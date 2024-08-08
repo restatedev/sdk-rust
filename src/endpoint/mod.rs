@@ -2,15 +2,15 @@ mod handler_context;
 mod handler_state;
 
 use crate::endpoint::handler_state::HandlerStateNotifier;
-use crate::service::{ Service};
+use crate::service::{Discoverable, Service};
 use bytes::Bytes;
+use futures::future::BoxFuture;
 pub use handler_context::HandlerContext;
 use restate_sdk_shared_core::{CoreVM, HeaderMap, VMError, VM};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use futures::future::BoxFuture;
 
 struct OutputSender(tokio::sync::mpsc::UnboundedSender<Bytes>);
 
@@ -65,16 +65,17 @@ enum ErrorInner {
     },
 }
 
-#[derive(Clone)]
-struct ArcBoxedService(Arc<Box<dyn Service<Future=BoxFuture<'static, ()>> + Send + Sync + 'static>>);
+struct BoxedService(Box<dyn Service<Future = BoxFuture<'static, ()>> + Send + Sync + 'static>);
 
-impl ArcBoxedService {
-    pub fn new<S: Service<Future=BoxFuture<'static, ()>> + Send + Sync + 'static>(service: S) -> Self {
-        Self(Arc::new(Box::new(service)))
+impl BoxedService {
+    pub fn new<S: Service<Future = BoxFuture<'static, ()>> + Send + Sync + 'static>(
+        service: S,
+    ) -> Self {
+        Self(Box::new(service))
     }
 }
 
-impl Service for ArcBoxedService {
+impl Service for BoxedService {
     type Future = BoxFuture<'static, ()>;
 
     fn handle(&self, req: HandlerContext) -> Self::Future {
@@ -82,8 +83,57 @@ impl Service for ArcBoxedService {
     }
 }
 
-pub struct Endpoint {
-    svcs: HashMap<String, ArcBoxedService>,
+pub struct Builder {
+    svcs: HashMap<String, BoxedService>,
+    discovery: crate::discovery::Endpoint,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            svcs: Default::default(),
+            discovery: crate::discovery::Endpoint {
+                max_protocol_version: 1,
+                min_protocol_version: 1,
+                protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
+                services: vec![],
+            },
+        }
+    }
+}
+
+impl Builder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub  fn with_service<
+        S: Service<Future = BoxFuture<'static, ()>> + Discoverable + Send + Sync + 'static,
+    >(
+        mut self,
+        s: S,
+    ) -> Self {
+        let service_metadata = S::discover();
+        let boxed_service = BoxedService::new(s);
+        self.svcs
+            .insert(service_metadata.name.to_string(), boxed_service);
+        self.discovery.services.push(service_metadata);
+        self
+    }
+
+    pub fn build(self) -> Endpoint {
+        Endpoint(Arc::new(EndpointInner {
+            svcs: self.svcs,
+            discovery: self.discovery,
+        }))
+    }
+}
+
+pub struct Endpoint(Arc<EndpointInner>);
+
+pub struct EndpointInner {
+    svcs: HashMap<String, BoxedService>,
+    discovery: crate::discovery::Endpoint,
 }
 
 impl Endpoint {
@@ -95,20 +145,21 @@ impl Endpoint {
         mut input_rx: InputReceiver,
         output_tx: OutputSender,
     ) -> impl Future<Output = Result<(), Error>> + Send + 'static {
-        let svc = self.svcs.get(svc_name).cloned();
         let vm = CoreVM::new(headers);
+
+        let this = Arc::clone(&self.0);
         let svc_name = svc_name.to_owned();
         let handler_name = handler_name.to_owned();
         return async move {
+            let svc = this.svcs.get(&svc_name);
             let svc = svc.ok_or_else(|| ErrorInner::UnknownService(svc_name.to_owned()))?;
 
             let mut vm = vm.map_err(ErrorInner::VM)?;
             Self::init_loop_vm(&mut vm, &mut input_rx).await?;
 
-            // Suspension aware future goes here!!!!!
             let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
 
-            let handler_context = HandlerContext::new(vm, input_rx, output_tx, handler_state_tx);
+            let handler_context = HandlerContext::new(vm, svc_name, handler_name, input_rx, output_tx, handler_state_tx);
 
             return handler_state::handler_state_aware_future(
                 handler_state_rx,

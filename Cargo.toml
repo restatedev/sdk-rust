@@ -1,0 +1,43 @@
+[package]
+name = "restate-sdk"
+version = "0.0.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# restate-sdk-derive = { version = "0.0.1", path = "derive"}
+restate-sdk-shared-core = { path = "../sdk-shared-core" }
+
+pin-project-lite = "0.2"
+
+bytes = "1.6.1"
+serde = "1.0"
+serde_json = "1.0"
+regress = "0.10"
+
+futures = "0.3"
+
+# TODO core sdk only needs sync and task
+tokio = { version = "1", features = ["full"] }
+
+thiserror = "1.0.63"
+
+tower-service = "0.3"
+
+[dev-dependencies]
+trybuild = "1.0"
+
+[build-dependencies]
+prettyplease = "0.2"
+serde_json = { version = "1.0" }
+syn = "2.0"
+typify = { version = "0.1.0" }
+jsonptr = "0.5.1"
+
+
+[workspace]
+members = ["derive"]
+
+[features]
+default = []

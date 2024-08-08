@@ -1,16 +1,19 @@
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{ErrorInner, InputReceiver, OutputSender};
 use crate::errors::TerminalError;
+use futures::future::Either;
 use futures::FutureExt;
 use pin_project_lite::pin_project;
-use restate_sdk_shared_core::{AsyncResultHandle, CoreVM, Input, SuspendedOrVMError, TakeOutputResult, VMError, Value, VM, NonEmptyValue};
-use std::future::{Future, ready};
+use restate_sdk_shared_core::{
+    AsyncResultHandle, CoreVM, Input, NonEmptyValue, SuspendedOrVMError, TakeOutputResult, VMError,
+    Value, VM,
+};
+use std::future::{ready, Future};
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
-use futures::future::Either;
 
 pub struct HandlerContextInner {
     vm: CoreVM,
@@ -36,22 +39,31 @@ impl HandlerContextInner {
 }
 
 #[derive(Clone)]
-pub struct HandlerContext(Arc<Mutex<HandlerContextInner>>);
+pub struct HandlerContext {
+    svc_name: String,
+    handler_name: String,
+    inner: Arc<Mutex<HandlerContextInner>>,
+}
 
 impl HandlerContext {
     pub(crate) fn new(
         vm: CoreVM,
-        // TODO replace those with enums!
+        svc_name: String,
+        handler_name: String,
         read: InputReceiver,
         write: OutputSender,
         handler_state: HandlerStateNotifier,
     ) -> Self {
-        Self(Arc::new(Mutex::new(HandlerContextInner::new(
-            vm,
-            read,
-            write,
-            handler_state,
-        ))))
+        Self {
+            svc_name,
+            handler_name,
+            inner: Arc::new(Mutex::new(HandlerContextInner::new(
+                vm,
+                read,
+                write,
+                handler_state,
+            )))
+        }
     }
 }
 
@@ -66,17 +78,17 @@ macro_rules! must_lock {
 }
 
 impl HandlerContext {
-    pub fn method_name(&self) -> &str {
-        todo!()
+    pub fn handler_name(&self) -> &str {
+        &self.handler_name
     }
 
-    pub fn input(&self) -> impl Future<Output=Input> {
-        let mut inner_lock = must_lock!(self.0);
+    pub fn input(&self) -> impl Future<Output = Input> {
+        let mut inner_lock = must_lock!(self.inner);
         match inner_lock.vm.sys_input() {
             Ok(i) => {
                 drop(inner_lock);
-                return Either::Left(ready(i))
-            },
+                return Either::Left(ready(i));
+            }
             Err(e) => {
                 inner_lock.handler_state.mark_error_inner(ErrorInner::VM(e));
                 drop(inner_lock);
@@ -89,7 +101,7 @@ impl HandlerContext {
         &self,
         duration: Duration,
     ) -> impl Future<Output = Result<(), TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.0).vm.sys_sleep(duration) };
+        let maybe_handle = { must_lock!(self.inner).vm.sys_sleep(duration) };
 
         let poll_future = self.create_poll_future(maybe_handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(())),
@@ -107,7 +119,7 @@ impl HandlerContext {
 
         InterceptErrorFuture {
             fut: poll_future,
-            ctx: Arc::clone(&self.0),
+            ctx: Arc::clone(&self.inner),
         }
     }
 
@@ -115,7 +127,7 @@ impl HandlerContext {
         &self,
         key: &str,
     ) -> impl Future<Output = Result<Option<Vec<u8>>, TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.0).vm.sys_state_get(key.to_owned()) };
+        let maybe_handle = { must_lock!(self.inner).vm.sys_state_get(key.to_owned()) };
 
         let poll_future = self.create_poll_future(maybe_handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
@@ -130,12 +142,12 @@ impl HandlerContext {
 
         InterceptErrorFuture {
             fut: poll_future,
-            ctx: Arc::clone(&self.0),
+            ctx: Arc::clone(&self.inner),
         }
     }
 
     pub fn set_state(&self, key: String, value: Vec<u8>) {
-        let _ = must_lock!(self.0).vm.sys_state_set(key, value);
+        let _ = must_lock!(self.inner).vm.sys_state_set(key, value);
     }
 
     fn create_poll_future(
@@ -145,7 +157,7 @@ impl HandlerContext {
         return VmPollFuture {
             state: Some(match handle {
                 Ok(handle) => PollState::Init {
-                    ctx: Arc::clone(&self.0),
+                    ctx: Arc::clone(&self.inner),
                     handle,
                 },
                 Err(err) => PollState::Failed(ErrorInner::VM(err)),
@@ -154,14 +166,14 @@ impl HandlerContext {
     }
 
     pub fn write_output(&self, res: Result<Vec<u8>, TerminalError>) {
-        let _ = must_lock!(self.0).vm.sys_write_output(match res {
+        let _ = must_lock!(self.inner).vm.sys_write_output(match res {
             Ok(success) => NonEmptyValue::Success(success),
-            Err(f) => NonEmptyValue::Failure(f.into())
+            Err(f) => NonEmptyValue::Failure(f.into()),
         });
     }
 
     pub fn consume_to_end(self) {
-        let mut inner_lock = must_lock!(self.0);
+        let mut inner_lock = must_lock!(self.inner);
 
         let out = inner_lock.vm.take_output();
         match out {
