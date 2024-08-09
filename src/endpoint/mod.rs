@@ -71,7 +71,8 @@ impl Error {
             ErrorInner::Suspended
             | ErrorInner::UnexpectedOutputClosed
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
-            | ErrorInner::Deserialization { .. } => 500,
+            | ErrorInner::Deserialization { .. }
+            | ErrorInner::Serialization { .. }=> 500,
             ErrorInner::BadDiscovery(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
         }
@@ -99,8 +100,14 @@ enum ErrorInner {
         variant: &'static str,
         syscall: &'static str,
     },
-    #[error("Deserialization error when using '{syscall}': {err:?}'")]
+    #[error("Failed to deserialize when using '{syscall}': {err:?}'")]
     Deserialization {
+        syscall: &'static str,
+        #[source]
+        err: BoxError,
+    },
+    #[error("Failed to serialize when using '{syscall}': {err:?}'")]
+    Serialization {
         syscall: &'static str,
         #[source]
         err: BoxError,
@@ -228,11 +235,8 @@ impl Endpoint {
         };
 
         let vm = CoreVM::new(headers).map_err(ErrorInner::VM)?;
-        if !self
-            .0
-            .svcs
-            .contains_key(&svc_name) {
-            return Err(ErrorInner::UnknownService(svc_name.to_owned()).into())
+        if !self.0.svcs.contains_key(&svc_name) {
+            return Err(ErrorInner::UnknownService(svc_name.to_owned()).into());
         }
 
         return Ok(Response::BidiStream {

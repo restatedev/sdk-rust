@@ -15,6 +15,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Poll};
 use std::time::Duration;
+use crate::serde::{Deserialize, Serialize};
 
 pub struct HandlerContextInner {
     vm: CoreVM,
@@ -124,7 +125,7 @@ impl ContextInternal {
         }
     }
 
-    pub fn get_state<T: crate::serde::Deserialize>(
+    pub fn get<T: Deserialize>(
         &self,
         key: &str,
     ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send + Sync {
@@ -154,8 +155,16 @@ impl ContextInternal {
         }
     }
 
-    pub fn set_state(&self, key: String, value: Vec<u8>) {
-        let _ = must_lock!(self.inner).vm.sys_state_set(key, value);
+    pub fn set<T: Serialize>(&self, key: &str, t: T) {
+        let mut inner_lock = must_lock!(self.inner);
+        match t.serialize() {
+            Ok(b) => {
+                let _ = inner_lock.vm.sys_state_set(key.to_owned(), b.to_vec());
+            }
+            Err(e) => {
+                inner_lock.handler_state.mark_error_inner(ErrorInner::Serialization { syscall: "set_state", err: Box::new(e) });
+            }
+        }
     }
 
     fn create_poll_future(

@@ -5,7 +5,7 @@ const APPLICATION_JSON: &str = "application/json";
 const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
 
 pub trait Serialize {
-    type Error: std::error::Error;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     fn serialize(&self) -> Result<Bytes, Self::Error>;
 }
@@ -100,20 +100,20 @@ macro_rules! impl_serde_primitives {
     ($ty:ty) => {
         impl Serialize for $ty {
             type Error = serde_json::Error;
-        
+
             fn serialize(&self) -> Result<Bytes, Self::Error> {
                 serde_json::to_vec(&self).map(Bytes::from)
             }
         }
-        
+
         impl Deserialize for $ty {
             type Error = serde_json::Error;
-        
+
             fn deserialize(bytes: &mut Bytes) -> Result<Self, Self::Error> {
                 serde_json::from_slice(&bytes)
             }
         }
-        
+
         impl WithContentType for $ty {
             fn content_type() -> &'static str {
                 APPLICATION_JSON

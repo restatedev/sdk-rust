@@ -2,6 +2,7 @@ use crate::endpoint::ContextInternal;
 use crate::errors::TerminalError;
 use std::future::Future;
 use std::time::Duration;
+use crate::serde::{Serialize, Deserialize};
 
 // TODO maybe use delegate macro
 
@@ -45,77 +46,46 @@ impl<'a> From<&'a ContextInternal> for crate::context::WorkflowContext<'a> {
     }
 }
 
-// TODO generate those methods with a fancy macro?!
-
-impl<'a> Context<'a> {
-    pub fn sleep(
-        &self,
-        duration: Duration,
-    ) -> impl Future<Output = Result<(), TerminalError>> + 'a {
-        self.0.sleep(duration)
-    }
+macro_rules! impl_context_method {
+    ([$ctx:ident, $($morectx:ident),*]; $($sig:tt)*) => {
+        impl_context_method!(@render_impl $ctx; $($sig)*);
+        impl_context_method!([$($morectx),*]; $($sig)*);
+    };
+    ([$ctx:ident]; $($sig:tt)*) => {
+        impl_context_method!(@render_impl $ctx; $($sig)*);
+    };
+    (@render_impl $ctx:ident; #[doc = $doc:expr] async fn $name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)? ($($param:ident : $ty:ty),*) -> $ret:ty) => {
+       impl<'a> $ctx<'a> {
+           #[doc = $doc]
+           pub fn $name $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? (&self, $($param: $ty),*) -> impl Future<Output=$ret> + 'a {
+               self.0.$name($($param),*)
+           }
+       }
+    };
+    (@render_impl $ctx:ident; #[doc = $doc:expr] fn $name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)? ($($param:ident : $ty:ty),*) -> $ret:ty) => {
+       impl<'a> $ctx<'a> {
+           #[doc = $doc]
+           pub fn $name $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? (&self, $($param: $ty),*) -> $ret {
+               self.0.$name($($param),*)
+           }
+       }
+    };
 }
 
-impl<'a> SharedObjectContext<'a> {
-    pub fn sleep(
-        &self,
-        duration: Duration,
-    ) -> impl Future<Output = Result<(), TerminalError>> + 'a {
-        self.0.sleep(duration)
-    }
+impl_context_method!(
+    [Context, SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
+    /// Sleep using Restate
+    async fn sleep(duration: Duration) -> Result<(), TerminalError>
+);
 
-    pub fn get<T: crate::serde::Deserialize + 'static>(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + 'a {
-        self.0.get_state(&key)
-    }
-}
+impl_context_method!(
+    [SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
+    /// Get state
+    async fn get<T: Deserialize + 'static>(key: &str) -> Result<Option<T>, TerminalError>
+);
 
-impl<'a> ObjectContext<'a> {
-    pub fn sleep(
-        &self,
-        duration: Duration,
-    ) -> impl Future<Output = Result<(), TerminalError>> + 'a {
-        self.0.sleep(duration)
-    }
-
-    pub fn get<T: crate::serde::Deserialize+ 'static>(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + 'a {
-        self.0.get_state(&key)
-    }
-}
-
-impl<'a> SharedWorkflowContext<'a> {
-    pub fn sleep(
-        &self,
-        duration: Duration,
-    ) -> impl Future<Output = Result<(), TerminalError>> + 'a {
-        self.0.sleep(duration)
-    }
-
-    pub fn get<T: crate::serde::Deserialize+ 'static>(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + 'a {
-        self.0.get_state(&key)
-    }
-}
-
-impl<'a> WorkflowContext<'a> {
-    pub fn sleep(
-        &self,
-        duration: Duration,
-    ) -> impl Future<Output = Result<(), TerminalError>> + 'a {
-        self.0.sleep(duration)
-    }
-
-    pub fn get<T: crate::serde::Deserialize+ 'static>(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + 'a {
-        self.0.get_state(&key)
-    }
-}
+impl_context_method!(
+    [ObjectContext, WorkflowContext];
+    /// Get state
+    fn set<T: Serialize + 'static>(key: &str, t: T) -> ()
+);
