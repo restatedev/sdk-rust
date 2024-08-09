@@ -5,45 +5,75 @@ use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::service::{Discoverable, Service};
 use bytes::Bytes;
 use futures::future::BoxFuture;
-pub use handler_context::HandlerContext;
-use restate_sdk_shared_core::{CoreVM, HeaderMap, VMError, VM};
+use futures::{Stream, StreamExt};
+pub use handler_context::ContextInternal;
+use restate_sdk_shared_core::{CoreVM, Header, HeaderMap, ResponseHead, VMError, VM};
 use std::collections::HashMap;
-use std::future::{poll_fn, Future};
+use std::future::poll_fn;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-struct OutputSender(tokio::sync::mpsc::UnboundedSender<Bytes>);
+const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v1+json";
+
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+pub struct OutputSender(tokio::sync::mpsc::UnboundedSender<Bytes>);
 
 impl OutputSender {
+    pub fn from_channel(tx: tokio::sync::mpsc::UnboundedSender<Bytes>) -> Self {
+        Self(tx)
+    }
+
     fn send(&self, b: Bytes) -> bool {
         self.0.send(b).is_ok()
     }
 }
 
-struct InputReceiver(tokio::sync::mpsc::UnboundedReceiver<Bytes>);
+pub struct InputReceiver(InputReceiverInner);
+
+enum InputReceiverInner {
+    Channel(tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BoxError>>),
+    BoxedStream(Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send + 'static>>),
+}
 
 impl InputReceiver {
-    async fn recv(&mut self) -> Option<Bytes> {
+    pub fn from_stream<S: Stream<Item = Result<Bytes, BoxError>> + Send + 'static>(s: S) -> Self {
+        Self(InputReceiverInner::BoxedStream(Box::pin(s)))
+    }
+
+    pub fn from_channel(rx: tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BoxError>>) -> Self {
+        Self(InputReceiverInner::Channel(rx))
+    }
+
+    async fn recv(&mut self) -> Option<Result<Bytes, BoxError>> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Bytes>> {
-        self.0.poll_recv(cx)
+    fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<Bytes, BoxError>>> {
+        match &mut self.0 {
+            InputReceiverInner::Channel(ch) => ch.poll_recv(cx),
+            InputReceiverInner::BoxedStream(s) => s.poll_next_unpin(cx),
+        }
     }
 }
 
+// TODO can we have the backtrace here?
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-struct Error(#[from] ErrorInner);
+pub struct Error(#[from] ErrorInner);
 
 impl Error {
-    fn code(&self) -> u16 {
+    pub fn status_code(&self) -> u16 {
         match &self.0 {
-            ErrorInner::UnknownService(_) => 404,
             ErrorInner::VM(e) => e.code,
-            ErrorInner::Suspended => 500,
-            ErrorInner::UnexpectedOutputClosed => 500,
-            ErrorInner::UnexpectedValueVariantForSyscall { .. } => 500,
+            ErrorInner::UnknownService(_) => 404,
+            ErrorInner::Suspended
+            | ErrorInner::UnexpectedOutputClosed
+            | ErrorInner::UnexpectedValueVariantForSyscall { .. }
+            | ErrorInner::Deserialization { .. } => 500,
+            ErrorInner::BadDiscovery(_) => 415,
+            ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
         }
     }
 }
@@ -54,6 +84,12 @@ enum ErrorInner {
     UnknownService(String),
     #[error("Error when processing the request: {0:?}")]
     VM(#[from] VMError),
+    #[error("Cannot read header '{0}', reason: {1}")]
+    Header(&'static str, #[source] BoxError),
+    #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery is {DISCOVERY_CONTENT_TYPE}")]
+    BadDiscovery(String),
+    #[error("Bad path '{0}', expected either '/discover' or '/invoke/service/handler'")]
+    BadPath(String),
     #[error("Suspended")]
     Suspended,
     #[error("Unexpected output closed")]
@@ -62,6 +98,12 @@ enum ErrorInner {
     UnexpectedValueVariantForSyscall {
         variant: &'static str,
         syscall: &'static str,
+    },
+    #[error("Deserialization error when using '{syscall}': {err:?}'")]
+    Deserialization {
+        syscall: &'static str,
+        #[source]
+        err: BoxError,
     },
 }
 
@@ -78,7 +120,7 @@ impl BoxedService {
 impl Service for BoxedService {
     type Future = BoxFuture<'static, ()>;
 
-    fn handle(&self, req: HandlerContext) -> Self::Future {
+    fn handle(&self, req: ContextInternal) -> Self::Future {
         self.0.handle(req)
     }
 }
@@ -107,7 +149,7 @@ impl Builder {
         Self::default()
     }
 
-    pub  fn with_service<
+    pub fn with_service<
         S: Service<Future = BoxFuture<'static, ()>> + Discoverable + Send + Sync + 'static,
     >(
         mut self,
@@ -129,7 +171,14 @@ impl Builder {
     }
 }
 
+#[derive(Clone)]
 pub struct Endpoint(Arc<EndpointInner>);
+
+impl Endpoint {
+    pub fn builder() -> Builder {
+        Builder::new()
+    }
+}
 
 pub struct EndpointInner {
     svcs: HashMap<String, BoxedService>,
@@ -137,44 +186,128 @@ pub struct EndpointInner {
 }
 
 impl Endpoint {
-    fn handle(
-        &self,
-        svc_name: &str,
-        handler_name: &str,
-        headers: impl HeaderMap,
+    pub fn resolve<H>(&self, path: &str, headers: H) -> Result<Response, Error>
+    where
+        H: HeaderMap,
+        <H as HeaderMap>::Error: std::error::Error + Send + Sync + 'static,
+    {
+        let parts: Vec<&str> = path.split('/').collect();
+
+        if parts.last() == Some(&"discover") {
+            let accept_header = headers
+                .extract("accept")
+                .map_err(|e| ErrorInner::Header("accept", Box::new(e)))?;
+            if accept_header.is_some() {
+                let accept = accept_header.unwrap();
+                if !accept.contains("application/vnd.restate.endpointmanifest.v1+json") {
+                    return Err(Error(ErrorInner::BadDiscovery(accept.to_owned())));
+                }
+            }
+
+            return Ok(Response::ReplyNow {
+                response_head: ResponseHead {
+                    status_code: 200,
+                    headers: vec![Header {
+                        key: "content-type".into(),
+                        value: DISCOVERY_CONTENT_TYPE.into(),
+                    }],
+                },
+                body: Bytes::from(
+                    serde_json::to_string(&self.0.discovery)
+                        .expect("Discovery should be serializable"),
+                ),
+            });
+        }
+
+        let (svc_name, handler_name) = match parts.get(parts.len() - 3..) {
+            None => return Err(Error(ErrorInner::BadPath(path.to_owned()))),
+            Some(last_elements) if last_elements[0] != "invoke" => {
+                return Err(Error(ErrorInner::BadPath(path.to_owned())))
+            }
+            Some(last_elements) => (last_elements[1].to_owned(), last_elements[2].to_owned()),
+        };
+
+        let vm = CoreVM::new(headers).map_err(ErrorInner::VM)?;
+        if !self
+            .0
+            .svcs
+            .contains_key(&svc_name) {
+            return Err(ErrorInner::UnknownService(svc_name.to_owned()).into())
+        }
+
+        return Ok(Response::BidiStream {
+            response_head: vm.get_response_head(),
+            handler: BidiStreamRunner {
+                svc_name,
+                handler_name,
+                vm,
+                endpoint: Arc::clone(&self.0),
+            },
+        });
+    }
+}
+
+pub enum Response {
+    ReplyNow {
+        response_head: ResponseHead,
+        body: Bytes,
+    },
+    BidiStream {
+        response_head: ResponseHead,
+        handler: BidiStreamRunner,
+    },
+}
+
+pub struct BidiStreamRunner {
+    svc_name: String,
+    handler_name: String,
+    vm: CoreVM,
+    endpoint: Arc<EndpointInner>,
+}
+
+impl BidiStreamRunner {
+    pub async fn handle(
+        mut self,
         mut input_rx: InputReceiver,
         output_tx: OutputSender,
-    ) -> impl Future<Output = Result<(), Error>> + Send + 'static {
-        let vm = CoreVM::new(headers);
+    ) -> Result<(), Error> {
+        Self::init_loop_vm(&mut self.vm, &mut input_rx).await?;
 
-        let this = Arc::clone(&self.0);
-        let svc_name = svc_name.to_owned();
-        let handler_name = handler_name.to_owned();
-        return async move {
-            let svc = this.svcs.get(&svc_name);
-            let svc = svc.ok_or_else(|| ErrorInner::UnknownService(svc_name.to_owned()))?;
+        // Retrieve the service from the Arc
+        let svc = self
+            .endpoint
+            .svcs
+            .get(&self.svc_name)
+            .expect("service must exist at this point");
 
-            let mut vm = vm.map_err(ErrorInner::VM)?;
-            Self::init_loop_vm(&mut vm, &mut input_rx).await?;
+        // Initialize handler context
+        let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
+        let handler_context = ContextInternal::new(
+            self.vm,
+            self.svc_name,
+            self.handler_name,
+            input_rx,
+            output_tx,
+            handler_state_tx,
+        );
 
-            let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
-
-            let handler_context = HandlerContext::new(vm, svc_name, handler_name, input_rx, output_tx, handler_state_tx);
-
-            return handler_state::handler_state_aware_future(
-                handler_state_rx,
-                svc.handle(handler_context),
-            )
-            .await;
-        };
+        // Start user code
+        handler_state::handler_state_aware_future(
+            handler_context.clone(),
+            handler_state_rx,
+            svc.handle(handler_context),
+        )
+        .await
     }
 
     async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(), ErrorInner> {
         while !vm.is_ready_to_execute().map_err(ErrorInner::VM)? {
-            if let Some(b) = input_rx.recv().await {
-                vm.notify_input(b.to_vec())
-            } else {
-                vm.notify_input_closed();
+            match input_rx.recv().await {
+                Some(Ok(b)) => vm.notify_input(b.to_vec()),
+                Some(Err(e)) => {
+                    vm.notify_error("Error when reading the body".into(), e.to_string().into())
+                }
+                None => vm.notify_input_closed(),
             }
         }
         Ok(())

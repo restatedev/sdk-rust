@@ -1,6 +1,7 @@
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{ErrorInner, InputReceiver, OutputSender};
 use crate::errors::TerminalError;
+use bytes::Bytes;
 use futures::future::Either;
 use futures::FutureExt;
 use pin_project_lite::pin_project;
@@ -12,7 +13,7 @@ use std::future::{ready, Future};
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{ready, Context, Poll};
+use std::task::{ready, Poll};
 use std::time::Duration;
 
 pub struct HandlerContextInner {
@@ -39,14 +40,14 @@ impl HandlerContextInner {
 }
 
 #[derive(Clone)]
-pub struct HandlerContext {
+pub struct ContextInternal {
     svc_name: String,
     handler_name: String,
     inner: Arc<Mutex<HandlerContextInner>>,
 }
 
-impl HandlerContext {
-    pub(crate) fn new(
+impl ContextInternal {
+    pub(super) fn new(
         vm: CoreVM,
         svc_name: String,
         handler_name: String,
@@ -62,14 +63,14 @@ impl HandlerContext {
                 read,
                 write,
                 handler_state,
-            )))
+            ))),
         }
     }
 }
 
 #[allow(unused)]
 const fn is_send_sync<T: Send + Sync>() {}
-const _: () = is_send_sync::<HandlerContext>();
+const _: () = is_send_sync::<ContextInternal>();
 
 macro_rules! must_lock {
     ($mutex:expr) => {
@@ -77,7 +78,7 @@ macro_rules! must_lock {
     };
 }
 
-impl HandlerContext {
+impl ContextInternal {
     pub fn handler_name(&self) -> &str {
         &self.handler_name
     }
@@ -123,15 +124,22 @@ impl HandlerContext {
         }
     }
 
-    pub fn get_state(
+    pub fn get_state<T: crate::serde::Deserialize>(
         &self,
         key: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>, TerminalError>> + Send + Sync {
+    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send + Sync {
         let maybe_handle = { must_lock!(self.inner).vm.sys_state_get(key.to_owned()) };
 
         let poll_future = self.create_poll_future(maybe_handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
-            Ok(Value::Success(s)) => Ok(Ok(Some(s))),
+            Ok(Value::Success(s)) => {
+                let mut b = Bytes::from(s);
+                let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+                    syscall: "get_state",
+                    err: Box::new(e),
+                })?;
+                Ok(Ok(Some(t)))
+            }
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
             Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                 variant: "state_keys",
@@ -172,7 +180,11 @@ impl HandlerContext {
         });
     }
 
-    pub fn consume_to_end(self) {
+    pub fn end(&self) {
+        let _ = must_lock!(self.inner).vm.sys_end();
+    }
+
+    pub(crate) fn consume_to_end(&self) {
         let mut inner_lock = must_lock!(self.inner);
 
         let out = inner_lock.vm.take_output();
@@ -185,18 +197,6 @@ impl HandlerContext {
             _ => {}
         }
     }
-
-    // pub fn as_context(self) {
-    //
-    // }
-    //
-    // pub fn as_object_context(self) {
-    //
-    // }
-    //
-    // pub fn as_shared_object_context(self) {
-    //
-    // }
 }
 
 struct VmPollFuture {
@@ -218,7 +218,7 @@ enum PollState {
 impl Future for VmPollFuture {
     type Output = Result<Value, ErrorInner>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         loop {
             match self
                 .state
@@ -266,13 +266,23 @@ impl Future for VmPollFuture {
                 PollState::WaitingInput { ctx, handle } => {
                     let mut inner_lock = must_lock!(ctx);
 
-                    let read_result = ready!(inner_lock.read.poll_recv(cx));
+                    let read_result = match inner_lock.read.poll_recv(cx) {
+                        Poll::Ready(t) => t,
+                        Poll::Pending => {
+                            drop(inner_lock);
+                            self.state = Some(PollState::WaitingInput { ctx, handle });
+                            return Poll::Pending;
+                        }
+                    };
 
                     // Pass read result to VM
-                    if let Some(b) = read_result {
-                        inner_lock.vm.notify_input(b.to_vec());
-                    } else {
-                        inner_lock.vm.notify_input_closed();
+                    match read_result {
+                        Some(Ok(b)) => inner_lock.vm.notify_input(b.to_vec()),
+                        Some(Err(e)) => inner_lock.vm.notify_error(
+                            "Error when reading the body".into(),
+                            e.to_string().into(),
+                        ),
+                        None => inner_lock.vm.notify_input_closed(),
                     }
 
                     // Now try to take async result again
@@ -301,7 +311,7 @@ struct PendingAwakeNow<T>(PhantomData<T>);
 impl<T> Future for PendingAwakeNow<T> {
     type Output = T;
 
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<T> {
+    fn poll(self: Pin<&mut Self>, ctx: &mut std::task::Context<'_>) -> Poll<T> {
         ctx.waker().wake_by_ref();
         Poll::Pending
     }
@@ -321,7 +331,7 @@ where
 {
     type Output = R;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         let result = ready!(this.fut.poll(cx));
 

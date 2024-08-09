@@ -1,4 +1,4 @@
-use crate::endpoint::{Error, ErrorInner};
+use crate::endpoint::{ContextInternal, Error, ErrorInner};
 use pin_project_lite::pin_project;
 use std::future::Future;
 use std::pin::Pin;
@@ -15,31 +15,23 @@ impl HandlerStateNotifier {
         return (Self { tx: Some(tx) }, rx);
     }
 
-    pub(super) fn mark_error(&mut self, err: Error) {
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(err);
-        }
-    }
-
     pub(super) fn mark_error_inner(&mut self, err: ErrorInner) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(Error(err));
         }
         // Some other operation already marked this handler as errored.
     }
-
-    pub(super) fn mark_suspend(&mut self) {
-        self.mark_error_inner(ErrorInner::Suspended)
-    }
 }
 
 pub(super) fn handler_state_aware_future<F: Future + Send>(
+    handler_context: ContextInternal,
     handler_state_rx: oneshot::Receiver<Error>,
     f: F,
 ) -> impl Future<Output = Result<F::Output, Error>> + Send {
     HandlerStateAwareFuture {
         fut: f,
         handler_state_rx,
+        handler_context,
     }
 }
 
@@ -49,6 +41,7 @@ pin_project! {
         #[pin]
         fut: F,
         handler_state_rx: oneshot::Receiver<Error>,
+        handler_context: ContextInternal,
     }
 }
 
@@ -62,8 +55,17 @@ where
         let this = self.project();
 
         match this.handler_state_rx.try_recv() {
-            Ok(e) => Poll::Ready(Err(e)),
-            Err(oneshot::error::TryRecvError::Empty) => this.fut.poll(cx).map(Ok),
+            Ok(e) => {
+                this.handler_context.consume_to_end();
+                Poll::Ready(Err(e))
+            }
+            Err(oneshot::error::TryRecvError::Empty) => match this.fut.poll(cx) {
+                Poll::Ready(out) => {
+                    this.handler_context.consume_to_end();
+                    Poll::Ready(Ok(out))
+                }
+                Poll::Pending => Poll::Pending,
+            },
             Err(oneshot::error::TryRecvError::Closed) => {
                 panic!("This is unexpected, this future is still being polled although the sender side was dropped. This should not be possible, because the sender is dropped when this future returns Poll:ready().")
             }

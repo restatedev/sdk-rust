@@ -3,13 +3,19 @@ name = "restate-sdk"
 version = "0.0.1"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["http"]
+http = ["hyper", "http-body-util", "hyper-util", "tokio/net", "restate-sdk-shared-core/http"]
 
 [dependencies]
 # restate-sdk-derive = { version = "0.0.1", path = "derive"}
 restate-sdk-shared-core = { path = "../sdk-shared-core" }
 
 pin-project-lite = "0.2"
+
+hyper = { version = "1.4.1", optional = true, features = ["server", "http2"] }
+http-body-util = { version = "0.1", optional = true }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http2"], optional = true }
 
 bytes = "1.6.1"
 serde = "1.0"
@@ -18,15 +24,17 @@ regress = "0.10"
 
 futures = "0.3"
 
-# TODO core sdk only needs sync and task
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = ["sync"] }
 
 thiserror = "1.0.63"
+tracing = "0.1"
 
 tower-service = "0.3"
 
 [dev-dependencies]
 trybuild = "1.0"
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"
 
 [build-dependencies]
 prettyplease = "0.2"
@@ -38,6 +46,3 @@ jsonptr = "0.5.1"
 
 [workspace]
 members = ["derive"]
-
-[features]
-default = []
