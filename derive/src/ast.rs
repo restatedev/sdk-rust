@@ -11,141 +11,189 @@
 //! Some parts copied from https://github.com/dtolnay/thiserror/blob/39aaeb00ff270a49e3c254d7b38b10e934d3c7a5/impl/src/ast.rs
 //! License Apache-2.0 or MIT
 
-use crate::attr::{self, Attrs};
-use crate::generics::ParamsInScope;
-use proc_macro2::Span;
+use syn::ext::IdentExt;
+use syn::parse::{Parse, ParseStream};
+use syn::spanned::Spanned;
+use syn::token::Comma;
 use syn::{
-    Data, DataEnum, DataStruct, DeriveInput, Error, Fields, Generics, Ident, Index, Member, Result,
-    Type,
+    braced, parenthesized, Attribute, Error, FnArg, GenericArgument, Ident, Pat, PatType, Path,
+    PathArguments, Result, ReturnType, Token, Type, Visibility,
 };
 
-pub enum Input<'a> {
-    Struct(Struct<'a>),
-    Enum(Enum<'a>),
-}
-
-pub struct Struct<'a> {
-    pub original: &'a DeriveInput,
-    pub attrs: Attrs<'a>,
-    pub ident: Ident,
-    pub generics: &'a Generics,
-    pub fields: Vec<Field<'a>>,
-}
-
-pub struct Enum<'a> {
-    pub original: &'a DeriveInput,
-    pub attrs: Attrs<'a>,
-    pub ident: Ident,
-    pub generics: &'a Generics,
-    pub variants: Vec<Variant<'a>>,
-}
-
-pub struct Variant<'a> {
-    pub original: &'a syn::Variant,
-    pub attrs: Attrs<'a>,
-    pub ident: Ident,
-    pub fields: Vec<Field<'a>>,
-}
-
-pub struct Field<'a> {
-    pub original: &'a syn::Field,
-    pub attrs: Attrs<'a>,
-    pub member: Member,
-    pub ty: &'a Type,
-    pub contains_generic: bool,
-}
-
-impl<'a> Input<'a> {
-    pub fn from_syn(node: &'a DeriveInput) -> Result<Self> {
-        match &node.data {
-            Data::Struct(data) => Struct::from_syn(node, data).map(Input::Struct),
-            Data::Enum(data) => Enum::from_syn(node, data).map(Input::Enum),
-            Data::Union(_) => Err(Error::new_spanned(
-                node,
-                "union as errors are not supported",
-            )),
+/// Accumulates multiple errors into a result.
+/// Only use this for recoverable errors, i.e. non-parse errors. Fatal errors should early exit to
+/// avoid further complications.
+macro_rules! extend_errors {
+    ($errors: ident, $e: expr) => {
+        match $errors {
+            Ok(_) => $errors = Err($e),
+            Err(ref mut errors) => errors.extend($e),
         }
-    }
+    };
 }
 
-impl<'a> Struct<'a> {
-    fn from_syn(node: &'a DeriveInput, data: &'a DataStruct) -> Result<Self> {
-        let attrs = attr::get(&node.attrs)?;
-        let scope = ParamsInScope::new(&node.generics);
-        let span = Span::call_site();
-        let fields = Field::multiple_from_syn(&data.fields, &scope, span)?;
-        Ok(Struct {
-            original: node,
+pub(crate) struct Service {
+    pub(crate) attrs: Vec<Attribute>,
+    pub(crate) vis: Visibility,
+    pub(crate) ident: Ident,
+    pub(crate) handlers: Vec<Handler>,
+}
+
+impl Parse for Service {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let attrs = input.call(Attribute::parse_outer)?;
+        let vis = input.parse()?;
+        input.parse::<Token![trait]>()?;
+        let ident: Ident = input.parse()?;
+        let content;
+        braced!(content in input);
+        let mut rpcs = Vec::<Handler>::new();
+        while !content.is_empty() {
+            rpcs.push(content.parse()?);
+        }
+        let mut ident_errors = Ok(());
+        for rpc in &rpcs {
+            if rpc.ident == "new" {
+                extend_errors!(
+                    ident_errors,
+                    Error::new(
+                        rpc.ident.span(),
+                        format!(
+                            "method name conflicts with generated fn `{}Client::new`",
+                            ident.unraw()
+                        )
+                    )
+                );
+            }
+            if rpc.ident == "serve" {
+                extend_errors!(
+                    ident_errors,
+                    Error::new(
+                        rpc.ident.span(),
+                        format!("method name conflicts with generated fn `{ident}::serve`")
+                    )
+                );
+            }
+        }
+        ident_errors?;
+
+        Ok(Self {
             attrs,
-            ident: node.ident.clone(),
-            generics: &node.generics,
-            fields,
+            vis,
+            ident,
+            handlers: rpcs,
         })
     }
 }
 
-impl<'a> Enum<'a> {
-    fn from_syn(node: &'a DeriveInput, data: &'a DataEnum) -> Result<Self> {
-        let attrs = attr::get(&node.attrs)?;
-        let scope = ParamsInScope::new(&node.generics);
-        let span = Span::call_site();
-        let variants = data
-            .variants
-            .iter()
-            .map(|node| Variant::from_syn(node, &scope, span))
-            .collect::<Result<_>>()?;
-        Ok(Enum {
-            original: node,
+pub(crate) struct Handler {
+    pub(crate) attrs: Vec<Attribute>,
+    pub(crate) is_shared: bool,
+    pub(crate) ident: Ident,
+    pub(crate) arg: Option<PatType>,
+    pub(crate) output: ReturnType,
+}
+
+impl Parse for Handler {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let attrs = input.call(Attribute::parse_outer)?;
+        let parsed_attrs_count = attrs.len();
+
+        // Remove shared attribute
+        let attrs: Vec<Attribute> = attrs.into_iter().filter(|a| !is_shared_attr(a)).collect();
+        let is_shared = attrs.len() != parsed_attrs_count;
+
+        input.parse::<Token![async]>()?;
+        input.parse::<Token![fn]>()?;
+        let ident = input.parse()?;
+
+        // Parse arguments
+        let content;
+        parenthesized!(content in input);
+        let mut args = Vec::new();
+        let mut errors = Ok(());
+        for arg in content.parse_terminated(FnArg::parse, Comma)? {
+            match arg {
+                FnArg::Typed(captured) if matches!(&*captured.pat, Pat::Ident(_)) => {
+                    args.push(captured);
+                }
+                FnArg::Typed(captured) => {
+                    extend_errors!(
+                        errors,
+                        Error::new(captured.pat.span(), "patterns aren't allowed in RPC args")
+                    );
+                }
+                FnArg::Receiver(_) => {
+                    extend_errors!(
+                        errors,
+                        Error::new(arg.span(), "method args cannot start with self")
+                    );
+                }
+            }
+        }
+        if args.len() > 1 {
+            extend_errors!(
+                errors,
+                Error::new(content.span(), "Only one input argument is supported")
+            );
+        }
+        errors?;
+
+        // Parse return type
+        let output: ReturnType = input.parse()?;
+        input.parse::<Token![;]>()?;
+
+        match &output {
+            ReturnType::Default => {}
+            ReturnType::Type(_, ty) => {
+                if handler_result_parameter(ty).is_none() {
+                    return Err(Error::new(
+                        output.span(),
+                        "Only restate_sdk::prelude::HandlerResult is supported as return type",
+                    ));
+                }
+            }
+        }
+
+        Ok(Self {
             attrs,
-            ident: node.ident.clone(),
-            generics: &node.generics,
-            variants,
+            is_shared,
+            ident,
+            arg: args.pop(),
+            output,
         })
     }
 }
 
-impl<'a> Variant<'a> {
-    fn from_syn(node: &'a syn::Variant, scope: &ParamsInScope<'a>, span: Span) -> Result<Self> {
-        let attrs = attr::get(&node.attrs)?;
-        Ok(Variant {
-            original: node,
-            attrs,
-            ident: node.ident.clone(),
-            fields: Field::multiple_from_syn(&node.fields, scope, span)?,
-        })
-    }
+fn is_shared_attr(attr: &Attribute) -> bool {
+    attr.meta
+        .require_path_only()
+        .and_then(Path::require_ident)
+        .is_ok_and(|i| i == "shared")
 }
 
-impl<'a> Field<'a> {
-    fn multiple_from_syn(
-        fields: &'a Fields,
-        scope: &ParamsInScope<'a>,
-        span: Span,
-    ) -> Result<Vec<Self>> {
-        fields
-            .iter()
-            .enumerate()
-            .map(|(i, field)| Field::from_syn(i, field, scope, span))
-            .collect()
+fn handler_result_parameter(ty: &Type) -> Option<&Type> {
+    let path = match ty {
+        Type::Path(ty) => &ty.path,
+        _ => return None,
+    };
+
+    let last = path.segments.last().unwrap();
+    if last.ident != "HandlerResult" {
+        return None;
     }
 
-    fn from_syn(
-        i: usize,
-        node: &'a syn::Field,
-        scope: &ParamsInScope<'a>,
-        span: Span,
-    ) -> Result<Self> {
-        Ok(Field {
-            original: node,
-            attrs: attr::get(&node.attrs)?,
-            member: node.ident.clone().map(Member::Named).unwrap_or_else(|| {
-                Member::Unnamed(Index {
-                    index: i as u32,
-                    span,
-                })
-            }),
-            ty: &node.ty,
-            contains_generic: scope.intersects(&node.ty),
-        })
+    let bracketed = match &last.arguments {
+        PathArguments::AngleBracketed(bracketed) => bracketed,
+        _ => return None,
+    };
+
+    if bracketed.args.len() != 1 {
+        return None;
+    }
+
+    match &bracketed.args[0] {
+        GenericArgument::Type(arg) => Some(arg),
+        _ => None,
     }
 }

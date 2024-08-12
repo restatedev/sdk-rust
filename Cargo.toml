@@ -5,10 +5,10 @@ edition = "2021"
 
 [features]
 default = ["http"]
-http = ["hyper", "http-body-util", "hyper-util", "tokio/net", "restate-sdk-shared-core/http"]
+http = ["hyper", "http-body-util", "hyper-util", "tokio/net", "tokio/signal", "restate-sdk-shared-core/http"]
 
 [dependencies]
-# restate-sdk-derive = { version = "0.0.1", path = "derive"}
+restate-sdk-derive = { version = "0.0.1", path = "derive"}
 restate-sdk-shared-core = { path = "../sdk-shared-core" }
 
 pin-project-lite = "0.2"
@@ -24,7 +24,7 @@ regress = "0.10"
 
 futures = "0.3"
 
-tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio = { version = "1", default-features = false, features = ["sync", "macros"] }
 
 thiserror = "1.0.63"
 tracing = "0.1"

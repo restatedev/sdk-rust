@@ -62,7 +62,7 @@ impl Deserialize for Vec<u8> {
     type Error = Infallible;
 
     fn deserialize(b: &mut Bytes) -> Result<Self, Self::Error> {
-        Ok(b.to_vec().into())
+        Ok(b.to_vec())
     }
 }
 
@@ -171,6 +171,6 @@ where
     type Error = serde_json::Error;
 
     fn deserialize(bytes: &mut Bytes) -> Result<Self, Self::Error> {
-        serde_json::from_slice(&bytes).map(Json)
+        serde_json::from_slice(bytes).map(Json)
     }
 }

@@ -118,11 +118,9 @@ impl Service<Request<Incoming>> for HyperEndpoint {
             endpoint::Response::ReplyNow {
                 response_head,
                 body,
-            } => {
-                return ready(Ok(response_builder_from_response_head(response_head)
-                    .body(Either::Left(Full::new(body)))
-                    .expect("Headers should be valid")))
-            }
+            } => ready(Ok(response_builder_from_response_head(response_head)
+                .body(Either::Left(Full::new(body)))
+                .expect("Headers should be valid"))),
             endpoint::Response::BidiStream {
                 response_head,
                 handler,
@@ -135,13 +133,13 @@ impl Service<Request<Incoming>> for HyperEndpoint {
 
                 let handler_fut = Box::pin(handler.handle(input_receiver, output_sender));
 
-                return ready(Ok(response_builder_from_response_head(response_head)
+                ready(Ok(response_builder_from_response_head(response_head)
                     .body(Either::Right(BidiStreamRunner {
                         fut: Some(handler_fut),
                         output_rx,
                         end_stream: false,
                     }))
-                    .expect("Headers should be valid")));
+                    .expect("Headers should be valid")))
             }
         }
     }

@@ -1,12 +1,14 @@
-mod handler_context;
+mod context;
+mod futures;
 mod handler_state;
 
+use crate::endpoint::futures::InterceptErrorFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::service::{Discoverable, Service};
+use ::futures::future::BoxFuture;
+use ::futures::{Stream, StreamExt};
 use bytes::Bytes;
-use futures::future::BoxFuture;
-use futures::{Stream, StreamExt};
-pub use handler_context::ContextInternal;
+pub use context::{ContextInternal, InputMetadata};
 use restate_sdk_shared_core::{CoreVM, Header, HeaderMap, ResponseHead, VMError, VM};
 use std::collections::HashMap;
 use std::future::poll_fn;
@@ -64,15 +66,24 @@ impl InputReceiver {
 pub struct Error(#[from] ErrorInner);
 
 impl Error {
+    pub fn unknown_handler(service_name: &str, handler_name: &str) -> Self {
+        Self(ErrorInner::UnknownServiceHandler(
+            service_name.to_owned(),
+            handler_name.to_owned(),
+        ))
+    }
+}
+
+impl Error {
     pub fn status_code(&self) -> u16 {
         match &self.0 {
             ErrorInner::VM(e) => e.code,
-            ErrorInner::UnknownService(_) => 404,
+            ErrorInner::UnknownService(_) | ErrorInner::UnknownServiceHandler(_, _) => 404,
             ErrorInner::Suspended
             | ErrorInner::UnexpectedOutputClosed
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
             | ErrorInner::Deserialization { .. }
-            | ErrorInner::Serialization { .. }=> 500,
+            | ErrorInner::Serialization { .. } => 500,
             ErrorInner::BadDiscovery(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
         }
@@ -81,8 +92,10 @@ impl Error {
 
 #[derive(Debug, thiserror::Error)]
 enum ErrorInner {
-    #[error("Received a request for unkonwn service '{0}'")]
+    #[error("Received a request for unknown service '{0}'")]
     UnknownService(String),
+    #[error("Received a request for unknown service handler '{0}/{1}'")]
+    UnknownServiceHandler(String, String),
     #[error("Error when processing the request: {0:?}")]
     VM(#[from] VMError),
     #[error("Cannot read header '{0}', reason: {1}")]
@@ -100,13 +113,13 @@ enum ErrorInner {
         variant: &'static str,
         syscall: &'static str,
     },
-    #[error("Failed to deserialize when using '{syscall}': {err:?}'")]
+    #[error("Failed to deserialize with '{syscall}': {err:?}'")]
     Deserialization {
         syscall: &'static str,
         #[source]
         err: BoxError,
     },
-    #[error("Failed to serialize when using '{syscall}': {err:?}'")]
+    #[error("Failed to serialize with '{syscall}': {err:?}'")]
     Serialization {
         syscall: &'static str,
         #[source]
@@ -114,10 +127,14 @@ enum ErrorInner {
     },
 }
 
-struct BoxedService(Box<dyn Service<Future = BoxFuture<'static, ()>> + Send + Sync + 'static>);
+struct BoxedService(
+    Box<dyn Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync + 'static>,
+);
 
 impl BoxedService {
-    pub fn new<S: Service<Future = BoxFuture<'static, ()>> + Send + Sync + 'static>(
+    pub fn new<
+        S: Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync + 'static,
+    >(
         service: S,
     ) -> Self {
         Self(Box::new(service))
@@ -125,7 +142,7 @@ impl BoxedService {
 }
 
 impl Service for BoxedService {
-    type Future = BoxFuture<'static, ()>;
+    type Future = BoxFuture<'static, Result<(), Error>>;
 
     fn handle(&self, req: ContextInternal) -> Self::Future {
         self.0.handle(req)
@@ -157,7 +174,11 @@ impl Builder {
     }
 
     pub fn with_service<
-        S: Service<Future = BoxFuture<'static, ()>> + Discoverable + Send + Sync + 'static,
+        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
+            + Discoverable
+            + Send
+            + Sync
+            + 'static,
     >(
         mut self,
         s: S,
@@ -239,7 +260,7 @@ impl Endpoint {
             return Err(ErrorInner::UnknownService(svc_name.to_owned()).into());
         }
 
-        return Ok(Response::BidiStream {
+        Ok(Response::BidiStream {
             response_head: vm.get_response_head(),
             handler: BidiStreamRunner {
                 svc_name,
@@ -247,7 +268,7 @@ impl Endpoint {
                 vm,
                 endpoint: Arc::clone(&self.0),
             },
-        });
+        })
     }
 }
 
@@ -286,7 +307,7 @@ impl BidiStreamRunner {
 
         // Initialize handler context
         let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
-        let handler_context = ContextInternal::new(
+        let ctx = ContextInternal::new(
             self.vm,
             self.svc_name,
             self.handler_name,
@@ -296,12 +317,10 @@ impl BidiStreamRunner {
         );
 
         // Start user code
-        handler_state::handler_state_aware_future(
-            handler_context.clone(),
-            handler_state_rx,
-            svc.handle(handler_context),
-        )
-        .await
+        let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
+
+        // Wrap it in handler state aware future
+        futures::HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
     }
 
     async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(), ErrorInner> {

@@ -14,60 +14,37 @@
 extern crate proc_macro;
 
 mod ast;
-mod attr;
-mod expand;
-mod generics;
-mod prop;
-mod valid;
+mod gen;
 
+use crate::ast::Service;
+use crate::gen::{ServiceGenerator, ServiceType};
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DeriveInput};
-
-// TODO macro
-// struct MyStruct;
-//
-// impl Service for MyStruct {
-//     fn discover() -> ServiceDefinition {
-//         todo!()
-//     }
-//
-//     fn handle(&self, svc_name: &str, handler_name: &str, ctx: Context) -> impl Future + Send + 'static {
-//         todo!()
-//     }
-// }
-//
-// trait MyTrait {}
-//
-// impl<T: MyTrait> Service for T {
-//     fn discover() -> ServiceDefinition {
-//         todo!()
-//     }
-//
-//     fn handle(&self, svc_name: &str, handler_name: &str, ctx: Context) -> impl Future + Send + 'static {
-//         todo!()
-//     }
-// }
+use quote::ToTokens;
+use syn::parse_macro_input;
 
 #[proc_macro_attribute]
-pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as syn::Item);
-    expand::derive(&input)
-        .unwrap_or_else(|err| err.to_compile_error())
+pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
+    let svc = parse_macro_input!(input as Service);
+
+    ServiceGenerator::new(ServiceType::Service, &svc)
+        .into_token_stream()
         .into()
 }
 
-// #[proc_macro_attribute]
-// pub fn virtual_object(attr: TokenStream, item: TokenStream) -> TokenStream {
-//     let input = parse_macro_input!(input as DeriveInput);
-//     expand::derive(&input)
-//         .unwrap_or_else(|err| err.to_compile_error())
-//         .into()
-// }
-//
-// #[proc_macro_attribute]
-// pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
-//     let input = parse_macro_input!(input as DeriveInput);
-//     expand::derive(&input)
-//         .unwrap_or_else(|err| err.to_compile_error())
-//         .into()
-// }
+#[proc_macro_attribute]
+pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
+    let svc = parse_macro_input!(input as Service);
+
+    ServiceGenerator::new(ServiceType::VirtualObject, &svc)
+        .into_token_stream()
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
+    let svc = parse_macro_input!(input as Service);
+
+    ServiceGenerator::new(ServiceType::Workflow, &svc)
+        .into_token_stream()
+        .into()
+}

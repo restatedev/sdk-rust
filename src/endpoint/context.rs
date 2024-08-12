@@ -1,30 +1,29 @@
+use crate::endpoint::futures::{InterceptErrorFuture, TrapFuture};
 use crate::endpoint::handler_state::HandlerStateNotifier;
-use crate::endpoint::{ErrorInner, InputReceiver, OutputSender};
-use crate::errors::TerminalError;
+use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
+use crate::errors::{HandlerResult, TerminalError};
+use crate::serde::{Deserialize, Serialize};
 use bytes::Bytes;
 use futures::future::Either;
-use futures::FutureExt;
-use pin_project_lite::pin_project;
+use futures::{FutureExt, TryFutureExt};
 use restate_sdk_shared_core::{
-    AsyncResultHandle, CoreVM, Input, NonEmptyValue, SuspendedOrVMError, TakeOutputResult, VMError,
-    Value, VM,
+    AsyncResultHandle, CoreVM, Header, Input, NonEmptyValue, SuspendedOrVMError, TakeOutputResult,
+    VMError, Value, VM,
 };
 use std::future::{ready, Future};
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{ready, Poll};
+use std::task::Poll;
 use std::time::Duration;
-use crate::serde::{Deserialize, Serialize};
 
-pub struct HandlerContextInner {
+pub struct ContextInternalInner {
     vm: CoreVM,
     read: InputReceiver,
     write: OutputSender,
-    handler_state: HandlerStateNotifier,
+    pub(super) handler_state: HandlerStateNotifier,
 }
 
-impl HandlerContextInner {
+impl ContextInternalInner {
     fn new(
         vm: CoreVM,
         read: InputReceiver,
@@ -44,7 +43,7 @@ impl HandlerContextInner {
 pub struct ContextInternal {
     svc_name: String,
     handler_name: String,
-    inner: Arc<Mutex<HandlerContextInner>>,
+    inner: Arc<Mutex<ContextInternalInner>>,
 }
 
 impl ContextInternal {
@@ -59,7 +58,7 @@ impl ContextInternal {
         Self {
             svc_name,
             handler_name,
-            inner: Arc::new(Mutex::new(HandlerContextInner::new(
+            inner: Arc::new(Mutex::new(ContextInternalInner::new(
                 vm,
                 read,
                 write,
@@ -79,24 +78,69 @@ macro_rules! must_lock {
     };
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct InputMetadata {
+    pub invocation_id: String,
+    pub random_seed: u64,
+    pub key: String,
+    pub headers: Vec<Header>,
+}
+
+impl From<Input> for InputMetadata {
+    fn from(value: Input) -> Self {
+        Self {
+            invocation_id: value.invocation_id,
+            random_seed: value.random_seed,
+            key: value.key,
+            headers: value.headers,
+        }
+    }
+}
+
 impl ContextInternal {
+    pub fn service_name(&self) -> &str {
+        &self.svc_name
+    }
+
     pub fn handler_name(&self) -> &str {
         &self.handler_name
     }
 
-    pub fn input(&self) -> impl Future<Output = Input> {
+    pub fn input<T: Deserialize>(&self) -> impl Future<Output = (T, InputMetadata)> {
         let mut inner_lock = must_lock!(self.inner);
-        match inner_lock.vm.sys_input() {
+        let input_result =
+            inner_lock
+                .vm
+                .sys_input()
+                .map_err(ErrorInner::VM)
+                .and_then(|raw_input| {
+                    Ok((
+                        T::deserialize(&mut (raw_input.input.into())).map_err(|e| {
+                            ErrorInner::Deserialization {
+                                syscall: "input",
+                                err: e.into(),
+                            }
+                        })?,
+                        InputMetadata {
+                            invocation_id: raw_input.invocation_id,
+                            random_seed: raw_input.random_seed,
+                            key: raw_input.key,
+                            headers: raw_input.headers,
+                        },
+                    ))
+                });
+
+        match input_result {
             Ok(i) => {
                 drop(inner_lock);
                 return Either::Left(ready(i));
             }
             Err(e) => {
-                inner_lock.handler_state.mark_error_inner(ErrorInner::VM(e));
+                inner_lock.handler_state.mark_error_inner(e);
                 drop(inner_lock);
             }
         }
-        Either::Right(PendingAwakeNow(Default::default()))
+        Either::Right(TrapFuture::default())
     }
 
     pub fn sleep(
@@ -119,10 +163,7 @@ impl ContextInternal {
             }),
         });
 
-        InterceptErrorFuture {
-            fut: poll_future,
-            ctx: Arc::clone(&self.inner),
-        }
+        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
     }
 
     pub fn get<T: Deserialize>(
@@ -149,10 +190,7 @@ impl ContextInternal {
             Err(e) => Err(e),
         });
 
-        InterceptErrorFuture {
-            fut: poll_future,
-            ctx: Arc::clone(&self.inner),
-        }
+        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
     }
 
     pub fn set<T: Serialize>(&self, key: &str, t: T) {
@@ -162,16 +200,25 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_state_set(key.to_owned(), b.to_vec());
             }
             Err(e) => {
-                inner_lock.handler_state.mark_error_inner(ErrorInner::Serialization { syscall: "set_state", err: Box::new(e) });
+                inner_lock
+                    .handler_state
+                    .mark_error_inner(ErrorInner::Serialization {
+                        syscall: "set_state",
+                        err: Box::new(e),
+                    });
             }
         }
+    }
+
+    pub fn clear(&self, key: &str) {
+        let _ = must_lock!(self.inner).vm.sys_state_clear(key.to_string());
     }
 
     fn create_poll_future(
         &self,
         handle: Result<AsyncResultHandle, VMError>,
     ) -> impl Future<Output = Result<Value, ErrorInner>> + Send + Sync {
-        return VmPollFuture {
+        VmPollFuture {
             state: Some(match handle {
                 Ok(handle) => PollState::Init {
                     ctx: Arc::clone(&self.inner),
@@ -179,14 +226,29 @@ impl ContextInternal {
                 },
                 Err(err) => PollState::Failed(ErrorInner::VM(err)),
             }),
-        };
+        }
     }
 
-    pub fn write_output(&self, res: Result<Vec<u8>, TerminalError>) {
-        let _ = must_lock!(self.inner).vm.sys_write_output(match res {
-            Ok(success) => NonEmptyValue::Success(success),
+    pub fn write_output<T: Serialize>(&self, res: HandlerResult<T>) {
+        let mut inner_lock = must_lock!(self.inner);
+
+        let res_to_write = match res {
+            Ok(success) => match T::serialize(&success) {
+                Ok(t) => NonEmptyValue::Success(t.to_vec()),
+                Err(e) => {
+                    inner_lock
+                        .handler_state
+                        .mark_error_inner(ErrorInner::Serialization {
+                            syscall: "output",
+                            err: Box::new(e),
+                        });
+                    return;
+                }
+            },
             Err(f) => NonEmptyValue::Failure(f.into()),
-        });
+        };
+
+        let _ = inner_lock.vm.sys_write_output(res_to_write);
     }
 
     pub fn end(&self) {
@@ -197,14 +259,15 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
 
         let out = inner_lock.vm.take_output();
-        match out {
-            TakeOutputResult::Buffer(b) => {
-                if !inner_lock.write.send(b.into()) {
-                    // Nothing we can do anymore here
-                }
+        if let TakeOutputResult::Buffer(b) = out {
+            if !inner_lock.write.send(b.into()) {
+                // Nothing we can do anymore here
             }
-            _ => {}
         }
+    }
+
+    pub(super) fn fail(&self, e: Error) {
+        must_lock!(self.inner).handler_state.mark_error(e);
     }
 }
 
@@ -214,11 +277,11 @@ struct VmPollFuture {
 
 enum PollState {
     Init {
-        ctx: Arc<Mutex<HandlerContextInner>>,
+        ctx: Arc<Mutex<ContextInternalInner>>,
         handle: AsyncResultHandle,
     },
     WaitingInput {
-        ctx: Arc<Mutex<HandlerContextInner>>,
+        ctx: Arc<Mutex<ContextInternalInner>>,
         handle: AsyncResultHandle,
     },
     Failed(ErrorInner),
@@ -310,52 +373,6 @@ impl Future for VmPollFuture {
                     }
                 }
                 PollState::Failed(err) => return Poll::Ready(Err(err)),
-            }
-        }
-    }
-}
-
-struct PendingAwakeNow<T>(PhantomData<T>);
-
-impl<T> Future for PendingAwakeNow<T> {
-    type Output = T;
-
-    fn poll(self: Pin<&mut Self>, ctx: &mut std::task::Context<'_>) -> Poll<T> {
-        ctx.waker().wake_by_ref();
-        Poll::Pending
-    }
-}
-
-pin_project! {
-    struct InterceptErrorFuture<F>{
-        #[pin]
-        fut: F,
-        ctx: Arc<Mutex<HandlerContextInner>>
-    }
-}
-
-impl<F, R> Future for InterceptErrorFuture<F>
-where
-    F: Future<Output = Result<R, ErrorInner>>,
-{
-    type Output = R;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        let result = ready!(this.fut.poll(cx));
-
-        match result {
-            Ok(r) => Poll::Ready(r),
-            Err(e) => {
-                {
-                    let mut inner_lock = must_lock!(&mut this.ctx);
-                    inner_lock.handler_state.mark_error_inner(e);
-                }
-
-                // Here is the secret sauce. This will immediately cause the whole future chain to be polled,
-                //  but the poll here will be intercepted by HandlerStateAwareFuture
-                cx.waker().wake_by_ref();
-                Poll::Pending
             }
         }
     }
