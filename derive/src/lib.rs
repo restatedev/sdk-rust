@@ -8,8 +8,8 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-//! Some parts of this codebase were taken from https://github.com/dtolnay/thiserror/tree/39aaeb00ff270a49e3c254d7b38b10e934d3c7a5/impl/src
-//! License Apache-2.0 or MIT
+//! Some parts of this codebase were taken from https://github.com/google/tarpc/blob/b826f332312d3702667880a464e247556ad7dbfe/plugins/src/lib.rs
+//! License MIT
 
 extern crate proc_macro;
 

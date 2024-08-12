@@ -1,6 +1,16 @@
 use restate_sdk_shared_core::Failure;
 use std::error::Error as StdError;
 
+pub struct HandlerError(HandlerErrorInner);
+
+enum HandlerErrorInner {
+    Retryable(Box<dyn StdError + Send + Sync + 'static>),
+    NonRetryable,
+}
+
+// TODO impl From<StdError>
+// TODO impl From<TerminalError>
+
 pub struct TerminalError {
     pub code: u16,
     pub message: String,
@@ -37,4 +47,7 @@ impl From<TerminalError> for Failure {
     }
 }
 
+// TODO impl AsRef<dyn StdError>
+
+// TODO this should return HandlerError
 pub type HandlerResult<T> = Result<T, TerminalError>;

@@ -15,6 +15,10 @@ impl<T> Default for TrapFuture<T> {
     }
 }
 
+/// This is always safe, because we simply use phantom data inside TrapFuture.
+unsafe impl<T> Send for TrapFuture<T> {}
+unsafe impl<T> Sync for TrapFuture<T> {}
+
 impl<T> Future for TrapFuture<T> {
     type Output = T;
 
