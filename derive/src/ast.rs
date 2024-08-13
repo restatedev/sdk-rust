@@ -15,7 +15,10 @@ use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::token::Comma;
-use syn::{braced, parenthesized, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit, Pat, PatType, Path, PathArguments, Result, ReturnType, Token, Type, Visibility};
+use syn::{
+    braced, parenthesized, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit,
+    Pat, PatType, Path, PathArguments, Result, ReturnType, Token, Type, Visibility,
+};
 
 /// Accumulates multiple errors into a result.
 /// Only use this for recoverable errors, i.e. non-parse errors. Fatal errors should early exit to
@@ -187,12 +190,20 @@ fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
         .ok()
         .filter(|val| val.path.require_ident().is_ok_and(|i| i == "name"))
         .map(|val| {
-            if let Expr::Lit(ExprLit {lit: Lit::Str(ref literal), .. }) = &val.value {
+            if let Expr::Lit(ExprLit {
+                lit: Lit::Str(ref literal),
+                ..
+            }) = &val.value
+            {
                 Ok(literal.value())
             } else {
-                Err(Error::new(val.span(), "Only string literal is allowed for the 'name' attribute"))
+                Err(Error::new(
+                    val.span(),
+                    "Only string literal is allowed for the 'name' attribute",
+                ))
             }
-        }).transpose()
+        })
+        .transpose()
 }
 
 fn handler_result_parameter(ty: &Type) -> Option<&Type> {
