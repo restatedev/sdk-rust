@@ -48,7 +48,7 @@ impl<'a> ServiceGenerator<'a> {
         let handler_fns = handlers
             .iter()
             .map(
-                |Handler { attrs, ident, arg, is_shared, output }| {
+                |Handler { attrs, ident, arg, is_shared, output, .. }| {
                     let args = arg.iter();
 
                     let ctx = match (&service_ty, is_shared) {
@@ -122,7 +122,7 @@ impl<'a> ServiceGenerator<'a> {
                 }
             };
 
-            let handler_literal = Literal::string(&handler_ident.to_string());
+            let handler_literal = Literal::string(&handler.restate_name);
 
             quote! {
                 #handler_literal => {
@@ -179,7 +179,7 @@ impl<'a> ServiceGenerator<'a> {
         };
 
         let handlers = handlers.iter().map(|handler| {
-            let handler_literal = Literal::string(&handler.ident.to_string());
+            let handler_literal = Literal::string(&handler.restate_name);
 
             let handler_ty = if handler.is_shared {
                 quote! { Some(::restate_sdk::discovery::HandlerType::Shared) }

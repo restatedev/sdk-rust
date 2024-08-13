@@ -15,10 +15,7 @@ use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::token::Comma;
-use syn::{
-    braced, parenthesized, Attribute, Error, FnArg, GenericArgument, Ident, Pat, PatType, Path,
-    PathArguments, Result, ReturnType, Token, Type, Visibility,
-};
+use syn::{braced, parenthesized, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit, Pat, PatType, Path, PathArguments, Result, ReturnType, Token, Type, Visibility};
 
 /// Accumulates multiple errors into a result.
 /// Only use this for recoverable errors, i.e. non-parse errors. Fatal errors should early exit to
@@ -89,6 +86,7 @@ impl Parse for Service {
 pub(crate) struct Handler {
     pub(crate) attrs: Vec<Attribute>,
     pub(crate) is_shared: bool,
+    pub(crate) restate_name: String,
     pub(crate) ident: Ident,
     pub(crate) arg: Option<PatType>,
     pub(crate) output: ReturnType,
@@ -96,16 +94,11 @@ pub(crate) struct Handler {
 
 impl Parse for Handler {
     fn parse(input: ParseStream) -> Result<Self> {
-        let attrs = input.call(Attribute::parse_outer)?;
-        let parsed_attrs_count = attrs.len();
-
-        // Remove shared attribute
-        let attrs: Vec<Attribute> = attrs.into_iter().filter(|a| !is_shared_attr(a)).collect();
-        let is_shared = attrs.len() != parsed_attrs_count;
+        let parsed_attrs = input.call(Attribute::parse_outer)?;
 
         input.parse::<Token![async]>()?;
         input.parse::<Token![fn]>()?;
-        let ident = input.parse()?;
+        let ident: Ident = input.parse()?;
 
         // Parse arguments
         let content;
@@ -155,9 +148,25 @@ impl Parse for Handler {
             }
         }
 
+        // Process attributes
+        let mut is_shared = false;
+        let mut restate_name = ident.to_string();
+        let mut attrs = vec![];
+        for attr in parsed_attrs {
+            if is_shared_attr(&attr) {
+                is_shared = true;
+            } else if let Some(name) = read_literal_attribute_name(&attr)? {
+                restate_name = name;
+            } else {
+                // Just propagate
+                attrs.push(attr);
+            }
+        }
+
         Ok(Self {
             attrs,
             is_shared,
+            restate_name,
             ident,
             arg: args.pop(),
             output,
@@ -170,6 +179,20 @@ fn is_shared_attr(attr: &Attribute) -> bool {
         .require_path_only()
         .and_then(Path::require_ident)
         .is_ok_and(|i| i == "shared")
+}
+
+fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
+    attr.meta
+        .require_name_value()
+        .ok()
+        .filter(|val| val.path.require_ident().is_ok_and(|i| i == "name"))
+        .map(|val| {
+            if let Expr::Lit(ExprLit {lit: Lit::Str(ref literal), .. }) = &val.value {
+                Ok(literal.value())
+            } else {
+                Err(Error::new(val.span(), "Only string literal is allowed for the 'name' attribute"))
+            }
+        }).transpose()
 }
 
 fn handler_result_parameter(ty: &Type) -> Option<&Type> {

@@ -3,6 +3,7 @@ use restate_sdk::prelude::*;
 
 #[restate_sdk::service]
 trait FailureExample {
+    #[name = "doRun"]
     async fn do_run() -> HandlerResult<()>;
 }
 
