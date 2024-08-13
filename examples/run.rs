@@ -14,7 +14,8 @@ impl RunExample for RunExampleImpl {
             .run("get_ip", || async move {
                 let req = self.0.get("https://httpbin.org/ip").build()?;
 
-                let res = self.0
+                let res = self
+                    .0
                     .execute(req)
                     .await?
                     .json::<HashMap<String, String>>()

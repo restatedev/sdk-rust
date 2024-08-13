@@ -1,5 +1,5 @@
-use restate_sdk::prelude::*;
 use rand::RngCore;
+use restate_sdk::prelude::*;
 
 #[restate_sdk::service]
 trait FailureExample {
@@ -17,7 +17,7 @@ impl FailureExample for FailureExampleImpl {
         context
             .run("get_ip", || async move {
                 if rand::thread_rng().next_u32() % 4 == 0 {
-                    return Err(TerminalError::new("Failed!!!").into())
+                    return Err(TerminalError::new("Failed!!!").into());
                 }
 
                 Err(MyError.into())

@@ -270,4 +270,10 @@ macro_rules! impl_run_method {
     };
 }
 
-impl_run_method!([Context, SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext]);
+impl_run_method!([
+    Context,
+    SharedObjectContext,
+    ObjectContext,
+    SharedWorkflowContext,
+    WorkflowContext
+]);

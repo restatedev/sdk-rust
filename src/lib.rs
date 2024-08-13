@@ -18,6 +18,6 @@ pub mod prelude {
         Context, ObjectContext, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::Endpoint;
-    pub use crate::errors::{HandlerResult, TerminalError};
+    pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
 }
