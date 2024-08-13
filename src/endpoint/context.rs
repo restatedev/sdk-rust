@@ -2,7 +2,7 @@ use crate::context::{RequestTarget, RunClosure};
 use crate::endpoint::futures::{InterceptErrorFuture, TrapFuture};
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
-use crate::errors::{HandlerResult, TerminalError};
+use crate::errors::{HandlerErrorInner, HandlerResult, TerminalError};
 use crate::serde::{Deserialize, Serialize};
 use bytes::Bytes;
 use futures::future::Either;
@@ -500,7 +500,7 @@ impl ContextInternal {
     where
         R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
         T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'static,
+        F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
     {
         let this = Arc::clone(&self.inner);
 
@@ -531,7 +531,18 @@ impl ContextInternal {
                         })?
                         .to_vec(),
                 ),
-                Err(e) => NonEmptyValue::Failure(e.into()),
+                Err(e) => match e.0 {
+                    HandlerErrorInner::Retryable(err) => {
+                        return Err(ErrorInner::RunResult {
+                            name: name.to_owned(),
+                            err,
+                        }
+                        .into())
+                    }
+                    HandlerErrorInner::Terminal(t) => {
+                        NonEmptyValue::Failure(TerminalError(t).into())
+                    }
+                },
             };
 
             let handle = {
@@ -567,7 +578,7 @@ impl ContextInternal {
         })
     }
 
-    pub fn write_output<T: Serialize>(&self, res: HandlerResult<T>) {
+    pub fn handle_handler_result<T: Serialize>(&self, res: HandlerResult<T>) {
         let mut inner_lock = must_lock!(self.inner);
 
         let res_to_write = match res {
@@ -583,7 +594,15 @@ impl ContextInternal {
                     return;
                 }
             },
-            Err(f) => NonEmptyValue::Failure(f.into()),
+            Err(e) => match e.0 {
+                HandlerErrorInner::Retryable(err) => {
+                    inner_lock
+                        .handler_state
+                        .mark_error_inner(ErrorInner::HandlerResult { err });
+                    return;
+                }
+                HandlerErrorInner::Terminal(t) => NonEmptyValue::Failure(TerminalError(t).into()),
+            },
         };
 
         let _ = inner_lock.vm.sys_write_output(res_to_write);

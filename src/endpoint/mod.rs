@@ -83,7 +83,9 @@ impl Error {
             | ErrorInner::UnexpectedOutputClosed
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
             | ErrorInner::Deserialization { .. }
-            | ErrorInner::Serialization { .. } => 500,
+            | ErrorInner::Serialization { .. }
+            | ErrorInner::RunResult { .. }
+            | ErrorInner::HandlerResult { .. } => 500,
             ErrorInner::BadDiscovery(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
         }
@@ -122,6 +124,17 @@ enum ErrorInner {
     #[error("Failed to serialize with '{syscall}': {err:?}'")]
     Serialization {
         syscall: &'static str,
+        #[source]
+        err: BoxError,
+    },
+    #[error("Run '{name}' failed with retryable error: {err:?}'")]
+    RunResult {
+        name: String,
+        #[source]
+        err: BoxError,
+    },
+    #[error("Handler failed with retryable error: {err:?}'")]
+    HandlerResult {
         #[source]
         err: BoxError,
     },

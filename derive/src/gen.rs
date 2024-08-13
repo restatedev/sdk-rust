@@ -128,7 +128,7 @@ impl<'a> ServiceGenerator<'a> {
                 #handler_literal => {
                     #get_input_and_call
                     let res = fut.await;
-                    ctx.write_output(res);
+                    ctx.handle_handler_result(res);
                     ctx.end();
                     Ok(())
                 }
@@ -213,112 +213,6 @@ impl<'a> ServiceGenerator<'a> {
             }
         }
     }
-
-    // fn struct_client(&self) -> TokenStream2 {
-    //     let &Self {
-    //         vis,
-    //         client_ident,
-    //         request_ident,
-    //         response_ident,
-    //         ..
-    //     } = self;
-    //
-    //     quote! {
-    //         #[allow(unused)]
-    //         #[derive(Clone, Debug)]
-    //         /// The client stub that makes RPC calls to the server. All request methods return
-    //         /// [Futures](::core::future::Future).
-    //         #vis struct #client_ident<
-    //             Stub = ::tarpc::client::Channel<#request_ident, #response_ident>
-    //         >(Stub);
-    //     }
-    // }
-    //
-    // fn impl_client_new(&self) -> TokenStream2 {
-    //     let &Self {
-    //         client_ident,
-    //         vis,
-    //         request_ident,
-    //         response_ident,
-    //         ..
-    //     } = self;
-    //
-    //     quote! {
-    //         impl #client_ident {
-    //             /// Returns a new client stub that sends requests over the given transport.
-    //             #vis fn new<T>(config: ::tarpc::client::Config, transport: T)
-    //                 -> ::tarpc::client::NewClient<
-    //                     Self,
-    //                     ::tarpc::client::RequestDispatch<#request_ident, #response_ident, T>
-    //                 >
-    //             where
-    //                 T: ::tarpc::Transport<::tarpc::ClientMessage<#request_ident>, ::tarpc::Response<#response_ident>>
-    //             {
-    //                 let new_client = ::tarpc::client::new(config, transport);
-    //                 ::tarpc::client::NewClient {
-    //                     client: #client_ident(new_client.client),
-    //                     dispatch: new_client.dispatch,
-    //                 }
-    //             }
-    //         }
-    //
-    //         impl<Stub> ::core::convert::From<Stub> for #client_ident<Stub>
-    //             where Stub: ::tarpc::client::stub::Stub<
-    //                 Req = #request_ident,
-    //                 Resp = #response_ident>
-    //         {
-    //             /// Returns a new client stub that sends requests over the given transport.
-    //             fn from(stub: Stub) -> Self {
-    //                 #client_ident(stub)
-    //             }
-    //
-    //         }
-    //     }
-    // }
-    //
-    // fn impl_client_rpc_methods(&self) -> TokenStream2 {
-    //     let &Self {
-    //         client_ident,
-    //         request_ident,
-    //         response_ident,
-    //         method_attrs,
-    //         vis,
-    //         method_idents,
-    //         args,
-    //         return_types,
-    //         arg_pats,
-    //         camel_case_idents,
-    //         ..
-    //     } = self;
-    //
-    //     quote! {
-    //         impl<Stub> #client_ident<Stub>
-    //             where Stub: ::tarpc::client::stub::Stub<
-    //                 Req = #request_ident,
-    //                 Resp = #response_ident>
-    //         {
-    //             #(
-    //                 #[allow(unused)]
-    //                 #( #method_attrs )*
-    //                 #vis fn #method_idents(&self, ctx: ::tarpc::context::Context, #( #args ),*)
-    //                     -> impl ::core::future::Future<Output = ::core::result::Result<#return_types, ::tarpc::client::RpcError>> + '_ {
-    //                     let request = #request_ident::#camel_case_idents { #( #arg_pats ),* };
-    //                     let resp = self.0.call(ctx, request);
-    //                     async move {
-    //                         match resp.await? {
-    //                             #response_ident::#camel_case_idents(msg) => ::core::result::Result::Ok(msg),
-    //                             _ => ::core::unreachable!(),
-    //                         }
-    //                     }
-    //                 }
-    //             )*
-    //         }
-    //     }
-    // }
-    //
-    // fn emit_warnings(&self) -> TokenStream2 {
-    //     self.warnings.iter().map(|w| w.to_token_stream()).collect()
-    // }
 }
 
 impl<'a> ToTokens for ServiceGenerator<'a> {
@@ -328,10 +222,6 @@ impl<'a> ToTokens for ServiceGenerator<'a> {
             self.struct_serve(),
             self.impl_service_for_serve(),
             self.impl_discoverable(),
-            // self.struct_client(),
-            // self.impl_client_new(),
-            // self.impl_client_rpc_methods(),
-            // self.emit_warnings(),
         ]);
     }
 }

@@ -45,6 +45,7 @@ impl<'a> From<(&'a ContextInternal, InputMetadata)> for WorkflowContext<'a> {
     }
 }
 
+// Little macro to simplify implementing context methods on all the context structs
 macro_rules! impl_context_method {
     ([$ctx:ident, $($morectx:ident),*]; $($sig:tt)*) => {
         impl_context_method!(@render_impl $ctx; $($sig)*);
@@ -71,6 +72,43 @@ macro_rules! impl_context_method {
     };
 }
 
+// State read methods
+impl_context_method!(
+    [SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
+    /// Get state
+    async fn get<T: Deserialize + 'static>(key: &str) -> Result<Option<T>, TerminalError>
+);
+impl_context_method!(
+    [SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
+    /// Get state
+    async fn get_keys() -> Result<Vec<String>, TerminalError>
+);
+
+// State write methods
+impl_context_method!(
+    [ObjectContext, WorkflowContext];
+    /// Set state
+    fn set<T: Serialize + 'static>(key: &str, t: T) -> ()
+);
+impl_context_method!(
+    [ObjectContext, WorkflowContext];
+    /// Clear state
+    fn clear(key: &str) -> ()
+);
+impl_context_method!(
+    [ObjectContext, WorkflowContext];
+    /// Clear state
+    fn clear_all() -> ()
+);
+
+// Sleep
+impl_context_method!(
+    [Context, SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
+    /// Sleep using Restate
+    async fn sleep(duration: Duration) -> Result<(), TerminalError>
+);
+
+// Calls
 #[derive(Debug, Clone)]
 pub enum RequestTarget {
     Service {
@@ -132,64 +170,6 @@ impl fmt::Display for RequestTarget {
     }
 }
 
-pub trait RunClosure {
-    type Output: Deserialize + Serialize + 'static;
-    type Fut: Future<Output = HandlerResult<Self::Output>>;
-
-    fn run(self) -> Self::Fut;
-}
-
-impl<F, O, Fut> RunClosure for F
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<O, TerminalError>>,
-    O: Deserialize + Serialize + 'static,
-{
-    type Output = O;
-    type Fut = Fut;
-
-    fn run(self) -> Self::Fut {
-        self()
-    }
-}
-
-// State read methods
-impl_context_method!(
-    [SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
-    /// Get state
-    async fn get<T: Deserialize + 'static>(key: &str) -> Result<Option<T>, TerminalError>
-);
-impl_context_method!(
-    [SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
-    /// Get state
-    async fn get_keys() -> Result<Vec<String>, TerminalError>
-);
-
-// State write methods
-impl_context_method!(
-    [ObjectContext, WorkflowContext];
-    /// Set state
-    fn set<T: Serialize + 'static>(key: &str, t: T) -> ()
-);
-impl_context_method!(
-    [ObjectContext, WorkflowContext];
-    /// Clear state
-    fn clear(key: &str) -> ()
-);
-impl_context_method!(
-    [ObjectContext, WorkflowContext];
-    /// Clear state
-    fn clear_all() -> ()
-);
-
-// Sleep
-impl_context_method!(
-    [Context, SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
-    /// Sleep using Restate
-    async fn sleep(duration: Duration) -> Result<(), TerminalError>
-);
-
-// Calls
 impl_context_method!(
     [Context, SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext];
     /// Call another Restate service
@@ -241,78 +221,53 @@ impl_context_method!(
 );
 
 // Run
-impl<'a> Context<'a> {
-    /// Run a non-deterministic operation
-    pub fn run<R, F, T>(
-        &self,
-        name: &'a str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'static,
-    {
-        self.0.run(name, run_closure)
+pub trait RunClosure {
+    type Output: Deserialize + Serialize + 'static;
+    type Fut: Future<Output = HandlerResult<Self::Output>>;
+
+    fn run(self) -> Self::Fut;
+}
+
+impl<F, O, Fut> RunClosure for F
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = HandlerResult<O>>,
+    O: Deserialize + Serialize + 'static,
+{
+    type Output = O;
+    type Fut = Fut;
+
+    fn run(self) -> Self::Fut {
+        self()
     }
 }
-impl<'a> SharedObjectContext<'a> {
-    /// Run a non-deterministic operation
-    pub fn run<R, F, T>(
-        &self,
-        name: &'a str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'static,
-    {
-        self.0.run(name, run_closure)
-    }
+
+// ad-hoc macro to copy paste run
+macro_rules! impl_run_method {
+    ([$ctx:ident, $($morectx:ident),*]) => {
+        impl_run_method!(@render_impl $ctx);
+        impl_run_method!([$($morectx),*]);
+    };
+    ([$ctx:ident]) => {
+        impl_run_method!(@render_impl $ctx);
+    };
+    (@render_impl $ctx:ident) => {
+       impl<'a> $ctx<'a> {
+              /// Run a non-deterministic operation
+                pub fn run<R, F, T>(
+                    &self,
+                    name: &'a str,
+                    run_closure: R,
+                ) -> impl Future<Output = Result<T, TerminalError>> + 'a
+                where
+                    R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
+                    T: Serialize + Deserialize,
+                    F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
+                {
+                    self.0.run(name, run_closure)
+                }
+       }
+    };
 }
-impl<'a> ObjectContext<'a> {
-    /// Run a non-deterministic operation
-    pub fn run<R, F, T>(
-        &self,
-        name: &'a str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'static,
-    {
-        self.0.run(name, run_closure)
-    }
-}
-impl<'a> SharedWorkflowContext<'a> {
-    /// Run a non-deterministic operation
-    pub fn run<R, F, T>(
-        &self,
-        name: &'a str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'static,
-    {
-        self.0.run(name, run_closure)
-    }
-}
-impl<'a> WorkflowContext<'a> {
-    /// Run a non-deterministic operation
-    pub fn run<R, F, T>(
-        &self,
-        name: &'a str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'static,
-    {
-        self.0.run(name, run_closure)
-    }
-}
+
+impl_run_method!([Context, SharedObjectContext, ObjectContext, SharedWorkflowContext, WorkflowContext]);

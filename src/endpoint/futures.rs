@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
+use tracing::warn;
 
 /// Future that traps the execution at this point, but keeps waking up the waker
 pub(super) struct TrapFuture<T>(PhantomData<T>);
@@ -102,6 +103,12 @@ where
 
         match this.handler_state_rx.try_recv() {
             Ok(e) => {
+                warn!(
+                    rpc.system = "restate",
+                    rpc.service = %this.handler_context.service_name(),
+                    rpc.method = %this.handler_context.handler_name(),
+                    "Error while processing handler {e:#}"
+                );
                 this.handler_context.consume_to_end();
                 Poll::Ready(Err(e))
             }
