@@ -1,6 +1,7 @@
 exclusions:
   "alwaysSuspending":
   - "dev.restate.sdktesting.tests.AwaitTimeout"
+  - "dev.restate.sdktesting.tests.NonDeterminismErrors"
   - "dev.restate.sdktesting.tests.ServiceToServiceCommunication"
   - "dev.restate.sdktesting.tests.SideEffect"
   - "dev.restate.sdktesting.tests.Sleep"
