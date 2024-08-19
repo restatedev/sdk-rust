@@ -32,6 +32,13 @@ impl StdError for HandlerErrorInner {
 #[derive(Debug)]
 pub struct HandlerError(pub(crate) HandlerErrorInner);
 
+impl HandlerError {
+    #[cfg(feature = "anyhow")]
+    pub fn from_anyhow(err: anyhow::Error) -> Self {
+        Self(HandlerErrorInner::Retryable(err.into()))
+    }
+}
+
 impl<E: StdError + Send + Sync + 'static> From<E> for HandlerError {
     fn from(value: E) -> Self {
         Self(HandlerErrorInner::Retryable(Box::new(value)))
@@ -44,6 +51,7 @@ impl From<TerminalError> for HandlerError {
     }
 }
 
+// Took from anyhow
 impl AsRef<dyn StdError + Send + Sync> for HandlerError {
     fn as_ref(&self) -> &(dyn StdError + Send + Sync + 'static) {
         &self.0
