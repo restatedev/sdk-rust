@@ -5,43 +5,90 @@ use std::fmt;
 use std::future::Future;
 use std::time::Duration;
 
-pub struct Context<'a>(&'a ContextInternal);
+pub struct Context<'a> {
+    inner: &'a ContextInternal,
+}
 
 impl<'a> From<(&'a ContextInternal, InputMetadata)> for Context<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
-        Self(value.0)
+        Self { inner: value.0 }
     }
 }
 
-pub struct SharedObjectContext<'a>(pub(crate) &'a ContextInternal);
+pub struct SharedObjectContext<'a> {
+    key: String,
+    pub(crate) inner: &'a ContextInternal,
+}
+
+impl<'a> SharedObjectContext<'a> {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
 
 impl<'a> From<(&'a ContextInternal, InputMetadata)> for SharedObjectContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
-        Self(value.0)
+        Self { key: value.1.key, inner: value.0 }
     }
 }
 
-pub struct ObjectContext<'a>(pub(crate) &'a ContextInternal);
+pub struct ObjectContext<'a> {
+    key: String,
+    pub(crate) inner: &'a ContextInternal,
+}
+
+impl<'a> ObjectContext<'a> {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
 
 impl<'a> From<(&'a ContextInternal, InputMetadata)> for ObjectContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
-        Self(value.0)
+        Self {
+            key: value.1.key,
+            inner: value.0
+        }
     }
 }
 
-pub struct SharedWorkflowContext<'a>(pub(crate) &'a ContextInternal);
+pub struct SharedWorkflowContext<'a> {
+    key: String,
+    pub(crate) inner: &'a ContextInternal,
+}
 
 impl<'a> From<(&'a ContextInternal, InputMetadata)> for SharedWorkflowContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
-        Self(value.0)
+        Self {
+            key: value.1.key,
+            inner: value.0
+        }
     }
 }
 
-pub struct WorkflowContext<'a>(pub(crate) &'a ContextInternal);
+impl<'a> SharedWorkflowContext<'a> {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+pub struct WorkflowContext<'a> {
+    key: String,
+    pub(crate) inner: &'a ContextInternal,
+}
 
 impl<'a> From<(&'a ContextInternal, InputMetadata)> for WorkflowContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
-        Self(value.0)
+        Self {
+            key: value.1.key,
+            inner: value.0
+        }
+    }
+}
+
+impl<'a> WorkflowContext<'a> {
+    pub fn key(&self) -> &str {
+        &self.key
     }
 }
 
@@ -58,7 +105,7 @@ macro_rules! impl_context_method {
        impl<'a> $ctx<'a> {
            #[doc = $doc]
            pub fn $name $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? (&self, $($param: $ty),*) -> impl Future<Output=$ret> + 'a {
-               self.0.$name($($param),*)
+               self.inner.$name($($param),*)
            }
        }
     };
@@ -66,7 +113,7 @@ macro_rules! impl_context_method {
        impl<'a> $ctx<'a> {
            #[doc = $doc]
            pub fn $name $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? (&self, $($param: $ty),*) -> $ret {
-               self.0.$name($($param),*)
+               self.inner.$name($($param),*)
            }
        }
     };
@@ -264,7 +311,7 @@ macro_rules! impl_run_method {
                     T: Serialize + Deserialize,
                     F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
                 {
-                    self.0.run(name, run_closure)
+                    self.inner.run(name, run_closure)
                 }
        }
     };
