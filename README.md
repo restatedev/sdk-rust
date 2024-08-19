@@ -25,7 +25,7 @@ Add Restate and Tokio as dependencies:
 
 ```toml
 [dependencies]
-restate_sdk = "0.1"
+restate-sdk = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -49,7 +49,8 @@ impl Greeter for GreeterImpl {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    // To enable logging/tracing
+    // tracing_subscriber::fmt::init();
     HyperServer::new(
         Endpoint::builder()
             .with_service(GreeterImpl.serve())
