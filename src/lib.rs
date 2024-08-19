@@ -8,7 +8,7 @@ pub mod errors;
 pub mod http;
 pub mod serde;
 
-pub use restate_sdk_derive::{object, service, workflow};
+pub use restate_sdk_macros::{object, service, workflow};
 
 pub mod prelude {
     #[cfg(feature = "http")]
