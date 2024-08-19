@@ -51,3 +51,17 @@ To build and test the SDK:
 ```shell
 just verify
 ```
+
+### Releasing
+
+You need the [Rust toolchain](https://rustup.rs/). To verify:
+
+```
+just verify
+```
+
+To release we use [cargo-release](https://github.com/crate-ci/cargo-release):
+
+```
+cargo release <VERSION> --workspace
+```
