@@ -28,7 +28,10 @@ impl<'a> SharedObjectContext<'a> {
 
 impl<'a> From<(&'a ContextInternal, InputMetadata)> for SharedObjectContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
-        Self { key: value.1.key, inner: value.0 }
+        Self {
+            key: value.1.key,
+            inner: value.0,
+        }
     }
 }
 
@@ -47,7 +50,7 @@ impl<'a> From<(&'a ContextInternal, InputMetadata)> for ObjectContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
         Self {
             key: value.1.key,
-            inner: value.0
+            inner: value.0,
         }
     }
 }
@@ -61,7 +64,7 @@ impl<'a> From<(&'a ContextInternal, InputMetadata)> for SharedWorkflowContext<'a
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
         Self {
             key: value.1.key,
-            inner: value.0
+            inner: value.0,
         }
     }
 }
@@ -81,7 +84,7 @@ impl<'a> From<(&'a ContextInternal, InputMetadata)> for WorkflowContext<'a> {
     fn from(value: (&'a ContextInternal, InputMetadata)) -> Self {
         Self {
             key: value.1.key,
-            inner: value.0
+            inner: value.0,
         }
     }
 }

@@ -1,7 +1,7 @@
 mod counter;
 
-use std::env;
 use restate_sdk::prelude::{Endpoint, HyperServer};
+use std::env;
 
 #[tokio::main]
 async fn main() {
@@ -12,7 +12,7 @@ async fn main() {
     let mut builder = Endpoint::builder();
 
     if services == "*" || services.contains("Counter") {
-      builder =  builder.with_service(counter::Counter::serve(counter::CounterImpl))
+        builder = builder.with_service(counter::Counter::serve(counter::CounterImpl))
     }
 
     HyperServer::new(builder.build())

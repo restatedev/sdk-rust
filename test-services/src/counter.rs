@@ -6,7 +6,7 @@ use tracing::info;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CounterUpdateResponse {
     old_value: u64,
-    new_value: u64
+    new_value: u64,
 }
 
 #[restate_sdk::object]
@@ -32,7 +32,11 @@ impl Counter for CounterImpl {
         Ok(ctx.get::<u64>(COUNT).await?.unwrap_or(0))
     }
 
-    async fn add(&self, ctx: ObjectContext<'_>, val: u64) -> HandlerResult<Json<CounterUpdateResponse>> {
+    async fn add(
+        &self,
+        ctx: ObjectContext<'_>,
+        val: u64,
+    ) -> HandlerResult<Json<CounterUpdateResponse>> {
         let current = ctx.get::<u64>(COUNT).await?.unwrap_or(0);
         let new = current + val;
         ctx.set(COUNT, new);
@@ -42,7 +46,8 @@ impl Counter for CounterImpl {
         Ok(CounterUpdateResponse {
             old_value: current,
             new_value: new,
-        }.into())
+        }
+        .into())
     }
 
     async fn reset(&self, ctx: ObjectContext<'_>) -> HandlerResult<()> {
