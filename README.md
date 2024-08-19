@@ -21,7 +21,49 @@
 
 ## Using the SDK
 
-<!-- TODO -->
+Add Restate and Tokio as dependencies:
+
+```toml
+[dependencies]
+restate_sdk = "0.1"
+tokio = { version = "1", features = ["full"] }
+```
+
+Then you're ready to develop your Restate service using Rust:
+
+```rust
+use restate_sdk::prelude::*;
+
+#[restate_sdk::service]
+trait Greeter {
+    async fn greet(name: String) -> HandlerResult<String>;
+}
+
+struct GreeterImpl;
+
+impl Greeter for GreeterImpl {
+    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
+        Ok(format!("Greetings {name}"))
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
+    HyperServer::new(
+        Endpoint::builder()
+            .with_service(GreeterImpl.serve())
+            .build(),
+    )
+    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+    .await;
+}
+```
+
+### Logging
+
+The SDK uses tokio's [`tracing`](https://docs.rs/tracing/latest/tracing/) crate to generate logs.
+Just configure it as usual through [`tracing_subscriber`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) to get your logs.
 
 ## Versions
 
