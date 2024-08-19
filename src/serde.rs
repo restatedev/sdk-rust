@@ -174,3 +174,9 @@ where
         serde_json::from_slice(bytes).map(Json)
     }
 }
+
+impl<T: Default> Default for Json<T> {
+    fn default() -> Self {
+        Self(T::default())
+    }
+}

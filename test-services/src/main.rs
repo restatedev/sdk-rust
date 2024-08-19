@@ -1,4 +1,5 @@
 mod counter;
+mod list_object;
 mod map_object;
 mod proxy;
 
@@ -21,6 +22,9 @@ async fn main() {
     }
     if services == "*" || services.contains("MapObject") {
         builder = builder.with_service(map_object::MapObject::serve(map_object::MapObjectImpl))
+    }
+    if services == "*" || services.contains("ListObject") {
+        builder = builder.with_service(list_object::ListObject::serve(list_object::ListObjectImpl))
     }
 
     HyperServer::new(builder.build())
