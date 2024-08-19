@@ -139,7 +139,7 @@ impl_serde_primitives!(f64);
 
 // --- Json responses
 
-pub struct Json<T>(T);
+pub struct Json<T>(pub T);
 
 impl<T> Json<T> {
     pub fn into_inner(self) -> T {

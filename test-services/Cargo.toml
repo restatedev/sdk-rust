@@ -5,8 +5,10 @@ edition = "2021"
 publish = false
 
 [dependencies]
+anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = "0.3"
+futures = "0.3"
 restate-sdk = { path = ".." }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1.40"

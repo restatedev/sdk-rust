@@ -4,10 +4,11 @@ version = "0.0.1"
 edition = "2021"
 
 [features]
-default = ["http"]
+default = ["http", "anyhow"]
 http = ["hyper", "http-body-util", "hyper-util", "tokio/net", "tokio/signal", "restate-sdk-shared-core/http"]
 
 [dependencies]
+anyhow = {version = "1.0", optional = true}
 bytes = "1.6.1"
 futures = "0.3"
 http-body-util = { version = "0.1", optional = true }
