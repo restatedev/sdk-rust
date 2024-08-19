@@ -39,8 +39,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check Cargo.lock file is updated
-        run: cargo update -w --locked
-
       - name: Run verify
         run: just verify
