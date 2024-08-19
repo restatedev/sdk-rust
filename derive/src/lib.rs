@@ -16,8 +16,8 @@ extern crate proc_macro;
 mod ast;
 mod gen;
 
-use crate::ast::Service;
-use crate::gen::{ServiceGenerator, ServiceType};
+use crate::ast::{Object, Service, Workflow};
+use crate::gen::ServiceGenerator;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::parse_macro_input;
@@ -26,25 +26,25 @@ use syn::parse_macro_input;
 pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Service);
 
-    ServiceGenerator::new(ServiceType::Service, &svc)
+    ServiceGenerator::new_service(&svc)
         .into_token_stream()
         .into()
 }
 
 #[proc_macro_attribute]
 pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
-    let svc = parse_macro_input!(input as Service);
+    let svc = parse_macro_input!(input as Object);
 
-    ServiceGenerator::new(ServiceType::VirtualObject, &svc)
+    ServiceGenerator::new_object(&svc)
         .into_token_stream()
         .into()
 }
 
 #[proc_macro_attribute]
 pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
-    let svc = parse_macro_input!(input as Service);
+    let svc = parse_macro_input!(input as Workflow);
 
-    ServiceGenerator::new(ServiceType::Workflow, &svc)
+    ServiceGenerator::new_workflow(&svc)
         .into_token_stream()
         .into()
 }

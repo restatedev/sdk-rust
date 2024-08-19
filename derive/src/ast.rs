@@ -32,16 +32,48 @@ macro_rules! extend_errors {
     };
 }
 
-pub(crate) struct Service {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ServiceType {
+    Service,
+    Object,
+    Workflow,
+}
+
+pub(crate) struct Service(pub(crate) ServiceInner);
+
+impl Parse for Service {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Service(ServiceInner::parse(ServiceType::Service, input)?))
+    }
+}
+
+pub(crate) struct Object(pub(crate) ServiceInner);
+
+impl Parse for Object {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Object(ServiceInner::parse(ServiceType::Object, input)?))
+    }
+}
+
+pub(crate) struct Workflow(pub(crate) ServiceInner);
+
+impl Parse for Workflow {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Workflow(ServiceInner::parse(ServiceType::Workflow, input)?))
+    }
+}
+
+pub(crate) struct ServiceInner {
     pub(crate) attrs: Vec<Attribute>,
+    pub(crate) restate_name: String,
     pub(crate) vis: Visibility,
     pub(crate) ident: Ident,
     pub(crate) handlers: Vec<Handler>,
 }
 
-impl Parse for Service {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let attrs = input.call(Attribute::parse_outer)?;
+impl ServiceInner {
+    fn parse(service_type: ServiceType, input: ParseStream) -> Result<Self> {
+        let parsed_attrs = input.call(Attribute::parse_outer)?;
         let vis = input.parse()?;
         input.parse::<Token![trait]>()?;
         let ident: Ident = input.parse()?;
@@ -49,7 +81,16 @@ impl Parse for Service {
         braced!(content in input);
         let mut rpcs = Vec::<Handler>::new();
         while !content.is_empty() {
-            rpcs.push(content.parse()?);
+            let h: Handler = content.parse()?;
+
+            if h.is_shared && service_type == ServiceType::Service {
+                return Err(Error::new(
+                    h.ident.span(),
+                    "Service handlers cannot be annotated with #[shared]",
+                ));
+            }
+
+            rpcs.push(h);
         }
         let mut ident_errors = Ok(());
         for rpc in &rpcs {
@@ -77,8 +118,20 @@ impl Parse for Service {
         }
         ident_errors?;
 
+        let mut attrs = vec![];
+        let mut restate_name = ident.to_string();
+        for attr in parsed_attrs {
+            if let Some(name) = read_literal_attribute_name(&attr)? {
+                restate_name = name;
+            } else {
+                // Just propagate
+                attrs.push(attr);
+            }
+        }
+
         Ok(Self {
             attrs,
+            restate_name,
             vis,
             ident,
             handlers: rpcs,

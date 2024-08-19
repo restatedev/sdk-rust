@@ -1,18 +1,12 @@
-use crate::ast::{Handler, Service};
+use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
 use quote::{format_ident, quote, ToTokens};
 use syn::{parse_quote, Attribute, ReturnType, Type, Visibility};
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ServiceType {
-    Service,
-    VirtualObject,
-    Workflow,
-}
-
 pub(crate) struct ServiceGenerator<'a> {
     pub(crate) service_ty: ServiceType,
+    pub(crate) restate_name: &'a str,
     pub(crate) service_ident: &'a Ident,
     pub(crate) serve_ident: Ident,
     pub(crate) vis: &'a Visibility,
@@ -21,15 +15,28 @@ pub(crate) struct ServiceGenerator<'a> {
 }
 
 impl<'a> ServiceGenerator<'a> {
-    pub(crate) fn new(service_ty: ServiceType, s: &'a Service) -> Self {
+    fn new(service_ty: ServiceType, s: &'a ServiceInner) -> Self {
         ServiceGenerator {
             service_ty,
+            restate_name: &s.restate_name,
             service_ident: &s.ident,
             serve_ident: format_ident!("Serve{}", s.ident),
             vis: &s.vis,
             attrs: &s.attrs,
             handlers: &s.handlers,
         }
+    }
+
+    pub(crate) fn new_service(s: &'a Service) -> Self {
+        Self::new(ServiceType::Service, &s.0)
+    }
+
+    pub(crate) fn new_object(s: &'a Object) -> Self {
+        Self::new(ServiceType::Object, &s.0)
+    }
+
+    pub(crate) fn new_workflow(s: &'a Workflow) -> Self {
+        Self::new(ServiceType::Workflow, &s.0)
     }
 
     fn trait_service(&self) -> TokenStream2 {
@@ -53,8 +60,8 @@ impl<'a> ServiceGenerator<'a> {
 
                     let ctx = match (&service_ty, is_shared) {
                         (ServiceType::Service, _) => quote! { ::restate_sdk::prelude::Context },
-                        (ServiceType::VirtualObject, true) => quote! { ::restate_sdk::prelude::SharedObjectContext },
-                        (ServiceType::VirtualObject, false) => quote! { ::restate_sdk::prelude::ObjectContext },
+                        (ServiceType::Object, true) => quote! { ::restate_sdk::prelude::SharedObjectContext },
+                        (ServiceType::Object, false) => quote! { ::restate_sdk::prelude::ObjectContext },
                         (ServiceType::Workflow, true) => quote! { ::restate_sdk::prelude::SharedWorkflowContext },
                         (ServiceType::Workflow, false) => quote! { ::restate_sdk::prelude::WorkflowContext },
                     };
@@ -165,14 +172,15 @@ impl<'a> ServiceGenerator<'a> {
             serve_ident,
             service_ident,
             handlers,
+            restate_name,
             ..
         } = self;
 
-        let service_literal = Literal::string(&service_ident.to_string());
+        let service_literal = Literal::string(restate_name);
 
         let service_ty = match service_ty {
             ServiceType::Service => quote! { ::restate_sdk::discovery::ServiceType::Service },
-            ServiceType::VirtualObject => {
+            ServiceType::Object => {
                 quote! { ::restate_sdk::discovery::ServiceType::VirtualObject }
             }
             ServiceType::Workflow => quote! { ::restate_sdk::discovery::ServiceType::Workflow },
