@@ -105,5 +105,5 @@ just verify
 To release we use [cargo-release](https://github.com/crate-ci/cargo-release):
 
 ```
-cargo release <VERSION> --workspace
+cargo release <VERSION> --exclude test-services --workspace
 ```
