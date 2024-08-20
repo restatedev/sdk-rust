@@ -7,7 +7,7 @@
 # Restate Rust SDK
 
 > [!WARNING]
-> The Rust SDK is currently in active development, and might break across releases.
+> The Rust SDK is currently in preview / early access.
 
 [Restate](https://restate.dev/) is a system for easily building resilient applications using _distributed durable async/await_. This repository contains the Restate SDK for writing services using Rust.
 
