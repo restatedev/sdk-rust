@@ -44,7 +44,7 @@ impl MapObject for MapObjectImpl {
             let value = ctx
                 .get(&k)
                 .await?
-                .ok_or_else(|| HandlerError::from_anyhow(anyhow!("Missing key {k}")))?;
+                .ok_or_else(|| anyhow!("Missing key {k}"))?;
             entries.push(Entry { key: k, value })
         }
 
