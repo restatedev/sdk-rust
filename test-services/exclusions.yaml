@@ -8,7 +8,6 @@ exclusions:
     - "dev.restate.sdktesting.tests.UpgradeWithInFlightInvocation"
     - "dev.restate.sdktesting.tests.UpgradeWithNewInvocation"
     - "dev.restate.sdktesting.tests.UserErrors"
-    - "dev.restate.sdktesting.tests.WorkflowAPI"
   "default":
     - "dev.restate.sdktesting.tests.AwaitTimeout"
     - "dev.restate.sdktesting.tests.CallOrdering"
@@ -21,7 +20,6 @@ exclusions:
     - "dev.restate.sdktesting.tests.UpgradeWithInFlightInvocation"
     - "dev.restate.sdktesting.tests.UpgradeWithNewInvocation"
     - "dev.restate.sdktesting.tests.UserErrors"
-    - "dev.restate.sdktesting.tests.WorkflowAPI"
   "persistedTimers":
     - "dev.restate.sdktesting.tests.Sleep"
   "singleThreadSinglePartition":
@@ -36,4 +34,3 @@ exclusions:
     - "dev.restate.sdktesting.tests.UpgradeWithInFlightInvocation"
     - "dev.restate.sdktesting.tests.UpgradeWithNewInvocation"
     - "dev.restate.sdktesting.tests.UserErrors"
-    - "dev.restate.sdktesting.tests.WorkflowAPI"

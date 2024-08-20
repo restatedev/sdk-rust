@@ -1,4 +1,7 @@
+mod awakeable_holder;
+mod block_and_wait_workflow;
 mod counter;
+mod list_object;
 mod map_object;
 mod proxy;
 
@@ -21,6 +24,19 @@ async fn main() {
     }
     if services == "*" || services.contains("MapObject") {
         builder = builder.with_service(map_object::MapObject::serve(map_object::MapObjectImpl))
+    }
+    if services == "*" || services.contains("ListObject") {
+        builder = builder.with_service(list_object::ListObject::serve(list_object::ListObjectImpl))
+    }
+    if services == "*" || services.contains("AwakeableHolder") {
+        builder = builder.with_service(awakeable_holder::AwakeableHolder::serve(
+            awakeable_holder::AwakeableHolderImpl,
+        ))
+    }
+    if services == "*" || services.contains("BlockAndWaitWorkflow") {
+        builder = builder.with_service(block_and_wait_workflow::BlockAndWaitWorkflow::serve(
+            block_and_wait_workflow::BlockAndWaitWorkflowImpl,
+        ))
     }
 
     HyperServer::new(builder.build())

@@ -1,7 +1,6 @@
 use restate_sdk_shared_core::Failure;
 use std::error::Error as StdError;
 use std::fmt;
-use thiserror::__private::AsDynError;
 
 #[derive(Debug)]
 pub(crate) enum HandlerErrorInner {
@@ -23,7 +22,7 @@ impl fmt::Display for HandlerErrorInner {
 impl StdError for HandlerErrorInner {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            HandlerErrorInner::Retryable(e) => Some(e.as_dyn_error()),
+            HandlerErrorInner::Retryable(e) => Some(e.as_ref()),
             HandlerErrorInner::Terminal(e) => Some(e),
         }
     }
@@ -32,16 +31,9 @@ impl StdError for HandlerErrorInner {
 #[derive(Debug)]
 pub struct HandlerError(pub(crate) HandlerErrorInner);
 
-impl HandlerError {
-    #[cfg(feature = "anyhow")]
-    pub fn from_anyhow(err: anyhow::Error) -> Self {
-        Self(HandlerErrorInner::Retryable(err.into()))
-    }
-}
-
-impl<E: StdError + Send + Sync + 'static> From<E> for HandlerError {
+impl<E: Into<Box<dyn StdError + Send + Sync + 'static>>> From<E> for HandlerError {
     fn from(value: E) -> Self {
-        Self(HandlerErrorInner::Retryable(Box::new(value)))
+        Self(HandlerErrorInner::Retryable(value.into()))
     }
 }
 

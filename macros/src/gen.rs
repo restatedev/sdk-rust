@@ -178,7 +178,7 @@ impl<'a> ServiceGenerator<'a> {
 
         let service_literal = Literal::string(restate_name);
 
-        let service_ty = match service_ty {
+        let service_ty_token = match service_ty {
             ServiceType::Service => quote! { ::restate_sdk::discovery::ServiceType::Service },
             ServiceType::Object => {
                 quote! { ::restate_sdk::discovery::ServiceType::VirtualObject }
@@ -191,6 +191,8 @@ impl<'a> ServiceGenerator<'a> {
 
             let handler_ty = if handler.is_shared {
                 quote! { Some(::restate_sdk::discovery::HandlerType::Shared) }
+            } else if *service_ty == ServiceType::Workflow {
+                quote! { Some(::restate_sdk::discovery::HandlerType::Workflow) }
             } else {
                 // Macro has same defaulting rules of the discovery manifest
                 quote! { None }
@@ -212,7 +214,7 @@ impl<'a> ServiceGenerator<'a> {
             {
                 fn discover() -> ::restate_sdk::discovery::Service {
                     ::restate_sdk::discovery::Service {
-                        ty: #service_ty,
+                        ty: #service_ty_token,
                         name: ::restate_sdk::discovery::ServiceName::try_from(#service_literal.to_string())
                             .expect("Service name valid"),
                         handlers: vec![#( #handlers ),*],
