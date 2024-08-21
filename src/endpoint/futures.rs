@@ -23,7 +23,7 @@ unsafe impl<T> Sync for TrapFuture<T> {}
 impl<T> Future for TrapFuture<T> {
     type Output = T;
 
-    fn poll(self: Pin<&mut Self>, ctx: &mut std::task::Context<'_>) -> Poll<T> {
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<T> {
         ctx.waker().wake_by_ref();
         Poll::Pending
     }
