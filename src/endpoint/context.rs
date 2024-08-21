@@ -1,4 +1,4 @@
-use crate::context::{RequestTarget, RunClosure};
+use crate::context::{Request, RequestTarget, RunClosure};
 use crate::endpoint::futures::{InterceptErrorFuture, TrapFuture};
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
@@ -261,6 +261,10 @@ impl ContextInternal {
         });
 
         InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
+    }
+
+    pub fn request<Req, Res>(&self, request_target: RequestTarget, req: Req) -> Request<Req, Res> {
+        Request::new(self, request_target, req)
     }
 
     pub fn call<Req: Serialize, Res: Deserialize>(

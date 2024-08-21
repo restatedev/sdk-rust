@@ -16,8 +16,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::{
-    braced, parenthesized, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit,
-    Pat, PatType, Path, PathArguments, Result, ReturnType, Token, Type, Visibility,
+    braced, parenthesized, parse_quote, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument,
+    Ident, Lit, Pat, PatType, Path, PathArguments, Result, ReturnType, Token, Type, Visibility,
 };
 
 /// Accumulates multiple errors into a result.
@@ -145,7 +145,7 @@ pub(crate) struct Handler {
     pub(crate) restate_name: String,
     pub(crate) ident: Ident,
     pub(crate) arg: Option<PatType>,
-    pub(crate) output: ReturnType,
+    pub(crate) output: Type,
 }
 
 impl Parse for Handler {
@@ -189,20 +189,24 @@ impl Parse for Handler {
         errors?;
 
         // Parse return type
-        let output: ReturnType = input.parse()?;
+        let return_type: ReturnType = input.parse()?;
         input.parse::<Token![;]>()?;
 
-        match &output {
-            ReturnType::Default => {}
+        let output: Type = match &return_type {
+            ReturnType::Default => {
+                parse_quote!(())
+            }
             ReturnType::Type(_, ty) => {
-                if handler_result_parameter(ty).is_none() {
+                if let Some(ty) = extract_handler_result_parameter(ty) {
+                    ty
+                } else {
                     return Err(Error::new(
-                        output.span(),
+                        return_type.span(),
                         "Only restate_sdk::prelude::HandlerResult is supported as return type",
                     ));
                 }
             }
-        }
+        };
 
         // Process attributes
         let mut is_shared = false;
@@ -259,7 +263,7 @@ fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
         .transpose()
 }
 
-fn handler_result_parameter(ty: &Type) -> Option<&Type> {
+fn extract_handler_result_parameter(ty: &Type) -> Option<Type> {
     let path = match ty {
         Type::Path(ty) => &ty.path,
         _ => return None,
@@ -280,7 +284,7 @@ fn handler_result_parameter(ty: &Type) -> Option<&Type> {
     }
 
     match &bracketed.args[0] {
-        GenericArgument::Type(arg) => Some(arg),
+        GenericArgument::Type(arg) => Some(arg.clone()),
         _ => None,
     }
 }

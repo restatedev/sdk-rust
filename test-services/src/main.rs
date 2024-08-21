@@ -1,5 +1,6 @@
 mod awakeable_holder;
 mod block_and_wait_workflow;
+mod cancel_test;
 mod counter;
 mod list_object;
 mod map_object;
@@ -36,6 +37,16 @@ async fn main() {
     if services == "*" || services.contains("BlockAndWaitWorkflow") {
         builder = builder.with_service(block_and_wait_workflow::BlockAndWaitWorkflow::serve(
             block_and_wait_workflow::BlockAndWaitWorkflowImpl,
+        ))
+    }
+    if services == "*" || services.contains("CancelTestRunner") {
+        builder = builder.with_service(cancel_test::CancelTestRunner::serve(
+            cancel_test::CancelTestRunnerImpl,
+        ))
+    }
+    if services == "*" || services.contains("CancelTestBlockingService") {
+        builder = builder.with_service(cancel_test::CancelTestBlockingService::serve(
+            cancel_test::CancelTestBlockingServiceImpl,
         ))
     }
 
