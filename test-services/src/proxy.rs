@@ -59,7 +59,7 @@ impl Proxy for ProxyImpl {
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
     ) -> HandlerResult<Json<Vec<u8>>> {
-        Ok(ctx.call(req.to_target(), req.message).await?)
+        Ok(ctx.request(req.to_target(), req.message).call().await?)
     }
 
     async fn one_way_call(
@@ -67,11 +67,14 @@ impl Proxy for ProxyImpl {
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
     ) -> HandlerResult<()> {
-        ctx.send(
-            req.to_target(),
-            req.message,
-            req.delay_millis.map(Duration::from_millis),
-        );
+        let request = ctx.request(req.to_target(), req.message);
+
+        if let Some(delay_millis) = req.delay_millis {
+            request.send_with_delay(Duration::from_millis(delay_millis));
+        } else {
+            request.send();
+        }
+
         Ok(())
     }
 
@@ -84,14 +87,16 @@ impl Proxy for ProxyImpl {
 
         for req in requests {
             if req.one_way_call {
-                ctx.send(
-                    req.proxy_request.to_target(),
-                    req.proxy_request.message,
-                    req.proxy_request.delay_millis.map(Duration::from_millis),
-                );
+                let request = ctx.request(req.proxy_request.to_target(), req.proxy_request.message);
+                if let Some(delay_millis) = req.proxy_request.delay_millis {
+                    request.send_with_delay(Duration::from_millis(delay_millis));
+                } else {
+                    request.send();
+                }
             } else {
                 let fut = ctx
-                    .call::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
+                    .request(req.proxy_request.to_target(), req.proxy_request.message)
+                    .call::<Vec<u8>>();
                 if req.await_at_the_end {
                     futures.push(fut.boxed())
                 }

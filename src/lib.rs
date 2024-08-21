@@ -15,7 +15,9 @@ pub mod prelude {
     pub use crate::http::HyperServer;
 
     pub use crate::context::{
-        Context, ObjectContext, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+        Context, ContextAwakeables, ContextClient, ContextReadState, ContextSideEffects,
+        ContextTimers, ContextWriteState, ObjectContext, SharedObjectContext,
+        SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::Endpoint;
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
