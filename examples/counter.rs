@@ -38,7 +38,7 @@ impl Counter for CounterImpl {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HyperServer::new(
+    HttpServer::new(
         Endpoint::builder()
             .with_service(CounterImpl.serve())
             .build(),

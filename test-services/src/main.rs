@@ -10,7 +10,7 @@ mod non_deterministic;
 mod proxy;
 mod test_utils_service;
 
-use restate_sdk::prelude::{Endpoint, HyperServer};
+use restate_sdk::prelude::{Endpoint, HttpServer};
 use std::env;
 
 #[tokio::main]
@@ -77,7 +77,7 @@ async fn main() {
         ))
     }
 
-    HyperServer::new(builder.build())
+    HttpServer::new(builder.build())
         .listen_and_serve(format!("0.0.0.0:{port}").parse().unwrap())
         .await;
 }
