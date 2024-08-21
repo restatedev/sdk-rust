@@ -2,12 +2,13 @@ use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_quote, Attribute, ReturnType, Type, Visibility};
+use syn::{Attribute, PatType, Visibility};
 
 pub(crate) struct ServiceGenerator<'a> {
     pub(crate) service_ty: ServiceType,
     pub(crate) restate_name: &'a str,
     pub(crate) service_ident: &'a Ident,
+    pub(crate) client_ident: Ident,
     pub(crate) serve_ident: Ident,
     pub(crate) vis: &'a Visibility,
     pub(crate) attrs: &'a [Attribute],
@@ -20,6 +21,7 @@ impl<'a> ServiceGenerator<'a> {
             service_ty,
             restate_name: &s.restate_name,
             service_ident: &s.ident,
+            client_ident: format_ident!("{}Client", s.ident),
             serve_ident: format_ident!("Serve{}", s.ident),
             vis: &s.vis,
             attrs: &s.attrs,
@@ -50,8 +52,6 @@ impl<'a> ServiceGenerator<'a> {
             ..
         } = self;
 
-        let unit_type: &Type = &parse_quote!(());
-
         let handler_fns = handlers
             .iter()
             .map(
@@ -66,13 +66,9 @@ impl<'a> ServiceGenerator<'a> {
                         (ServiceType::Workflow, false) => quote! { ::restate_sdk::prelude::WorkflowContext },
                     };
 
-                    let output = match output {
-                        ReturnType::Type(_, ref ty) => ty.as_ref(),
-                        ReturnType::Default => unit_type,
-                    };
                     quote! {
                         #( #attrs )*
-                        fn #ident(&self, context: #ctx, #( #args ),*) -> impl std::future::Future<Output=#output> + ::core::marker::Send;
+                        fn #ident(&self, context: #ctx, #( #args ),*) -> impl std::future::Future<Output=::restate_sdk::prelude::HandlerResult<#output>> + ::core::marker::Send;
                     }
                 },
             );
@@ -223,6 +219,123 @@ impl<'a> ServiceGenerator<'a> {
             }
         }
     }
+
+    fn struct_client(&self) -> TokenStream2 {
+        let &Self {
+            vis,
+            ref client_ident,
+            // service_ident,
+            ref service_ty,
+            ..
+        } = self;
+
+        let key_field = match service_ty {
+            ServiceType::Service => quote! {},
+            ServiceType::Object | ServiceType::Workflow => quote! {
+                key: String,
+            },
+        };
+
+        let into_client_impl = match service_ty {
+            ServiceType::Service => {
+                quote! {
+                    impl<'ctx> ::restate_sdk::context::IntoServiceClient<'ctx> for #client_ident<'ctx> {
+                        fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal) -> Self {
+                            Self { ctx }
+                        }
+                    }
+                }
+            }
+            ServiceType::Object => quote! {
+                impl<'ctx> ::restate_sdk::context::IntoObjectClient<'ctx> for #client_ident<'ctx> {
+                    fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal, key: String) -> Self {
+                        Self { ctx, key }
+                    }
+                }
+            },
+            ServiceType::Workflow => quote! {
+                impl<'ctx> ::restate_sdk::context::IntoWorkflowClient<'ctx> for #client_ident<'ctx> {
+                    fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal, key: String) -> Self {
+                        Self { ctx, key }
+                    }
+                }
+            },
+        };
+
+        quote! {
+            /// Struct exposing the client to invoke [#service_ident] from another service.
+            #vis struct #client_ident<'ctx> {
+                ctx: &'ctx ::restate_sdk::endpoint::ContextInternal,
+                #key_field
+            }
+
+            #into_client_impl
+        }
+    }
+
+    fn impl_client(&self) -> TokenStream2 {
+        let &Self {
+            vis,
+            ref client_ident,
+            service_ident,
+            handlers,
+            restate_name,
+            service_ty,
+            ..
+        } = self;
+
+        let service_literal = Literal::string(restate_name);
+
+        let handlers_fns = handlers.iter().map(|handler| {
+            let handler_ident = &handler.ident;
+            let handler_literal = Literal::string(&handler.restate_name);
+
+            let argument = match &handler.arg {
+                None => quote! {},
+                Some(PatType {
+                         ty, ..
+                     }) => quote! { req: #ty }
+            };
+            let argument_ty = match &handler.arg {
+                None => quote! { () },
+                Some(PatType {
+                         ty, ..
+                     }) => quote! { #ty }
+            };
+            let res_ty = &handler.output;
+            let input =  match &handler.arg {
+                None => quote! { () },
+                Some(_) => quote! { req }
+            };
+            let request_target = match service_ty {
+                ServiceType::Service => quote! {
+                    ::restate_sdk::context::RequestTarget::service(#service_literal, #handler_literal)
+                },
+                ServiceType::Object => quote! {
+                    ::restate_sdk::context::RequestTarget::object(#service_literal, &self.key, #handler_literal)
+                },
+                ServiceType::Workflow => quote! {
+                    ::restate_sdk::context::RequestTarget::workflow(#service_literal, &self.key, #handler_literal)
+                }
+            };
+
+            quote! {
+                #vis fn #handler_ident(&self, #argument) -> ::restate_sdk::context::Request<'ctx, #argument_ty, #res_ty> {
+                    self.ctx.request(#request_target, #input)
+                }
+            }
+        });
+
+        let doc_msg = format!(
+            "Struct exposing the client to invoke [`{service_ident}`] from another service."
+        );
+        quote! {
+            #[doc = #doc_msg]
+            impl<'ctx> #client_ident<'ctx> {
+                #( #handlers_fns )*
+            }
+        }
+    }
 }
 
 impl<'a> ToTokens for ServiceGenerator<'a> {
@@ -232,6 +345,8 @@ impl<'a> ToTokens for ServiceGenerator<'a> {
             self.struct_serve(),
             self.impl_service_for_serve(),
             self.impl_discoverable(),
+            self.struct_client(),
+            self.impl_client(),
         ]);
     }
 }

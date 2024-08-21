@@ -3,6 +3,7 @@ use crate::errors::TerminalError;
 use crate::serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -66,22 +67,24 @@ impl fmt::Display for RequestTarget {
     }
 }
 
-pub struct Request<'a, Req> {
+pub struct Request<'a, Req, Res> {
     ctx: &'a ContextInternal,
     request_target: RequestTarget,
     req: Req,
+    res: PhantomData<Res>,
 }
 
-impl<'a, Req> Request<'a, Req> {
-    pub(super) fn new(ctx: &'a ContextInternal, request_target: RequestTarget, req: Req) -> Self {
+impl<'a, Req, Res> Request<'a, Req, Res> {
+    pub(crate) fn new(ctx: &'a ContextInternal, request_target: RequestTarget, req: Req) -> Self {
         Self {
             ctx,
             request_target,
             req,
+            res: PhantomData,
         }
     }
 
-    pub fn call<Res>(self) -> impl Future<Output = Result<Res, TerminalError>> + Send
+    pub fn call(self) -> impl Future<Output = Result<Res, TerminalError>> + Send
     where
         Req: Serialize + 'static,
         Res: Deserialize + 'static,

@@ -10,8 +10,6 @@ exclusions:
     - "dev.restate.sdktesting.tests.UserErrors"
   "default":
     - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.CallOrdering"
-    - "dev.restate.sdktesting.tests.CancelInvocation"
     - "dev.restate.sdktesting.tests.Ingress"
     - "dev.restate.sdktesting.tests.KillInvocation"
     - "dev.restate.sdktesting.tests.ServiceToServiceCommunication"
@@ -24,8 +22,6 @@ exclusions:
     - "dev.restate.sdktesting.tests.Sleep"
   "singleThreadSinglePartition":
     - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.CallOrdering"
-    - "dev.restate.sdktesting.tests.CancelInvocation"
     - "dev.restate.sdktesting.tests.Ingress"
     - "dev.restate.sdktesting.tests.KillInvocation"
     - "dev.restate.sdktesting.tests.ServiceToServiceCommunication"

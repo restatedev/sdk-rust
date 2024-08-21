@@ -67,7 +67,7 @@ impl Proxy for ProxyImpl {
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
     ) -> HandlerResult<()> {
-        let request = ctx.request(req.to_target(), req.message);
+        let request = ctx.request::<_, ()>(req.to_target(), req.message);
 
         if let Some(delay_millis) = req.delay_millis {
             request.send_with_delay(Duration::from_millis(delay_millis));
@@ -86,17 +86,16 @@ impl Proxy for ProxyImpl {
         let mut futures: Vec<BoxFuture<'_, Result<Vec<u8>, TerminalError>>> = vec![];
 
         for req in requests {
+            let restate_req =
+                ctx.request::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
             if req.one_way_call {
-                let request = ctx.request(req.proxy_request.to_target(), req.proxy_request.message);
                 if let Some(delay_millis) = req.proxy_request.delay_millis {
-                    request.send_with_delay(Duration::from_millis(delay_millis));
+                    restate_req.send_with_delay(Duration::from_millis(delay_millis));
                 } else {
-                    request.send();
+                    restate_req.send();
                 }
             } else {
-                let fut = ctx
-                    .request(req.proxy_request.to_target(), req.proxy_request.message)
-                    .call::<Vec<u8>>();
+                let fut = restate_req.call();
                 if req.await_at_the_end {
                     futures.push(fut.boxed())
                 }
