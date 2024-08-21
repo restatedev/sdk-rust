@@ -100,8 +100,8 @@ enum ErrorInner {
     UnknownServiceHandler(String, String),
     #[error("Error when processing the request: {0:?}")]
     VM(#[from] VMError),
-    #[error("Cannot read header '{0}', reason: {1}")]
-    Header(&'static str, #[source] BoxError),
+    #[error("Cannot convert header '{0}', reason: {1}")]
+    Header(String, #[source] BoxError),
     #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery is {DISCOVERY_CONTENT_TYPE}")]
     BadDiscovery(String),
     #[error("Bad path '{0}', expected either '/discover' or '/invoke/service/handler'")]
@@ -237,7 +237,7 @@ impl Endpoint {
         if parts.last() == Some(&"discover") {
             let accept_header = headers
                 .extract("accept")
-                .map_err(|e| ErrorInner::Header("accept", Box::new(e)))?;
+                .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))?;
             if accept_header.is_some() {
                 let accept = accept_header.unwrap();
                 if !accept.contains("application/vnd.restate.endpointmanifest.v1+json") {
