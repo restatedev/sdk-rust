@@ -1,32 +1,7 @@
 exclusions:
   "alwaysSuspending":
     - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.ServiceToServiceCommunication"
-    - "dev.restate.sdktesting.tests.SideEffect"
-    - "dev.restate.sdktesting.tests.Sleep"
-    - "dev.restate.sdktesting.tests.SleepWithFailures"
-    - "dev.restate.sdktesting.tests.UpgradeWithInFlightInvocation"
-    - "dev.restate.sdktesting.tests.UpgradeWithNewInvocation"
-    - "dev.restate.sdktesting.tests.UserErrors"
   "default":
     - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.Ingress"
-    - "dev.restate.sdktesting.tests.KillInvocation"
-    - "dev.restate.sdktesting.tests.ServiceToServiceCommunication"
-    - "dev.restate.sdktesting.tests.Sleep"
-    - "dev.restate.sdktesting.tests.SleepWithFailures"
-    - "dev.restate.sdktesting.tests.UpgradeWithInFlightInvocation"
-    - "dev.restate.sdktesting.tests.UpgradeWithNewInvocation"
-    - "dev.restate.sdktesting.tests.UserErrors"
-  "persistedTimers":
-    - "dev.restate.sdktesting.tests.Sleep"
   "singleThreadSinglePartition":
     - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.Ingress"
-    - "dev.restate.sdktesting.tests.KillInvocation"
-    - "dev.restate.sdktesting.tests.ServiceToServiceCommunication"
-    - "dev.restate.sdktesting.tests.Sleep"
-    - "dev.restate.sdktesting.tests.SleepWithFailures"
-    - "dev.restate.sdktesting.tests.UpgradeWithInFlightInvocation"
-    - "dev.restate.sdktesting.tests.UpgradeWithNewInvocation"
-    - "dev.restate.sdktesting.tests.UserErrors"

@@ -67,7 +67,7 @@ impl fmt::Display for RequestTarget {
     }
 }
 
-pub struct Request<'a, Req, Res> {
+pub struct Request<'a, Req, Res = ()> {
     ctx: &'a ContextInternal,
     request_target: RequestTarget,
     req: Req,

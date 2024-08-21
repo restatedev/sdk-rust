@@ -1,4 +1,4 @@
-use crate::endpoint::{Error, ErrorInner};
+use crate::endpoint::Error;
 use tokio::sync::oneshot;
 
 pub(super) struct HandlerStateNotifier {
@@ -16,9 +16,5 @@ impl HandlerStateNotifier {
             let _ = tx.send(err);
         }
         // Some other operation already marked this handler as errored.
-    }
-
-    pub(super) fn mark_error_inner(&mut self, err: ErrorInner) {
-        self.mark_error(Error(err))
     }
 }

@@ -8,9 +8,10 @@ use bytes::Bytes;
 use futures::future::Either;
 use futures::{FutureExt, TryFutureExt};
 use restate_sdk_shared_core::{
-    AsyncResultHandle, CoreVM, Header, Input, NonEmptyValue, RunEnterResult, SuspendedOrVMError,
-    TakeOutputResult, Target, VMError, Value, VM,
+    AsyncResultHandle, CoreVM, NonEmptyValue, RunEnterResult, SuspendedOrVMError, TakeOutputResult,
+    Target, VMError, Value, VM,
 };
+use std::collections::HashMap;
 use std::future::{ready, Future};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,12 @@ impl ContextInternalInner {
             write,
             handler_state,
         }
+    }
+
+    pub(super) fn fail(&mut self, e: Error) {
+        self.vm
+            .notify_error(e.0.to_string().into(), format!("{:#}", e.0).into());
+        self.handler_state.mark_error(e);
     }
 }
 
@@ -84,18 +91,7 @@ pub struct InputMetadata {
     pub invocation_id: String,
     pub random_seed: u64,
     pub key: String,
-    pub headers: Vec<Header>,
-}
-
-impl From<Input> for InputMetadata {
-    fn from(value: Input) -> Self {
-        Self {
-            invocation_id: value.invocation_id,
-            random_seed: value.random_seed,
-            key: value.key,
-            headers: value.headers,
-        }
-    }
+    pub headers: http::HeaderMap<String>,
 }
 
 impl From<RequestTarget> for Target {
@@ -137,6 +133,18 @@ impl ContextInternal {
                 .sys_input()
                 .map_err(ErrorInner::VM)
                 .and_then(|raw_input| {
+                    let headers = http::HeaderMap::<String>::try_from(
+                        &raw_input
+                            .headers
+                            .into_iter()
+                            .map(|h| (h.key.to_string(), h.value.to_string()))
+                            .collect::<HashMap<String, String>>(),
+                    )
+                    .map_err(|e| ErrorInner::Deserialization {
+                        syscall: "input_headers",
+                        err: e.into(),
+                    })?;
+
                     Ok((
                         T::deserialize(&mut (raw_input.input.into())).map_err(|e| {
                             ErrorInner::Deserialization {
@@ -148,7 +156,7 @@ impl ContextInternal {
                             invocation_id: raw_input.invocation_id,
                             random_seed: raw_input.random_seed,
                             key: raw_input.key,
-                            headers: raw_input.headers,
+                            headers,
                         },
                     ))
                 });
@@ -159,7 +167,7 @@ impl ContextInternal {
                 return Either::Left(ready(i));
             }
             Err(e) => {
-                inner_lock.handler_state.mark_error_inner(e);
+                inner_lock.fail(e.into());
                 drop(inner_lock);
             }
         }
@@ -222,12 +230,13 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_state_set(key.to_owned(), b.to_vec());
             }
             Err(e) => {
-                inner_lock
-                    .handler_state
-                    .mark_error_inner(ErrorInner::Serialization {
+                inner_lock.fail(
+                    ErrorInner::Serialization {
                         syscall: "set_state",
                         err: Box::new(e),
-                    });
+                    }
+                    .into(),
+                );
             }
         }
     }
@@ -277,12 +286,13 @@ impl ContextInternal {
         let input = match Req::serialize(&req) {
             Ok(t) => t,
             Err(e) => {
-                inner_lock
-                    .handler_state
-                    .mark_error_inner(ErrorInner::Serialization {
+                inner_lock.fail(
+                    ErrorInner::Serialization {
                         syscall: "call",
                         err: Box::new(e),
-                    });
+                    }
+                    .into(),
+                );
                 return Either::Right(TrapFuture::default());
             }
         };
@@ -334,12 +344,13 @@ impl ContextInternal {
                     .sys_send(request_target.into(), t.to_vec(), delay);
             }
             Err(e) => {
-                inner_lock
-                    .handler_state
-                    .mark_error_inner(ErrorInner::Serialization {
+                inner_lock.fail(
+                    ErrorInner::Serialization {
                         syscall: "call",
                         err: Box::new(e),
-                    });
+                    }
+                    .into(),
+                );
             }
         };
     }
@@ -398,12 +409,13 @@ impl ContextInternal {
                     .sys_complete_awakeable(id.to_owned(), NonEmptyValue::Success(b.to_vec()));
             }
             Err(e) => {
-                inner_lock
-                    .handler_state
-                    .mark_error_inner(ErrorInner::Serialization {
+                inner_lock.fail(
+                    ErrorInner::Serialization {
                         syscall: "resolve_awakeable",
                         err: Box::new(e),
-                    });
+                    }
+                    .into(),
+                );
             }
         }
     }
@@ -480,12 +492,13 @@ impl ContextInternal {
                     .sys_complete_promise(name.to_owned(), NonEmptyValue::Success(b.to_vec()));
             }
             Err(e) => {
-                inner_lock
-                    .handler_state
-                    .mark_error_inner(ErrorInner::Serialization {
+                inner_lock.fail(
+                    ErrorInner::Serialization {
                         syscall: "resolve_promise",
                         err: Box::new(e),
-                    });
+                    }
+                    .into(),
+                );
             }
         }
     }
@@ -589,20 +602,19 @@ impl ContextInternal {
             Ok(success) => match T::serialize(&success) {
                 Ok(t) => NonEmptyValue::Success(t.to_vec()),
                 Err(e) => {
-                    inner_lock
-                        .handler_state
-                        .mark_error_inner(ErrorInner::Serialization {
+                    inner_lock.fail(
+                        ErrorInner::Serialization {
                             syscall: "output",
                             err: Box::new(e),
-                        });
+                        }
+                        .into(),
+                    );
                     return;
                 }
             },
             Err(e) => match e.0 {
                 HandlerErrorInner::Retryable(err) => {
-                    inner_lock
-                        .handler_state
-                        .mark_error_inner(ErrorInner::HandlerResult { err });
+                    inner_lock.fail(ErrorInner::HandlerResult { err }.into());
                     return;
                 }
                 HandlerErrorInner::Terminal(t) => NonEmptyValue::Failure(TerminalError(t).into()),
@@ -628,7 +640,7 @@ impl ContextInternal {
     }
 
     pub(super) fn fail(&self, e: Error) {
-        must_lock!(self.inner).handler_state.mark_error(e);
+        must_lock!(self.inner).fail(e)
     }
 
     fn create_poll_future(

@@ -59,7 +59,11 @@ impl Proxy for ProxyImpl {
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
     ) -> HandlerResult<Json<Vec<u8>>> {
-        Ok(ctx.request(req.to_target(), req.message).call().await?)
+        Ok(ctx
+            .request::<Vec<u8>, Vec<u8>>(req.to_target(), req.message)
+            .call()
+            .await?
+            .into())
     }
 
     async fn one_way_call(
