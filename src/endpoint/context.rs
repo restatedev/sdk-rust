@@ -127,44 +127,55 @@ impl ContextInternal {
 
     pub fn input<T: Deserialize>(&self) -> impl Future<Output = (T, InputMetadata)> {
         let mut inner_lock = must_lock!(self.inner);
-        let input_result =
-            inner_lock
-                .vm
-                .sys_input()
-                .map_err(ErrorInner::VM)
-                .and_then(|raw_input| {
-                    let headers = http::HeaderMap::<String>::try_from(
-                        &raw_input
-                            .headers
-                            .into_iter()
-                            .map(|h| (h.key.to_string(), h.value.to_string()))
-                            .collect::<HashMap<String, String>>(),
-                    )
-                    .map_err(|e| ErrorInner::Deserialization {
-                        syscall: "input_headers",
-                        err: e.into(),
-                    })?;
+        let input_result = inner_lock
+            .vm
+            .sys_input()
+            .map_err(ErrorInner::VM)
+            .map(|raw_input| {
+                let headers = http::HeaderMap::<String>::try_from(
+                    &raw_input
+                        .headers
+                        .into_iter()
+                        .map(|h| (h.key.to_string(), h.value.to_string()))
+                        .collect::<HashMap<String, String>>(),
+                )
+                .map_err(|e| {
+                    TerminalError::new_with_code(400, format!("Cannot decode headers: {e:?}"))
+                })?;
 
-                    Ok((
-                        T::deserialize(&mut (raw_input.input.into())).map_err(|e| {
-                            ErrorInner::Deserialization {
-                                syscall: "input",
-                                err: e.into(),
-                            }
-                        })?,
-                        InputMetadata {
-                            invocation_id: raw_input.invocation_id,
-                            random_seed: raw_input.random_seed,
-                            key: raw_input.key,
-                            headers,
-                        },
-                    ))
-                });
+                Ok::<_, TerminalError>((
+                    T::deserialize(&mut (raw_input.input.into())).map_err(|e| {
+                        TerminalError::new_with_code(
+                            400,
+                            format!("Cannot decode input payload: {e:?}"),
+                        )
+                    })?,
+                    InputMetadata {
+                        invocation_id: raw_input.invocation_id,
+                        random_seed: raw_input.random_seed,
+                        key: raw_input.key,
+                        headers,
+                    },
+                ))
+            });
 
         match input_result {
-            Ok(i) => {
+            Ok(Ok(i)) => {
                 drop(inner_lock);
                 return Either::Left(ready(i));
+            }
+            Ok(Err(err)) => {
+                let error_inner = ErrorInner::Deserialization {
+                    syscall: "input",
+                    err: err.0.clone().into(),
+                };
+                let _ = inner_lock
+                    .vm
+                    .sys_write_output(NonEmptyValue::Failure(err.into()));
+                let _ = inner_lock.vm.sys_end();
+                // This causes the trap, plus logs the error
+                inner_lock.handler_state.mark_error(error_inner.into());
+                drop(inner_lock);
             }
             Err(e) => {
                 inner_lock.fail(e.into());
