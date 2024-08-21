@@ -3,97 +3,28 @@ use crate::endpoint::{Endpoint, InputReceiver, OutputSender};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{FutureExt, TryStreamExt};
+use http::header::CONTENT_TYPE;
+use http::{response, Request, Response};
 use http_body_util::{BodyExt, Either, Full};
 use hyper::body::{Body, Frame, Incoming};
-use hyper::header::CONTENT_TYPE;
-use hyper::http::response;
-use hyper::server::conn::http2;
 use hyper::service::Service;
-use hyper::{Request, Response};
-use hyper_util::rt::{TokioExecutor, TokioIo};
 use restate_sdk_shared_core::ResponseHead;
 use std::convert::Infallible;
-use std::future::{ready, Future, Ready};
-use std::net::SocketAddr;
+use std::future::{ready, Ready};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
-use std::time::Duration;
-use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
-
-pub struct HyperServer {
-    endpoint: Endpoint,
-}
-
-impl From<Endpoint> for HyperServer {
-    fn from(endpoint: Endpoint) -> Self {
-        Self { endpoint }
-    }
-}
-
-impl HyperServer {
-    pub fn new(endpoint: Endpoint) -> Self {
-        Self { endpoint }
-    }
-
-    pub async fn listen_and_serve(self, addr: SocketAddr) {
-        let listener = TcpListener::bind(addr).await.expect("listener can bind");
-        self.serve(listener).await;
-    }
-
-    pub async fn serve(self, listener: TcpListener) {
-        self.serve_with_cancel(listener, tokio::signal::ctrl_c().map(|_| ()))
-            .await;
-    }
-
-    pub async fn serve_with_cancel(self, listener: TcpListener, cancel_signal_future: impl Future) {
-        let endpoint = HyperEndpoint(self.endpoint);
-        let graceful = hyper_util::server::graceful::GracefulShutdown::new();
-
-        // when this signal completes, start shutdown
-        let mut signal = std::pin::pin!(cancel_signal_future);
-
-        info!("Starting listening on {}", listener.local_addr().unwrap());
-
-        // Our server accept loop
-        loop {
-            tokio::select! {
-                Ok((stream, remote)) = listener.accept() => {
-                    let endpoint = endpoint.clone();
-
-                    let conn = http2::Builder::new(TokioExecutor::default())
-                        .serve_connection(TokioIo::new(stream), endpoint);
-
-                    let fut = graceful.watch(conn);
-
-                    tokio::spawn(async move {
-                        if let Err(e) = fut.await {
-                            warn!("Error serving connection {remote}: {:?}", e);
-                        }
-                    });
-                },
-                _ = &mut signal => {
-                    info!("Shutting down");
-                    // stop the accept loop
-                    break;
-                }
-            }
-        }
-
-        // Wait graceful shutdown
-        tokio::select! {
-            _ = graceful.shutdown() => {},
-            _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                warn!("Timed out waiting for all connections to close");
-            }
-        }
-    }
-}
+use tracing::warn;
 
 #[derive(Clone)]
-struct HyperEndpoint(Endpoint);
+pub struct HyperEndpoint(Endpoint);
+
+impl HyperEndpoint {
+    pub fn new(endpoint: Endpoint) -> Self {
+        Self(endpoint)
+    }
+}
 
 impl Service<Request<Incoming>> for HyperEndpoint {
     type Response = Response<Either<Full<Bytes>, BidiStreamRunner>>;
@@ -155,8 +86,7 @@ fn response_builder_from_response_head(response_head: ResponseHead) -> response:
     response_builder
 }
 
-// TODO use pin_project
-struct BidiStreamRunner {
+pub struct BidiStreamRunner {
     fut: Option<BoxFuture<'static, Result<(), endpoint::Error>>>,
     output_rx: mpsc::UnboundedReceiver<Bytes>,
     end_stream: bool,

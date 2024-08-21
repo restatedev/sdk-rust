@@ -17,7 +17,7 @@ impl SharedHandlerInService for SharedHandlerInServiceImpl {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HyperServer::new(
+    HttpServer::new(
         Endpoint::builder()
             .with_service(SharedHandlerInServiceImpl.serve())
             .build(),

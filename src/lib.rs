@@ -5,14 +5,16 @@ pub mod context;
 pub mod discovery;
 pub mod errors;
 #[cfg(feature = "http_server")]
-pub mod http;
+pub mod http_server;
+#[cfg(feature = "hyper")]
+pub mod hyper;
 pub mod serde;
 
 pub use restate_sdk_macros::{object, service, workflow};
 
 pub mod prelude {
     #[cfg(feature = "http_server")]
-    pub use crate::http::HyperServer;
+    pub use crate::http_server::HttpServer;
 
     pub use crate::context::{
         Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,

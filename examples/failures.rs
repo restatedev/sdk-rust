@@ -32,7 +32,7 @@ impl FailureExample for FailureExampleImpl {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HyperServer::new(
+    HttpServer::new(
         Endpoint::builder()
             .with_service(FailureExampleImpl.serve())
             .build(),

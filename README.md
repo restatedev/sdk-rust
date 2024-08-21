@@ -51,7 +51,7 @@ impl Greeter for GreeterImpl {
 async fn main() {
     // To enable logging/tracing
     // tracing_subscriber::fmt::init();
-    HyperServer::new(
+    HttpServer::new(
         Endpoint::builder()
             .with_service(GreeterImpl.serve())
             .build(),
