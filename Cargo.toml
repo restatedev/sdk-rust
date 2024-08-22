@@ -9,7 +9,7 @@ repository = "https://github.com/restatedev/sdk-rust"
 [features]
 default = ["http_server", "rand", "uuid"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
-http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal"]
+http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
 
 [dependencies]
 bytes = "1.6.1"
