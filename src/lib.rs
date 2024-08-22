@@ -58,7 +58,7 @@ pub mod prelude {
     pub use crate::context::{
         Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
         ContextSideEffects, ContextTimers, ContextWriteState, HeaderMap, ObjectContext, Request,
-        SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+        RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::Endpoint;
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};

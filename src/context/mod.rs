@@ -10,7 +10,7 @@ mod request;
 mod run;
 
 pub use request::{Request, RequestTarget};
-pub use run::RunClosure;
+pub use run::{RunClosure, RunRetryPolicy};
 pub type HeaderMap = http::HeaderMap<String>;
 
 /// Service handler context.
@@ -383,6 +383,23 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
         F: Future<Output = HandlerResult<T>> + Send + Sync + 'ctx,
     {
         self.inner_context().run(name, run_closure)
+    }
+
+    /// Run a non-deterministic operation and record its result.
+    ///
+    fn run_with_retry<R, F, T>(
+        &self,
+        name: &'ctx str,
+        retry_policy: RunRetryPolicy,
+        run_closure: R,
+    ) -> impl Future<Output = Result<T, TerminalError>> + 'ctx
+    where
+        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'ctx,
+        T: Serialize + Deserialize,
+        F: Future<Output = HandlerResult<T>> + Send + Sync + 'ctx,
+    {
+        self.inner_context()
+            .run_with_retry(name, retry_policy, run_closure)
     }
 
     /// Return a random seed inherently predictable, based on the invocation id, which is not secret.

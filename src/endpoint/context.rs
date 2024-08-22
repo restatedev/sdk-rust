@@ -1,22 +1,21 @@
-use crate::context::{Request, RequestTarget, RunClosure};
+use crate::context::{Request, RequestTarget, RunClosure, RunRetryPolicy};
 use crate::endpoint::futures::{InterceptErrorFuture, TrapFuture};
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
 use crate::errors::{HandlerErrorInner, HandlerResult, TerminalError};
 use crate::serde::{Deserialize, Serialize};
-use bytes::Bytes;
 use futures::future::Either;
 use futures::{FutureExt, TryFutureExt};
 use restate_sdk_shared_core::{
-    AsyncResultHandle, CoreVM, NonEmptyValue, RunEnterResult, SuspendedOrVMError, TakeOutputResult,
-    Target, VMError, Value, VM,
+    AsyncResultHandle, CoreVM, Failure, NonEmptyValue, RetryPolicy, RunEnterResult, RunExitResult,
+    SuspendedOrVMError, TakeOutputResult, Target, VMError, Value, VM,
 };
 use std::collections::HashMap;
 use std::future::{ready, Future};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct ContextInternalInner {
     vm: CoreVM,
@@ -42,7 +41,7 @@ impl ContextInternalInner {
 
     pub(super) fn fail(&mut self, e: Error) {
         self.vm
-            .notify_error(e.0.to_string().into(), format!("{:#}", e.0).into());
+            .notify_error(e.0.to_string().into(), format!("{:#}", e.0).into(), None);
         self.handler_state.mark_error(e);
     }
 }
@@ -130,37 +129,38 @@ impl ContextInternal {
 
     pub fn input<T: Deserialize>(&self) -> impl Future<Output = (T, InputMetadata)> {
         let mut inner_lock = must_lock!(self.inner);
-        let input_result = inner_lock
-            .vm
-            .sys_input()
-            .map_err(ErrorInner::VM)
-            .map(|raw_input| {
-                let headers = http::HeaderMap::<String>::try_from(
-                    &raw_input
-                        .headers
-                        .into_iter()
-                        .map(|h| (h.key.to_string(), h.value.to_string()))
-                        .collect::<HashMap<String, String>>(),
-                )
-                .map_err(|e| {
-                    TerminalError::new_with_code(400, format!("Cannot decode headers: {e:?}"))
-                })?;
+        let input_result =
+            inner_lock
+                .vm
+                .sys_input()
+                .map_err(ErrorInner::VM)
+                .map(|mut raw_input| {
+                    let headers = http::HeaderMap::<String>::try_from(
+                        &raw_input
+                            .headers
+                            .into_iter()
+                            .map(|h| (h.key.to_string(), h.value.to_string()))
+                            .collect::<HashMap<String, String>>(),
+                    )
+                    .map_err(|e| {
+                        TerminalError::new_with_code(400, format!("Cannot decode headers: {e:?}"))
+                    })?;
 
-                Ok::<_, TerminalError>((
-                    T::deserialize(&mut (raw_input.input.into())).map_err(|e| {
-                        TerminalError::new_with_code(
-                            400,
-                            format!("Cannot decode input payload: {e:?}"),
-                        )
-                    })?,
-                    InputMetadata {
-                        invocation_id: raw_input.invocation_id,
-                        random_seed: raw_input.random_seed,
-                        key: raw_input.key,
-                        headers,
-                    },
-                ))
-            });
+                    Ok::<_, TerminalError>((
+                        T::deserialize(&mut (raw_input.input)).map_err(|e| {
+                            TerminalError::new_with_code(
+                                400,
+                                format!("Cannot decode input payload: {e:?}"),
+                            )
+                        })?,
+                        InputMetadata {
+                            invocation_id: raw_input.invocation_id,
+                            random_seed: raw_input.random_seed,
+                            key: raw_input.key,
+                            headers,
+                        },
+                    ))
+                });
 
         match input_result {
             Ok(Ok(i)) => {
@@ -196,9 +196,8 @@ impl ContextInternal {
 
         let poll_future = self.create_poll_future(maybe_handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
-            Ok(Value::Success(s)) => {
-                let mut b = Bytes::from(s);
-                let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+            Ok(Value::Success(mut s)) => {
+                let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
                     syscall: "get_state",
                     err: Box::new(e),
                 })?;
@@ -241,7 +240,7 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         match t.serialize() {
             Ok(b) => {
-                let _ = inner_lock.vm.sys_state_set(key.to_owned(), b.to_vec());
+                let _ = inner_lock.vm.sys_state_set(key.to_owned(), b);
             }
             Err(e) => {
                 inner_lock.fail(
@@ -311,9 +310,7 @@ impl ContextInternal {
             }
         };
 
-        let maybe_handle = inner_lock
-            .vm
-            .sys_call(request_target.into(), input.to_vec());
+        let maybe_handle = inner_lock.vm.sys_call(request_target.into(), input);
         drop(inner_lock);
 
         let poll_future = self.create_poll_future(maybe_handle).map(|res| match res {
@@ -321,9 +318,8 @@ impl ContextInternal {
                 variant: "empty",
                 syscall: "call",
             }),
-            Ok(Value::Success(s)) => {
-                let mut b = Bytes::from(s);
-                let t = Res::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+            Ok(Value::Success(mut s)) => {
+                let t = Res::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
                     syscall: "call",
                     err: Box::new(e),
                 })?;
@@ -353,9 +349,7 @@ impl ContextInternal {
 
         match Req::serialize(&req) {
             Ok(t) => {
-                let _ = inner_lock
-                    .vm
-                    .sys_send(request_target.into(), t.to_vec(), delay);
+                let _ = inner_lock.vm.sys_send(request_target.into(), t, delay);
             }
             Err(e) => {
                 inner_lock.fail(
@@ -392,9 +386,8 @@ impl ContextInternal {
                 variant: "empty",
                 syscall: "awakeable",
             }),
-            Ok(Value::Success(s)) => {
-                let mut b = Bytes::from(s);
-                let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+            Ok(Value::Success(mut s)) => {
+                let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
                     syscall: "awakeable",
                     err: Box::new(e),
                 })?;
@@ -420,7 +413,7 @@ impl ContextInternal {
             Ok(b) => {
                 let _ = inner_lock
                     .vm
-                    .sys_complete_awakeable(id.to_owned(), NonEmptyValue::Success(b.to_vec()));
+                    .sys_complete_awakeable(id.to_owned(), NonEmptyValue::Success(b));
             }
             Err(e) => {
                 inner_lock.fail(
@@ -451,9 +444,8 @@ impl ContextInternal {
                 variant: "empty",
                 syscall: "promise",
             }),
-            Ok(Value::Success(s)) => {
-                let mut b = Bytes::from(s);
-                let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+            Ok(Value::Success(mut s)) => {
+                let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
                     syscall: "promise",
                     err: Box::new(e),
                 })?;
@@ -478,9 +470,8 @@ impl ContextInternal {
 
         let poll_future = self.create_poll_future(maybe_handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
-            Ok(Value::Success(s)) => {
-                let mut b = Bytes::from(s);
-                let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+            Ok(Value::Success(mut s)) => {
+                let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
                     syscall: "peek_promise",
                     err: Box::new(e),
                 })?;
@@ -503,7 +494,7 @@ impl ContextInternal {
             Ok(b) => {
                 let _ = inner_lock
                     .vm
-                    .sys_complete_promise(name.to_owned(), NonEmptyValue::Success(b.to_vec()));
+                    .sys_complete_promise(name.to_owned(), NonEmptyValue::Success(b));
             }
             Err(e) => {
                 inner_lock.fail(
@@ -533,6 +524,44 @@ impl ContextInternal {
         T: Serialize + Deserialize,
         F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
     {
+        self.run_inner(name, RetryPolicy::Infinite, run_closure)
+    }
+
+    pub fn run_with_retry<'a, R, F, T>(
+        &'a self,
+        name: &'a str,
+        retry_policy: RunRetryPolicy,
+        run_closure: R,
+    ) -> impl Future<Output = Result<T, TerminalError>> + Send + Sync + 'a
+    where
+        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
+        T: Serialize + Deserialize,
+        F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
+    {
+        self.run_inner(
+            name,
+            RetryPolicy::Exponential {
+                initial_interval: retry_policy.initial_interval,
+                factor: retry_policy.factor,
+                max_interval: retry_policy.max_interval,
+                max_attempts: retry_policy.max_attempts,
+                max_duration: retry_policy.max_duration,
+            },
+            run_closure,
+        )
+    }
+
+    fn run_inner<'a, R, F, T>(
+        &'a self,
+        name: &'a str,
+        retry_policy: RetryPolicy,
+        run_closure: R,
+    ) -> impl Future<Output = Result<T, TerminalError>> + Send + Sync + 'a
+    where
+        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
+        T: Serialize + Deserialize,
+        F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
+    {
         let this = Arc::clone(&self.inner);
 
         InterceptErrorFuture::new(self.clone(), async move {
@@ -540,38 +569,36 @@ impl ContextInternal {
 
             // Enter the side effect
             match enter_result.map_err(ErrorInner::VM)? {
-                RunEnterResult::Executed(NonEmptyValue::Success(v)) => {
-                    let mut b = Bytes::from(v);
-                    let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+                RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
+                    let t = T::deserialize(&mut v).map_err(|e| ErrorInner::Deserialization {
                         syscall: "run",
                         err: Box::new(e),
                     })?;
                     return Ok(Ok(t));
                 }
                 RunEnterResult::Executed(NonEmptyValue::Failure(f)) => return Ok(Err(f.into())),
-                RunEnterResult::NotExecuted => {}
+                RunEnterResult::NotExecuted(_) => {}
             };
 
             // We need to run the closure
+            let run_start = Instant::now();
             let res = match run_closure.run().await {
-                Ok(t) => NonEmptyValue::Success(
-                    T::serialize(&t)
-                        .map_err(|e| ErrorInner::Serialization {
-                            syscall: "run",
-                            err: Box::new(e),
-                        })?
-                        .to_vec(),
-                ),
-                Err(e) => match e.0 {
-                    HandlerErrorInner::Retryable(err) => {
-                        return Err(ErrorInner::RunResult {
-                            name: name.to_owned(),
-                            err,
-                        }
-                        .into())
+                Ok(t) => RunExitResult::Success(T::serialize(&t).map_err(|e| {
+                    ErrorInner::Serialization {
+                        syscall: "run",
+                        err: Box::new(e),
                     }
+                })?),
+                Err(e) => match e.0 {
+                    HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
+                        attempt_duration: run_start.elapsed(),
+                        failure: Failure {
+                            code: 500,
+                            message: err.to_string(),
+                        },
+                    },
                     HandlerErrorInner::Terminal(t) => {
-                        NonEmptyValue::Failure(TerminalError(t).into())
+                        RunExitResult::TerminalFailure(TerminalError(t).into())
                     }
                 },
             };
@@ -579,7 +606,7 @@ impl ContextInternal {
             let handle = {
                 must_lock!(this)
                     .vm
-                    .sys_run_exit(res)
+                    .sys_run_exit(res, retry_policy)
                     .map_err(ErrorInner::VM)?
             };
 
@@ -591,9 +618,8 @@ impl ContextInternal {
                     syscall: "run",
                 }
                 .into()),
-                Value::Success(s) => {
-                    let mut b = Bytes::from(s);
-                    let t = T::deserialize(&mut b).map_err(|e| ErrorInner::Deserialization {
+                Value::Success(mut s) => {
+                    let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
                         syscall: "run",
                         err: Box::new(e),
                     })?;
@@ -614,7 +640,7 @@ impl ContextInternal {
 
         let res_to_write = match res {
             Ok(success) => match T::serialize(&success) {
-                Ok(t) => NonEmptyValue::Success(t.to_vec()),
+                Ok(t) => NonEmptyValue::Success(t),
                 Err(e) => {
                     inner_lock.fail(
                         ErrorInner::Serialization {
@@ -647,7 +673,7 @@ impl ContextInternal {
 
         let out = inner_lock.vm.take_output();
         if let TakeOutputResult::Buffer(b) = out {
-            if !inner_lock.write.send(b.into()) {
+            if !inner_lock.write.send(b) {
                 // Nothing we can do anymore here
             }
         }
@@ -707,7 +733,7 @@ impl Future for VmPollFuture {
                     let out = inner_lock.vm.take_output();
                     match out {
                         TakeOutputResult::Buffer(b) => {
-                            if !inner_lock.write.send(b.into()) {
+                            if !inner_lock.write.send(b) {
                                 self.state = Some(PollState::Failed(ErrorInner::Suspended));
                                 continue;
                             }
@@ -751,10 +777,11 @@ impl Future for VmPollFuture {
 
                     // Pass read result to VM
                     match read_result {
-                        Some(Ok(b)) => inner_lock.vm.notify_input(b.to_vec()),
+                        Some(Ok(b)) => inner_lock.vm.notify_input(b),
                         Some(Err(e)) => inner_lock.vm.notify_error(
                             "Error when reading the body".into(),
                             e.to_string().into(),
+                            None,
                         ),
                         None => inner_lock.vm.notify_input_closed(),
                     }

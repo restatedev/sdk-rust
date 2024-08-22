@@ -82,14 +82,13 @@ impl Error {
     /// Returns the HTTP status code for this error.
     pub fn status_code(&self) -> u16 {
         match &self.0 {
-            ErrorInner::VM(e) => e.code,
+            ErrorInner::VM(e) => e.code(),
             ErrorInner::UnknownService(_) | ErrorInner::UnknownServiceHandler(_, _) => 404,
             ErrorInner::Suspended
             | ErrorInner::UnexpectedOutputClosed
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
-            | ErrorInner::RunResult { .. }
             | ErrorInner::HandlerResult { .. } => 500,
             ErrorInner::BadDiscovery(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
@@ -135,12 +134,6 @@ enum ErrorInner {
         #[source]
         err: BoxError,
     },
-    #[error("Run '{name}' failed with retryable error: {err:?}'")]
-    RunResult {
-        name: String,
-        #[source]
-        err: BoxError,
-    },
     #[error("Handler failed with retryable error: {err:?}'")]
     HandlerResult {
         #[source]
@@ -182,8 +175,8 @@ impl Default for Builder {
         Self {
             svcs: Default::default(),
             discovery: crate::discovery::Endpoint {
-                max_protocol_version: 1,
-                min_protocol_version: 1,
+                max_protocol_version: 2,
+                min_protocol_version: 2,
                 protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
                 services: vec![],
             },
@@ -372,10 +365,12 @@ impl BidiStreamRunner {
     async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(), ErrorInner> {
         while !vm.is_ready_to_execute().map_err(ErrorInner::VM)? {
             match input_rx.recv().await {
-                Some(Ok(b)) => vm.notify_input(b.to_vec()),
-                Some(Err(e)) => {
-                    vm.notify_error("Error when reading the body".into(), e.to_string().into())
-                }
+                Some(Ok(b)) => vm.notify_input(b),
+                Some(Err(e)) => vm.notify_error(
+                    "Error when reading the body".into(),
+                    e.to_string().into(),
+                    None,
+                ),
                 None => vm.notify_input_closed(),
             }
         }

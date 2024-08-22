@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use restate_sdk::prelude::*;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[restate_sdk::object]
 #[name = "Failing"]
@@ -65,17 +66,23 @@ impl Failing for FailingImpl {
     ) -> HandlerResult<i32> {
         let cloned_eventual_side_effect_calls = Arc::clone(&self.eventual_success_side_effects);
         let success_attempt = context
-            .run("failing_side_effect", || async move {
-                let current_attempt =
-                    cloned_eventual_side_effect_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            .run_with_retry(
+                "failing_side_effect",
+                RunRetryPolicy::new()
+                    .with_initial_interval(Duration::from_millis(10))
+                    .with_factor(1.0),
+                || async move {
+                    let current_attempt =
+                        cloned_eventual_side_effect_calls.fetch_add(1, Ordering::SeqCst) + 1;
 
-                if current_attempt >= 4 {
-                    cloned_eventual_side_effect_calls.store(0, Ordering::SeqCst);
-                    Ok(current_attempt)
-                } else {
-                    Err(anyhow!("Failed at attempt ${current_attempt}").into())
-                }
-            })
+                    if current_attempt >= 4 {
+                        cloned_eventual_side_effect_calls.store(0, Ordering::SeqCst);
+                        Ok(current_attempt)
+                    } else {
+                        Err(anyhow!("Failed at attempt ${current_attempt}").into())
+                    }
+                },
+            )
             .await?;
 
         Ok(success_attempt)
