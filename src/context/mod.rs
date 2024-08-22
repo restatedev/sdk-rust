@@ -239,18 +239,17 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// }
     ///
     /// # async fn handler(ctx: Context<'_>) {
-    ///     let client = ctx.service_client::<MyServiceClient>();
+    /// let client = ctx.service_client::<MyServiceClient>();
     ///
-    ///     // Do request
-    ///     let result = client.handle().call().await;
+    /// // Do request
+    /// let result = client.handle().call().await;
     ///
-    ///     // Just send the request, don't wait the response
-    ///     client.handle().send();
+    /// // Just send the request, don't wait the response
+    /// client.handle().send();
     ///
-    ///     // Schedule the request to be executed later
-    ///     client.handle().send_with_delay(Duration::from_secs(60));
-    /// }
-    ///
+    /// // Schedule the request to be executed later
+    /// client.handle().send_with_delay(Duration::from_secs(60));
+    /// # }
     /// ```
     fn service_client<C>(&self) -> C
     where
@@ -271,18 +270,17 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// }
     ///
     /// # async fn handler(ctx: Context<'_>) {
-    ///     let client = ctx.object_client::<MyObjectClient>("my-key");
+    /// let client = ctx.object_client::<MyObjectClient>("my-key");
     ///
-    ///     // Do request
-    ///     let result = client.handle().call().await;
+    /// // Do request
+    /// let result = client.handle().call().await;
     ///
-    ///     // Just send the request, don't wait the response
-    ///     client.handle().send();
+    /// // Just send the request, don't wait the response
+    /// client.handle().send();
     ///
-    ///     // Schedule the request to be executed later
-    ///     client.handle().send_with_delay(Duration::from_secs(60));
-    /// }
-    ///
+    /// // Schedule the request to be executed later
+    /// client.handle().send_with_delay(Duration::from_secs(60));
+    /// # }
     /// ```
     fn object_client<C>(&self, key: impl Into<String>) -> C
     where
@@ -303,18 +301,17 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// }
     ///
     /// # async fn handler(ctx: Context<'_>) {
-    ///     let client = ctx.workflow_client::<MyWorkflowClient>("my-key");
+    /// let client = ctx.workflow_client::<MyWorkflowClient>("my-key");
     ///
-    ///     // Do request
-    ///     let result = client.handle().call().await;
+    /// // Do request
+    /// let result = client.handle().call().await;
     ///
-    ///     // Just send the request, don't wait the response
-    ///     client.handle().send();
+    /// // Just send the request, don't wait the response
+    /// client.handle().send();
     ///
-    ///     // Schedule the request to be executed later
-    ///     client.handle().send_with_delay(Duration::from_secs(60));
-    /// }
-    ///
+    /// // Schedule the request to be executed later
+    /// client.handle().send_with_delay(Duration::from_secs(60));
+    /// # }
     /// ```
     fn workflow_client<C>(&self, key: impl Into<String>) -> C
     where
