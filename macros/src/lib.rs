@@ -8,8 +8,8 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-//! Some parts of this codebase were taken from https://github.com/google/tarpc/blob/b826f332312d3702667880a464e247556ad7dbfe/plugins/src/lib.rs
-//! License MIT
+// Some parts of this codebase were taken from https://github.com/google/tarpc/blob/b826f332312d3702667880a464e247556ad7dbfe/plugins/src/lib.rs
+// License MIT
 
 extern crate proc_macro;
 
@@ -22,6 +22,7 @@ use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::parse_macro_input;
 
+/// Entry-point macro to define a Restate service.
 #[proc_macro_attribute]
 pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Service);
@@ -31,6 +32,7 @@ pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Entry-point macro to define a Restate object.
 #[proc_macro_attribute]
 pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Object);
@@ -40,6 +42,7 @@ pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Entry-point macro to define a Restate workflow.
 #[proc_macro_attribute]
 pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Workflow);
