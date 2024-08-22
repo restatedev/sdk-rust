@@ -1,9 +1,16 @@
+//! Serialization/Deserialization traits and concrete implementations for handlers and state.
+
 use bytes::Bytes;
 use std::convert::Infallible;
 
 const APPLICATION_JSON: &str = "application/json";
 const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
 
+/// Serialize trait for Restate services.
+///
+/// Default implementations are provided for primitives, and you can use the wrapper type [`Json`] to serialize using [`serde_json`].
+///
+/// This looks similar to [`serde::Serialize`], but allows to plug-in non-serde serialization formats (e.g. like Protobuf using `prost`).
 pub trait Serialize {
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -11,6 +18,11 @@ pub trait Serialize {
 }
 
 // TODO perhaps figure out how to add a lifetime here so we can deserialize to borrowed types
+/// Deserialize trait for Restate services.
+///
+/// Default implementations are provided for primitives, and you can use the wrapper type [`Json`] to serialize using [`serde_json`].
+///
+/// This looks similar to [`serde::Deserialize`], but allows to plug-in non-serde serialization formats (e.g. like Protobuf using `prost`).
 pub trait Deserialize
 where
     Self: Sized,
@@ -20,6 +32,9 @@ where
     fn deserialize(bytes: &mut Bytes) -> Result<Self, Self::Error>;
 }
 
+/// Trait encapsulating `content-type` information for the given serializer/deserializer.
+///
+/// This is used by service discovery to correctly specify the content type.
 pub trait WithContentType {
     fn content_type() -> &'static str;
 }
@@ -139,6 +154,7 @@ impl_serde_primitives!(f64);
 
 // --- Json responses
 
+/// Wrapper type to use [`serde_json`] with Restate's [`Serialize`]/[`Deserialize`] traits.
 pub struct Json<T>(pub T);
 
 impl<T> Json<T> {

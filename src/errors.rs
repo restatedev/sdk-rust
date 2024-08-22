@@ -1,3 +1,5 @@
+//! Error types to use within handlers.
+
 use restate_sdk_shared_core::Failure;
 use std::error::Error as StdError;
 use std::fmt;
@@ -28,6 +30,8 @@ impl StdError for HandlerErrorInner {
     }
 }
 
+/// This error can contain either a [`TerminalError`], or any other Rust's [`StdError`].
+/// For the latter, the error is considered "retryable", and the execution will be retried.
 #[derive(Debug)]
 pub struct HandlerError(pub(crate) HandlerErrorInner);
 
@@ -70,14 +74,19 @@ impl fmt::Display for TerminalErrorInner {
 
 impl StdError for TerminalErrorInner {}
 
+/// Error representing the result of an operation recorded in the journal.
+///
+/// When returned inside a [`crate::context::ContextSideEffects::run`] closure, or in a handler, it completes the operation with a failure value.
 #[derive(Debug, Clone)]
 pub struct TerminalError(pub(crate) TerminalErrorInner);
 
 impl TerminalError {
+    /// Create a new [`TerminalError`].
     pub fn new(message: impl Into<String>) -> Self {
         Self::new_with_code(500, message)
     }
 
+    /// Create a new [`TerminalError`] with a status code.
     pub fn new_with_code(code: u16, message: impl Into<String>) -> Self {
         Self(TerminalErrorInner {
             code,
@@ -134,4 +143,7 @@ impl From<TerminalError> for Failure {
     }
 }
 
+/// Result type for a Restate handler.
+///
+/// All Restate handlers *MUST* use this type as return type for their handlers.
 pub type HandlerResult<T> = Result<T, HandlerError>;

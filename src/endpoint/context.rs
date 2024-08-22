@@ -47,6 +47,9 @@ impl ContextInternalInner {
     }
 }
 
+/// Internal context interface.
+///
+/// For the high level interfaces, look at [`crate::context`].
 #[derive(Clone)]
 pub struct ContextInternal {
     svc_name: String,

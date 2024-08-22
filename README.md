@@ -1,4 +1,4 @@
-[![Documentation](https://img.shields.io/badge/doc-reference-blue)](https://docs.restate.dev)
+[![Documentation](https://img.shields.io/docsrs/restate-sdk)](https://docs.rs/restate-sdk)
 [![crates.io](https://img.shields.io/crates/v/restate_sdk.svg)](https://crates.io/crates/restate-sdk/)
 [![Examples](https://img.shields.io/badge/view-examples-blue)](https://github.com/restatedev/examples)
 [![Discord](https://img.shields.io/discord/1128210118216007792?logo=discord)](https://discord.gg/skW3AZ6uGd)

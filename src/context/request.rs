@@ -6,6 +6,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+/// Target of a request to a Restate service.
 #[derive(Debug, Clone)]
 pub enum RequestTarget {
     Service {
@@ -67,6 +68,7 @@ impl fmt::Display for RequestTarget {
     }
 }
 
+/// This struct encapsulates the parameters for a request to a service.
 pub struct Request<'a, Req, Res = ()> {
     ctx: &'a ContextInternal,
     request_target: RequestTarget,
@@ -84,6 +86,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         }
     }
 
+    /// Call a service. This returns a future encapsulating the response.
     pub fn call(self) -> impl Future<Output = Result<Res, TerminalError>> + Send
     where
         Req: Serialize + 'static,
@@ -92,6 +95,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self.ctx.call(self.request_target, self.req)
     }
 
+    /// Send the request to the service, without waiting for the response.
     pub fn send(self)
     where
         Req: Serialize + 'static,
@@ -99,6 +103,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self.ctx.send(self.request_target, self.req, None)
     }
 
+    /// Schedule the request to the service, without waiting for the response.
     pub fn send_with_delay(self, duration: Duration)
     where
         Req: Serialize + 'static,

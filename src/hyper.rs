@@ -1,3 +1,5 @@
+//! Hyper integration.
+
 use crate::endpoint;
 use crate::endpoint::{Endpoint, InputReceiver, OutputSender};
 use bytes::Bytes;
@@ -17,6 +19,7 @@ use std::task::{ready, Context, Poll};
 use tokio::sync::mpsc;
 use tracing::warn;
 
+/// Wraps [`Endpoint`] to implement hyper [`Service`].
 #[derive(Clone)]
 pub struct HyperEndpoint(Endpoint);
 

@@ -63,11 +63,13 @@ impl InputReceiver {
 }
 
 // TODO can we have the backtrace here?
+/// Endpoint error. This encapsulates any error that happens within the SDK while processing a request.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct Error(#[from] ErrorInner);
 
 impl Error {
+    /// New error for unknown handler
     pub fn unknown_handler(service_name: &str, handler_name: &str) -> Self {
         Self(ErrorInner::UnknownServiceHandler(
             service_name.to_owned(),
@@ -77,6 +79,7 @@ impl Error {
 }
 
 impl Error {
+    /// Returns the HTTP status code for this error.
     pub fn status_code(&self) -> u16 {
         match &self.0 {
             ErrorInner::VM(e) => e.code,
@@ -167,6 +170,7 @@ impl Service for BoxedService {
     }
 }
 
+/// Builder for [`Endpoint`]
 pub struct Builder {
     svcs: HashMap<String, BoxedService>,
     discovery: crate::discovery::Endpoint,
@@ -189,10 +193,14 @@ impl Default for Builder {
 }
 
 impl Builder {
+    /// Create a new builder for [`Endpoint`].
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Add a service.
+    ///
+    /// When using the service/object/workflow macros, you need to pass the result of the `serve` method.
     pub fn with_service<
         S: Service<Future = BoxFuture<'static, Result<(), Error>>>
             + Discoverable
@@ -211,11 +219,13 @@ impl Builder {
         self
     }
 
+    /// Add identity key, e.g. `publickeyv1_ChjENKeMvCtRnqG2mrBK1HmPKufgFUc98K8B3ononQvp`.
     pub fn with_identity_key(mut self, key: &str) -> Result<Self, KeyError> {
         self.identity_verifier = self.identity_verifier.with_key(key)?;
         Ok(self)
     }
 
+    /// Build the [`Endpoint`].
     pub fn build(self) -> Endpoint {
         Endpoint(Arc::new(EndpointInner {
             svcs: self.svcs,
@@ -225,10 +235,15 @@ impl Builder {
     }
 }
 
+/// This struct encapsulates all the business logic to handle incoming requests to the SDK,
+/// including service discovery, invocations and identity verification.
+///
+/// It internally wraps the provided services. This structure is cheaply cloneable.
 #[derive(Clone)]
 pub struct Endpoint(Arc<EndpointInner>);
 
 impl Endpoint {
+    /// Create a new builder for [`Endpoint`].
     pub fn builder() -> Builder {
         Builder::new()
     }

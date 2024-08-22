@@ -2,7 +2,7 @@ use crate::errors::HandlerResult;
 use crate::serde::{Deserialize, Serialize};
 use std::future::Future;
 
-// Run
+/// Run closure trait
 pub trait RunClosure {
     type Output: Deserialize + Serialize + 'static;
     type Fut: Future<Output = HandlerResult<Self::Output>>;
