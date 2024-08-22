@@ -3,7 +3,7 @@
 //! [Restate](https://restate.dev/) is a system for easily building resilient applications using _distributed durable async/await_.
 //! This crate is the Restate SDK for writing Restate services using Rust.
 //!
-//! ```rust
+//! ```rust,no_run
 //! // The prelude contains all the imports you need to get started
 //! use restate_sdk::prelude::*;
 //!

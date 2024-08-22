@@ -66,8 +66,11 @@ print-target:
 test: (_target-installed target)
     cargo nextest run {{ _target-option }} --all-features
 
+doctest:
+    cargo test --doc
+
 # Runs lints and tests
-verify: lint test
+verify: lint test doctest
 
 udeps *flags:
     RUSTC_BOOTSTRAP=1 cargo udeps --all-features --all-targets {{ flags }}
