@@ -77,6 +77,10 @@ async fn main() {
         ))
     }
 
+    if let Ok(key) = env::var("E2E_REQUEST_SIGNING_ENV") {
+        builder = builder.with_identity_key(&key).unwrap()
+    }
+
     HttpServer::new(builder.build())
         .listen_and_serve(format!("0.0.0.0:{port}").parse().unwrap())
         .await;
