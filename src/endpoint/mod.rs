@@ -2,7 +2,8 @@ mod context;
 mod futures;
 mod handler_state;
 
-use crate::endpoint::futures::InterceptErrorFuture;
+use crate::endpoint::futures::handler_state_aware::HandlerStateAwareFuture;
+use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::service::{Discoverable, Service};
 use ::futures::future::BoxFuture;
@@ -98,7 +99,7 @@ impl Error {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ErrorInner {
+pub(crate) enum ErrorInner {
     #[error("Received a request for unknown service '{0}'")]
     UnknownService(String),
     #[error("Received a request for unknown service handler '{0}/{1}'")]
@@ -359,7 +360,7 @@ impl BidiStreamRunner {
         let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
 
         // Wrap it in handler state aware future
-        futures::HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
+        HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
     }
 
     async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(), ErrorInner> {
