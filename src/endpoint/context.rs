@@ -6,15 +6,19 @@ use crate::errors::{HandlerErrorInner, HandlerResult, TerminalError};
 use crate::serde::{Deserialize, Serialize};
 use futures::future::Either;
 use futures::{FutureExt, TryFutureExt};
+use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
     AsyncResultHandle, CoreVM, Failure, NonEmptyValue, RetryPolicy, RunEnterResult, RunExitResult,
     SuspendedOrVMError, TakeOutputResult, Target, VMError, Value, VM,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::{ready, Future};
+use std::marker::PhantomData;
+use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
+use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 pub struct ContextInternalInner {
@@ -514,125 +518,18 @@ impl ContextInternal {
             .sys_complete_promise(id.to_owned(), NonEmptyValue::Failure(failure.into()));
     }
 
-    pub fn run<'a, R, F, T>(
+    pub fn run<'a, Run, Fut, Res>(
         &'a self,
-        name: &'a str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + Send + Sync + 'a
+        run_closure: Run,
+    ) -> impl crate::context::RunFuture<Result<Res, TerminalError>> + Send + Sync + 'a
     where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
-    {
-        self.run_inner(name, RetryPolicy::Infinite, run_closure)
-    }
-
-    pub fn run_with_retry<'a, R, F, T>(
-        &'a self,
-        name: &'a str,
-        retry_policy: RunRetryPolicy,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + Send + Sync + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
-    {
-        self.run_inner(
-            name,
-            RetryPolicy::Exponential {
-                initial_interval: retry_policy.initial_interval,
-                factor: retry_policy.factor,
-                max_interval: retry_policy.max_interval,
-                max_attempts: retry_policy.max_attempts,
-                max_duration: retry_policy.max_duration,
-            },
-            run_closure,
-        )
-    }
-
-    fn run_inner<'a, R, F, T>(
-        &'a self,
-        name: &'a str,
-        retry_policy: RetryPolicy,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + Send + Sync + 'a
-    where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'a,
-        T: Serialize + Deserialize,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'a,
+        Run: RunClosure<Fut = Fut, Output = Res> + Send + Sync + 'a,
+        Fut: Future<Output = HandlerResult<Res>> + Send + Sync + 'a,
+        Res: Serialize + Deserialize + 'static,
     {
         let this = Arc::clone(&self.inner);
 
-        InterceptErrorFuture::new(self.clone(), async move {
-            let enter_result = { must_lock!(this).vm.sys_run_enter(name.to_owned()) };
-
-            // Enter the side effect
-            match enter_result.map_err(ErrorInner::VM)? {
-                RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
-                    let t = T::deserialize(&mut v).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "run",
-                        err: Box::new(e),
-                    })?;
-                    return Ok(Ok(t));
-                }
-                RunEnterResult::Executed(NonEmptyValue::Failure(f)) => return Ok(Err(f.into())),
-                RunEnterResult::NotExecuted(_) => {}
-            };
-
-            // We need to run the closure
-            let run_start = Instant::now();
-            let res = match run_closure.run().await {
-                Ok(t) => RunExitResult::Success(T::serialize(&t).map_err(|e| {
-                    ErrorInner::Serialization {
-                        syscall: "run",
-                        err: Box::new(e),
-                    }
-                })?),
-                Err(e) => match e.0 {
-                    HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
-                        attempt_duration: run_start.elapsed(),
-                        failure: Failure {
-                            code: 500,
-                            message: err.to_string(),
-                        },
-                    },
-                    HandlerErrorInner::Terminal(t) => {
-                        RunExitResult::TerminalFailure(TerminalError(t).into())
-                    }
-                },
-            };
-
-            let handle = {
-                must_lock!(this)
-                    .vm
-                    .sys_run_exit(res, retry_policy)
-                    .map_err(ErrorInner::VM)?
-            };
-
-            let value = self.create_poll_future(Ok(handle)).await?;
-
-            match value {
-                Value::Void => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "empty",
-                    syscall: "run",
-                }
-                .into()),
-                Value::Success(mut s) => {
-                    let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "run",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(t))
-                }
-                Value::Failure(f) => Ok(Err(f.into())),
-                Value::StateKeys(_) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "run",
-                }
-                .into()),
-            }
-        })
+        InterceptErrorFuture::new(self.clone(), RunFuture::new(this, run_closure))
     }
 
     pub fn handle_handler_result<T: Serialize>(&self, res: HandlerResult<T>) {
@@ -699,8 +596,208 @@ impl ContextInternal {
     }
 }
 
+pin_project! {
+    struct RunFuture<Run, Fut, Ret> {
+        name: String,
+        retry_policy: RetryPolicy,
+        phantom_data: PhantomData<fn() -> Ret>,
+        closure: Option<Run>,
+        inner_ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+        #[pin]
+        state: RunState<Fut>,
+    }
+}
+
+pin_project! {
+    #[project = RunStateProj]
+    enum RunState<Fut> {
+        New,
+        ClosureRunning {
+            start_time: Instant,
+            #[pin]
+            fut: Fut,
+        },
+        PollFutureRunning {
+            #[pin]
+            fut: VmPollFuture
+        }
+    }
+}
+
+impl<Run, Fut, Ret> RunFuture<Run, Fut, Ret> {
+    fn new(inner_ctx: Arc<Mutex<ContextInternalInner>>, closure: Run) -> Self {
+        Self {
+            name: "".to_string(),
+            retry_policy: RetryPolicy::Infinite,
+            phantom_data: PhantomData,
+            inner_ctx: Some(inner_ctx),
+            closure: Some(closure),
+            state: RunState::New,
+        }
+    }
+}
+
+impl<Run, Fut, Ret> crate::context::RunFuture<Result<Result<Ret, TerminalError>, Error>>
+    for RunFuture<Run, Fut, Ret>
+where
+    Run: RunClosure<Fut = Fut, Output = Ret> + Send + Sync,
+    Fut: Future<Output = HandlerResult<Ret>> + Send + Sync,
+    Ret: Serialize + Deserialize,
+{
+    fn with_retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
+        self.retry_policy = RetryPolicy::Exponential {
+            initial_interval: retry_policy.initial_interval,
+            factor: retry_policy.factor,
+            max_interval: retry_policy.max_interval,
+            max_attempts: retry_policy.max_attempts,
+            max_duration: retry_policy.max_duration,
+        };
+        self
+    }
+
+    fn named(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+}
+
+impl<Run, Fut, Res> Future for RunFuture<Run, Fut, Res>
+where
+    Run: RunClosure<Fut = Fut, Output = Res> + Send + Sync,
+    Res: Serialize + Deserialize,
+    Fut: Future<Output = HandlerResult<Res>> + Send + Sync,
+{
+    type Output = Result<Result<Res, TerminalError>, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        loop {
+            match this.state.as_mut().project() {
+                RunStateProj::New => {
+                    let enter_result = {
+                        must_lock!(this
+                            .inner_ctx
+                            .as_mut()
+                            .expect("Future should not be polled after returning Poll::Ready"))
+                        .vm
+                        .sys_run_enter(this.name.to_owned())
+                    };
+
+                    // Enter the side effect
+                    match enter_result.map_err(ErrorInner::VM)? {
+                        RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
+                            let t = Res::deserialize(&mut v).map_err(|e| {
+                                ErrorInner::Deserialization {
+                                    syscall: "run",
+                                    err: Box::new(e),
+                                }
+                            })?;
+                            return Poll::Ready(Ok(Ok(t)));
+                        }
+                        RunEnterResult::Executed(NonEmptyValue::Failure(f)) => {
+                            return Poll::Ready(Ok(Err(f.into())))
+                        }
+                        RunEnterResult::NotExecuted(_) => {}
+                    };
+
+                    // We need to run the closure
+                    this.state.set(RunState::ClosureRunning {
+                        start_time: Instant::now(),
+                        fut: this
+                            .closure
+                            .take()
+                            .expect("Future should not be polled after returning Poll::Ready")
+                            .run(),
+                    });
+                }
+                RunStateProj::ClosureRunning { start_time, fut } => {
+                    let res = match ready!(fut.poll(cx)) {
+                        Ok(t) => RunExitResult::Success(Res::serialize(&t).map_err(|e| {
+                            ErrorInner::Serialization {
+                                syscall: "run",
+                                err: Box::new(e),
+                            }
+                        })?),
+                        Err(e) => match e.0 {
+                            HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
+                                attempt_duration: start_time.elapsed(),
+                                failure: Failure {
+                                    code: 500,
+                                    message: err.to_string(),
+                                },
+                            },
+                            HandlerErrorInner::Terminal(t) => {
+                                RunExitResult::TerminalFailure(TerminalError(t).into())
+                            }
+                        },
+                    };
+
+                    let inner_ctx = this
+                        .inner_ctx
+                        .take()
+                        .expect("Future should not be polled after returning Poll::Ready");
+
+                    let handle = {
+                        must_lock!(inner_ctx)
+                            .vm
+                            .sys_run_exit(res, mem::take(this.retry_policy))
+                    };
+
+                    this.state.set(RunState::PollFutureRunning {
+                        fut: VmPollFuture::new(Cow::Owned(inner_ctx), handle),
+                    });
+                }
+                RunStateProj::PollFutureRunning { fut } => {
+                    let value = ready!(fut.poll(cx))?;
+
+                    return Poll::Ready(match value {
+                        Value::Void => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                            variant: "empty",
+                            syscall: "run",
+                        }
+                        .into()),
+                        Value::Success(mut s) => {
+                            let t = Res::deserialize(&mut s).map_err(|e| {
+                                ErrorInner::Deserialization {
+                                    syscall: "run",
+                                    err: Box::new(e),
+                                }
+                            })?;
+                            Ok(Ok(t))
+                        }
+                        Value::Failure(f) => Ok(Err(f.into())),
+                        Value::StateKeys(_) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                            variant: "state_keys",
+                            syscall: "run",
+                        }
+                        .into()),
+                    });
+                }
+            }
+        }
+    }
+}
+
 struct VmPollFuture {
     state: Option<PollState>,
+}
+
+impl VmPollFuture {
+    fn new(
+        inner: Cow<'_, Arc<Mutex<ContextInternalInner>>>,
+        handle: Result<AsyncResultHandle, VMError>,
+    ) -> Self {
+        VmPollFuture {
+            state: Some(match handle {
+                Ok(handle) => PollState::Init {
+                    ctx: inner.into_owned(),
+                    handle,
+                },
+                Err(err) => PollState::Failed(ErrorInner::VM(err)),
+            }),
+        }
+    }
 }
 
 enum PollState {

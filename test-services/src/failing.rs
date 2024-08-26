@@ -72,9 +72,7 @@ impl Failing for FailingImpl {
         error_message: String,
     ) -> HandlerResult<()> {
         context
-            .run("failing_side_effect", || async move {
-                Err::<(), _>(TerminalError::new(error_message).into())
-            })
+            .run(|| async move { Err::<(), _>(TerminalError::new(error_message).into()) })
             .await?;
 
         unreachable!("This should be unreachable")
@@ -87,22 +85,22 @@ impl Failing for FailingImpl {
     ) -> HandlerResult<i32> {
         let cloned_counter = Arc::clone(&self.eventual_success_side_effects);
         let success_attempt = context
-            .run_with_retry(
-                "failing_side_effect",
+            .run(|| async move {
+                let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+                if current_attempt >= minimum_attempts {
+                    cloned_counter.store(0, Ordering::SeqCst);
+                    Ok(current_attempt)
+                } else {
+                    Err(anyhow!("Failed at attempt {current_attempt}").into())
+                }
+            })
+            .with_retry_policy(
                 RunRetryPolicy::new()
                     .with_initial_interval(Duration::from_millis(10))
                     .with_factor(1.0),
-                || async move {
-                    let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
-
-                    if current_attempt >= minimum_attempts {
-                        cloned_counter.store(0, Ordering::SeqCst);
-                        Ok(current_attempt)
-                    } else {
-                        Err(anyhow!("Failed at attempt {current_attempt}").into())
-                    }
-                },
             )
+            .named("failing_side_effect")
             .await?;
 
         Ok(success_attempt)
@@ -115,16 +113,15 @@ impl Failing for FailingImpl {
     ) -> HandlerResult<i32> {
         let cloned_counter = Arc::clone(&self.eventual_failure_side_effects);
         if context
-            .run_with_retry::<_, _, ()>(
-                "failing_side_effect",
+            .run(|| async move {
+                let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
+                Err::<(), _>(anyhow!("Failed at attempt {current_attempt}").into())
+            })
+            .with_retry_policy(
                 RunRetryPolicy::new()
                     .with_initial_interval(Duration::from_millis(10))
                     .with_factor(1.0)
                     .with_max_attempts(retry_policy_max_retry_count as u32),
-                || async move {
-                    let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    Err(anyhow!("Failed at attempt {current_attempt}").into())
-                },
             )
             .await
             .is_err()

@@ -25,6 +25,11 @@ where
     }
 }
 
+pub trait RunFuture<O>: Future<Output = O> {
+    fn with_retry_policy(self, retry_policy: RunRetryPolicy) -> Self;
+    fn named(self, name: impl Into<String>) -> Self;
+}
+
 /// This struct represents the policy to execute retries for run closures.
 #[derive(Debug, Clone)]
 pub struct RunRetryPolicy {

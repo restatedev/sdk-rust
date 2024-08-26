@@ -1,3 +1,4 @@
+use crate::context::{RunFuture, RunRetryPolicy};
 use crate::endpoint::{ContextInternal, Error};
 use pin_project_lite::pin_project;
 use std::future::Future;
@@ -8,17 +9,13 @@ use tokio::sync::oneshot;
 use tracing::warn;
 
 /// Future that traps the execution at this point, but keeps waking up the waker
-pub(super) struct TrapFuture<T>(PhantomData<T>);
+pub(super) struct TrapFuture<T>(PhantomData<fn() -> T>);
 
 impl<T> Default for TrapFuture<T> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
-
-/// This is always safe, because we simply use phantom data inside TrapFuture.
-unsafe impl<T> Send for TrapFuture<T> {}
-unsafe impl<T> Sync for TrapFuture<T> {}
 
 impl<T> Future for TrapFuture<T> {
     type Output = T;
@@ -65,6 +62,21 @@ where
                 Poll::Pending
             }
         }
+    }
+}
+
+impl<F, R> RunFuture<R> for InterceptErrorFuture<F>
+where
+    F: RunFuture<Result<R, Error>>,
+{
+    fn with_retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
+        self.fut = self.fut.with_retry_policy(retry_policy);
+        self
+    }
+
+    fn named(mut self, name: impl Into<String>) -> Self {
+        self.fut = self.fut.named(name);
+        self
     }
 }
 
