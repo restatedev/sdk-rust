@@ -372,7 +372,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// Trait exposing Restate functionalities to deal with non-deterministic operations.
 pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// Run a non-deterministic operation and record its result.
-    ///
+    #[must_use]
     fn run<R, F, T>(&self, run_closure: R) -> impl RunFuture<Result<T, TerminalError>> + 'ctx
     where
         R: RunClosure<Fut = F, Output = T> + Send + Sync + 'ctx,

@@ -25,8 +25,17 @@ where
     }
 }
 
+/// Future created using [`super::ContextSideEffects::run`].
 pub trait RunFuture<O>: Future<Output = O> {
+    /// Provide a custom retry policy for this `run` operation.
+    ///
+    /// If unspecified, the `run` will be retried using the [Restate invoker retry policy](https://docs.restate.dev/operate/configuration/server),
+    /// which by default retries indefinitely.
     fn with_retry_policy(self, retry_policy: RunRetryPolicy) -> Self;
+
+    /// Define a name for this `run` operation.
+    ///
+    /// This is used mainly for observability.
     fn named(self, name: impl Into<String>) -> Self;
 }
 
@@ -82,16 +91,24 @@ impl RunRetryPolicy {
         self
     }
 
-    /// Gives up retrying when either this number of attempts is reached,
+    /// Gives up retrying when either at least the given number of attempts is reached,
     /// or `max_duration` (if set) is reached first.
+    ///
+    /// **Note:** The number of actual retries may be higher than the provided value.
+    /// This is due to the nature of the run operation, which executes the closure on the service and sends the result afterward to Restate.
+    ///
     /// Infinite retries if this field and `max_duration` are unset.
     pub fn with_max_attempts(mut self, max_attempts: u32) -> Self {
         self.max_attempts = Some(max_attempts);
         self
     }
 
-    /// Gives up retrying when either the retry loop lasted for this given max duration,
+    /// Gives up retrying when either the retry loop lasted at least for this given max duration,
     /// or `max_attempts` (if set) is reached first.
+    ///
+    /// **Note:** The real retry loop duration may be higher than the given duration.
+    /// This is due to the nature of the run operation, which executes the closure on the service and sends the result afterward to Restate.
+    ///
     /// Infinite retries if this field and `max_attempts` are unset.
     pub fn with_max_duration(mut self, max_duration: Duration) -> Self {
         self.max_duration = Some(max_duration);
