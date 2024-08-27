@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{FutureExt, TryStreamExt};
 use http::header::CONTENT_TYPE;
-use http::{response, Request, Response};
+use http::{response, HeaderName, HeaderValue, Request, Response};
 use http_body_util::{BodyExt, Either, Full};
 use hyper::body::{Body, Frame, Incoming};
 use hyper::service::Service;
@@ -17,7 +17,12 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{debug, warn};
+
+#[allow(clippy::declare_interior_mutable_const)]
+const X_RESTATE_SERVER: HeaderName = HeaderName::from_static("x-restate-server");
+const X_RESTATE_SERVER_VALUE: HeaderValue =
+    HeaderValue::from_static(concat!("restate-sdk-rust/", env!("CARGO_PKG_VERSION")));
 
 /// Wraps [`Endpoint`] to implement hyper [`Service`].
 #[derive(Clone)]
@@ -39,10 +44,11 @@ impl Service<Request<Incoming>> for HyperEndpoint {
         let endpoint_response = match self.0.resolve(parts.uri.path(), parts.headers) {
             Ok(res) => res,
             Err(err) => {
-                // TODO log this
+                debug!("Error when trying to handle incoming request: {err}");
                 return ready(Ok(Response::builder()
                     .status(err.status_code())
                     .header(CONTENT_TYPE, "text/plain")
+                    .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE)
                     .body(Either::Left(Full::new(Bytes::from(err.to_string()))))
                     .expect("Headers should be valid")));
             }
@@ -80,7 +86,9 @@ impl Service<Request<Incoming>> for HyperEndpoint {
 }
 
 fn response_builder_from_response_head(response_head: ResponseHead) -> response::Builder {
-    let mut response_builder = Response::builder().status(response_head.status_code);
+    let mut response_builder = Response::builder()
+        .status(response_head.status_code)
+        .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE);
 
     for header in response_head.headers {
         response_builder = response_builder.header(header.key.deref(), header.value.deref());
