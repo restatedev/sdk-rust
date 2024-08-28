@@ -11,7 +11,7 @@ struct RunExampleImpl(reqwest::Client);
 impl RunExample for RunExampleImpl {
     async fn do_run(&self, context: Context<'_>) -> HandlerResult<Json<HashMap<String, String>>> {
         let res = context
-            .run("get_ip", || async move {
+            .run(|| async move {
                 let req = self.0.get("https://httpbin.org/ip").build()?;
 
                 let res = self
@@ -23,6 +23,7 @@ impl RunExample for RunExampleImpl {
 
                 Ok(Json::from(res))
             })
+            .named("get_ip")
             .await?
             .into_inner();
 

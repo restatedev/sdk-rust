@@ -16,7 +16,7 @@ struct MyError;
 impl FailureExample for FailureExampleImpl {
     async fn do_run(&self, context: Context<'_>) -> HandlerResult<()> {
         context
-            .run("get_ip", || async move {
+            .run(|| async move {
                 if rand::thread_rng().next_u32() % 4 == 0 {
                     return Err(TerminalError::new("Failed!!!").into());
                 }

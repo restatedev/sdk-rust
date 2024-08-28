@@ -141,7 +141,7 @@ impl TestUtilsService for TestUtilsServiceImpl {
         for _ in 0..increments {
             let counter_clone = Arc::clone(&counter);
             context
-                .run("count", || async {
+                .run(|| async {
                     counter_clone.fetch_add(1, Ordering::SeqCst);
                     Ok(())
                 })

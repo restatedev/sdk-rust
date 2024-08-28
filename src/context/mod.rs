@@ -10,7 +10,8 @@ mod request;
 mod run;
 
 pub use request::{Request, RequestTarget};
-pub use run::RunClosure;
+pub use run::{RunClosure, RunFuture, RunRetryPolicy};
+
 pub type HeaderMap = http::HeaderMap<String>;
 
 /// Service handler context.
@@ -371,18 +372,14 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// Trait exposing Restate functionalities to deal with non-deterministic operations.
 pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// Run a non-deterministic operation and record its result.
-    ///
-    fn run<R, F, T>(
-        &self,
-        name: &'ctx str,
-        run_closure: R,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'ctx
+    #[must_use]
+    fn run<R, F, T>(&self, run_closure: R) -> impl RunFuture<Result<T, TerminalError>> + 'ctx
     where
         R: RunClosure<Fut = F, Output = T> + Send + Sync + 'ctx,
-        T: Serialize + Deserialize,
         F: Future<Output = HandlerResult<T>> + Send + Sync + 'ctx,
+        T: Serialize + Deserialize + 'static,
     {
-        self.inner_context().run(name, run_closure)
+        self.inner_context().run(run_closure)
     }
 
     /// Return a random seed inherently predictable, based on the invocation id, which is not secret.

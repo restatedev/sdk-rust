@@ -2,7 +2,8 @@ mod context;
 mod futures;
 mod handler_state;
 
-use crate::endpoint::futures::InterceptErrorFuture;
+use crate::endpoint::futures::handler_state_aware::HandlerStateAwareFuture;
+use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::service::{Discoverable, Service};
 use ::futures::future::BoxFuture;
@@ -82,14 +83,13 @@ impl Error {
     /// Returns the HTTP status code for this error.
     pub fn status_code(&self) -> u16 {
         match &self.0 {
-            ErrorInner::VM(e) => e.code,
+            ErrorInner::VM(e) => e.code(),
             ErrorInner::UnknownService(_) | ErrorInner::UnknownServiceHandler(_, _) => 404,
             ErrorInner::Suspended
             | ErrorInner::UnexpectedOutputClosed
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
-            | ErrorInner::RunResult { .. }
             | ErrorInner::HandlerResult { .. } => 500,
             ErrorInner::BadDiscovery(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
@@ -99,7 +99,7 @@ impl Error {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ErrorInner {
+pub(crate) enum ErrorInner {
     #[error("Received a request for unknown service '{0}'")]
     UnknownService(String),
     #[error("Received a request for unknown service handler '{0}/{1}'")]
@@ -132,12 +132,6 @@ enum ErrorInner {
     #[error("Failed to serialize with '{syscall}': {err:?}'")]
     Serialization {
         syscall: &'static str,
-        #[source]
-        err: BoxError,
-    },
-    #[error("Run '{name}' failed with retryable error: {err:?}'")]
-    RunResult {
-        name: String,
         #[source]
         err: BoxError,
     },
@@ -182,8 +176,8 @@ impl Default for Builder {
         Self {
             svcs: Default::default(),
             discovery: crate::discovery::Endpoint {
-                max_protocol_version: 1,
-                min_protocol_version: 1,
+                max_protocol_version: 2,
+                min_protocol_version: 2,
                 protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
                 services: vec![],
             },
@@ -366,16 +360,18 @@ impl BidiStreamRunner {
         let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
 
         // Wrap it in handler state aware future
-        futures::HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
+        HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
     }
 
     async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(), ErrorInner> {
         while !vm.is_ready_to_execute().map_err(ErrorInner::VM)? {
             match input_rx.recv().await {
-                Some(Ok(b)) => vm.notify_input(b.to_vec()),
-                Some(Err(e)) => {
-                    vm.notify_error("Error when reading the body".into(), e.to_string().into())
-                }
+                Some(Ok(b)) => vm.notify_input(b),
+                Some(Err(e)) => vm.notify_error(
+                    "Error when reading the body".into(),
+                    e.to_string().into(),
+                    None,
+                ),
                 None => vm.notify_input_closed(),
             }
         }
