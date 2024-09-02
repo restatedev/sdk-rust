@@ -95,12 +95,12 @@ impl Failing for FailingImpl {
                     Err(anyhow!("Failed at attempt {current_attempt}"))?
                 }
             })
-            .with_retry_policy(
+            .retry_policy(
                 RunRetryPolicy::new()
-                    .with_initial_interval(Duration::from_millis(10))
-                    .with_factor(1.0),
+                    .initial_delay(Duration::from_millis(10))
+                    .exponentiation_factor(1.0),
             )
-            .named("failing_side_effect")
+            .name("failing_side_effect")
             .await?;
 
         Ok(success_attempt)
@@ -117,11 +117,11 @@ impl Failing for FailingImpl {
                 let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
                 Err::<(), _>(anyhow!("Failed at attempt {current_attempt}").into())
             })
-            .with_retry_policy(
+            .retry_policy(
                 RunRetryPolicy::new()
-                    .with_initial_interval(Duration::from_millis(10))
-                    .with_factor(1.0)
-                    .with_max_attempts(retry_policy_max_retry_count as u32),
+                    .initial_delay(Duration::from_millis(10))
+                    .exponentiation_factor(1.0)
+                    .max_attempts(retry_policy_max_retry_count as u32),
             )
             .await
             .is_err()
