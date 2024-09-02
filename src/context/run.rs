@@ -25,7 +25,7 @@ where
     }
 }
 
-/// Future created using [`super::ContextSideEffects::run`].
+/// Future created using [`ContextSideEffects::run`](super::ContextSideEffects::run).
 pub trait RunFuture<O>: Future<Output = O> {
     /// Provide a custom retry policy for this `run` operation.
     ///
