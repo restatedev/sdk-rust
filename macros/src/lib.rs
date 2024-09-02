@@ -22,7 +22,6 @@ use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::parse_macro_input;
 
-/// Entry-point macro to define a Restate service.
 #[proc_macro_attribute]
 pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Service);
@@ -32,7 +31,6 @@ pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Entry-point macro to define a Restate object.
 #[proc_macro_attribute]
 pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Object);
@@ -42,7 +40,6 @@ pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Entry-point macro to define a Restate workflow.
 #[proc_macro_attribute]
 pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
     let svc = parse_macro_input!(input as Workflow);

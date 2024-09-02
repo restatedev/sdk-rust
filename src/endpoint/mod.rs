@@ -194,7 +194,8 @@ impl Builder {
 
     /// Add a [`Service`] to this endpoint.
     ///
-    /// When using the service/object/workflow macros, you need to pass the result of the `serve` method.
+    /// When using the [`service`](macro@crate::service), [`object`](macro@crate::object) or [`workflow`](macro@crate::workflow) macros,
+    /// you need to pass the result of the `serve` method.
     pub fn bind<
         S: Service<Future = BoxFuture<'static, Result<(), Error>>>
             + Discoverable
