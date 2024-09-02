@@ -4,7 +4,7 @@ use restate_sdk::prelude::*;
 #[restate_sdk::service]
 trait FailureExample {
     #[name = "doRun"]
-    async fn do_run() -> HandlerResult<()>;
+    async fn do_run() -> Result<(), TerminalError>;
 }
 
 struct FailureExampleImpl;
@@ -14,14 +14,14 @@ struct FailureExampleImpl;
 struct MyError;
 
 impl FailureExample for FailureExampleImpl {
-    async fn do_run(&self, context: Context<'_>) -> HandlerResult<()> {
+    async fn do_run(&self, context: Context<'_>) -> Result<(), TerminalError> {
         context
             .run(|| async move {
                 if rand::thread_rng().next_u32() % 4 == 0 {
-                    return Err(TerminalError::new("Failed!!!").into());
+                    Err(TerminalError::new("Failed!!!"))?
                 }
 
-                Err(MyError.into())
+                Err(MyError)?
             })
             .await?;
 

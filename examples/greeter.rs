@@ -1,14 +1,15 @@
 use restate_sdk::prelude::*;
+use std::convert::Infallible;
 
 #[restate_sdk::service]
 trait Greeter {
-    async fn greet(name: String) -> HandlerResult<String>;
+    async fn greet(name: String) -> Result<String, Infallible>;
 }
 
 struct GreeterImpl;
 
 impl Greeter for GreeterImpl {
-    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
+    async fn greet(&self, _: Context<'_>, name: String) -> Result<String, Infallible> {
         Ok(format!("Greetings {name}"))
     }
 }

@@ -527,14 +527,14 @@ impl ContextInternal {
             .sys_complete_promise(id.to_owned(), NonEmptyValue::Failure(failure.into()));
     }
 
-    pub fn run<'a, Run, Fut, Res>(
+    pub fn run<'a, Run, Fut, Out>(
         &'a self,
         run_closure: Run,
-    ) -> impl crate::context::RunFuture<Result<Res, TerminalError>> + Send + Sync + 'a
+    ) -> impl crate::context::RunFuture<Result<Out, TerminalError>> + Send + Sync + 'a
     where
-        Run: RunClosure<Fut = Fut, Output = Res> + Send + Sync + 'a,
-        Fut: Future<Output = HandlerResult<Res>> + Send + Sync + 'a,
-        Res: Serialize + Deserialize + 'static,
+        Run: RunClosure<Fut = Fut, Output = Out> + Send + Sync + 'a,
+        Fut: Future<Output = HandlerResult<Out>> + Send + Sync + 'a,
+        Out: Serialize + Deserialize + 'static,
     {
         let this = Arc::clone(&self.inner);
 
@@ -631,12 +631,12 @@ impl<Run, Fut, Ret> RunFuture<Run, Fut, Ret> {
     }
 }
 
-impl<Run, Fut, Ret> crate::context::RunFuture<Result<Result<Ret, TerminalError>, Error>>
-    for RunFuture<Run, Fut, Ret>
+impl<Run, Fut, Out> crate::context::RunFuture<Result<Result<Out, TerminalError>, Error>>
+    for RunFuture<Run, Fut, Out>
 where
-    Run: RunClosure<Fut = Fut, Output = Ret> + Send + Sync,
-    Fut: Future<Output = HandlerResult<Ret>> + Send + Sync,
-    Ret: Serialize + Deserialize,
+    Run: RunClosure<Fut = Fut, Output = Out> + Send + Sync,
+    Fut: Future<Output = HandlerResult<Out>> + Send + Sync,
+    Out: Serialize + Deserialize,
 {
     fn with_retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
         self.retry_policy = RetryPolicy::Exponential {
@@ -655,13 +655,13 @@ where
     }
 }
 
-impl<Run, Fut, Res> Future for RunFuture<Run, Fut, Res>
+impl<Run, Fut, Out> Future for RunFuture<Run, Fut, Out>
 where
-    Run: RunClosure<Fut = Fut, Output = Res> + Send + Sync,
-    Res: Serialize + Deserialize,
-    Fut: Future<Output = HandlerResult<Res>> + Send + Sync,
+    Run: RunClosure<Fut = Fut, Output = Out> + Send + Sync,
+    Out: Serialize + Deserialize,
+    Fut: Future<Output = HandlerResult<Out>> + Send + Sync,
 {
-    type Output = Result<Result<Res, TerminalError>, Error>;
+    type Output = Result<Result<Out, TerminalError>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
@@ -681,7 +681,7 @@ where
                     // Enter the side effect
                     match enter_result.map_err(ErrorInner::VM)? {
                         RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
-                            let t = Res::deserialize(&mut v).map_err(|e| {
+                            let t = Out::deserialize(&mut v).map_err(|e| {
                                 ErrorInner::Deserialization {
                                     syscall: "run",
                                     err: Box::new(e),
@@ -707,7 +707,7 @@ where
                 }
                 RunStateProj::ClosureRunning { start_time, fut } => {
                     let res = match ready!(fut.poll(cx)) {
-                        Ok(t) => RunExitResult::Success(Res::serialize(&t).map_err(|e| {
+                        Ok(t) => RunExitResult::Success(Out::serialize(&t).map_err(|e| {
                             ErrorInner::Serialization {
                                 syscall: "run",
                                 err: Box::new(e),
@@ -752,7 +752,7 @@ where
                         }
                         .into()),
                         Value::Success(mut s) => {
-                            let t = Res::deserialize(&mut s).map_err(|e| {
+                            let t = Out::deserialize(&mut s).map_err(|e| {
                                 ErrorInner::Deserialization {
                                     syscall: "run",
                                     err: Box::new(e),

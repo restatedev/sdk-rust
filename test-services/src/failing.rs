@@ -72,7 +72,7 @@ impl Failing for FailingImpl {
         error_message: String,
     ) -> HandlerResult<()> {
         context
-            .run(|| async move { Err::<(), _>(TerminalError::new(error_message).into()) })
+            .run(|| async move { Err(TerminalError::new(error_message))? })
             .await?;
 
         unreachable!("This should be unreachable")
@@ -92,7 +92,7 @@ impl Failing for FailingImpl {
                     cloned_counter.store(0, Ordering::SeqCst);
                     Ok(current_attempt)
                 } else {
-                    Err(anyhow!("Failed at attempt {current_attempt}").into())
+                    Err(anyhow!("Failed at attempt {current_attempt}"))?
                 }
             })
             .with_retry_policy(
