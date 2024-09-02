@@ -48,13 +48,13 @@ impl<F, R> RunFuture<R> for InterceptErrorFuture<F>
 where
     F: RunFuture<Result<R, Error>>,
 {
-    fn with_retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
-        self.fut = self.fut.with_retry_policy(retry_policy);
+    fn retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
+        self.fut = self.fut.retry_policy(retry_policy);
         self
     }
 
-    fn named(mut self, name: impl Into<String>) -> Self {
-        self.fut = self.fut.named(name);
+    fn name(mut self, name: impl Into<String>) -> Self {
+        self.fut = self.fut.name(name);
         self
     }
 }

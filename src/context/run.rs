@@ -31,20 +31,20 @@ pub trait RunFuture<O>: Future<Output = O> {
     ///
     /// If unspecified, the `run` will be retried using the [Restate invoker retry policy](https://docs.restate.dev/operate/configuration/server),
     /// which by default retries indefinitely.
-    fn with_retry_policy(self, retry_policy: RunRetryPolicy) -> Self;
+    fn retry_policy(self, retry_policy: RunRetryPolicy) -> Self;
 
     /// Define a name for this `run` operation.
     ///
     /// This is used mainly for observability.
-    fn named(self, name: impl Into<String>) -> Self;
+    fn name(self, name: impl Into<String>) -> Self;
 }
 
 /// This struct represents the policy to execute retries for run closures.
 #[derive(Debug, Clone)]
 pub struct RunRetryPolicy {
-    pub(crate) initial_interval: Duration,
+    pub(crate) initial_delay: Duration,
     pub(crate) factor: f32,
-    pub(crate) max_interval: Option<Duration>,
+    pub(crate) max_delay: Option<Duration>,
     pub(crate) max_attempts: Option<u32>,
     pub(crate) max_duration: Option<Duration>,
 }
@@ -52,9 +52,9 @@ pub struct RunRetryPolicy {
 impl Default for RunRetryPolicy {
     fn default() -> Self {
         Self {
-            initial_interval: Duration::from_millis(100),
+            initial_delay: Duration::from_millis(100),
             factor: 2.0,
-            max_interval: Some(Duration::from_secs(2)),
+            max_delay: Some(Duration::from_secs(2)),
             max_attempts: None,
             max_duration: Some(Duration::from_secs(50)),
         }
@@ -65,29 +65,29 @@ impl RunRetryPolicy {
     /// Create a new retry policy.
     pub fn new() -> Self {
         Self {
-            initial_interval: Duration::from_millis(100),
+            initial_delay: Duration::from_millis(100),
             factor: 1.0,
-            max_interval: None,
+            max_delay: None,
             max_attempts: None,
             max_duration: None,
         }
     }
 
-    /// Initial interval for the first retry attempt.
-    pub fn with_initial_interval(mut self, initial_interval: Duration) -> Self {
-        self.initial_interval = initial_interval;
+    /// Initial retry delay for the first retry attempt.
+    pub fn initial_delay(mut self, initial_interval: Duration) -> Self {
+        self.initial_delay = initial_interval;
         self
     }
 
-    /// Maximum interval between retries.
-    pub fn with_factor(mut self, factor: f32) -> Self {
+    /// Exponentiation factor to use when computing the next retry delay.
+    pub fn exponentiation_factor(mut self, factor: f32) -> Self {
         self.factor = factor;
         self
     }
 
-    /// Maximum interval between retries.
-    pub fn with_max_interval(mut self, max_interval: Duration) -> Self {
-        self.max_interval = Some(max_interval);
+    /// Maximum delay between retries.
+    pub fn max_delay(mut self, max_interval: Duration) -> Self {
+        self.max_delay = Some(max_interval);
         self
     }
 
@@ -98,7 +98,7 @@ impl RunRetryPolicy {
     /// This is due to the nature of the run operation, which executes the closure on the service and sends the result afterward to Restate.
     ///
     /// Infinite retries if this field and `max_duration` are unset.
-    pub fn with_max_attempts(mut self, max_attempts: u32) -> Self {
+    pub fn max_attempts(mut self, max_attempts: u32) -> Self {
         self.max_attempts = Some(max_attempts);
         self
     }
@@ -110,7 +110,7 @@ impl RunRetryPolicy {
     /// This is due to the nature of the run operation, which executes the closure on the service and sends the result afterward to Restate.
     ///
     /// Infinite retries if this field and `max_attempts` are unset.
-    pub fn with_max_duration(mut self, max_duration: Duration) -> Self {
+    pub fn max_duration(mut self, max_duration: Duration) -> Self {
         self.max_duration = Some(max_duration);
         self
     }

@@ -26,7 +26,7 @@ impl RunExample for RunExampleImpl {
 
                 Ok(Json::from(res))
             })
-            .named("get_ip")
+            .name("get_ip")
             .await?
             .into_inner();
 
@@ -39,7 +39,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
     HttpServer::new(
         Endpoint::builder()
-            .with_service(RunExampleImpl(reqwest::Client::new()).serve())
+            .bind(RunExampleImpl(reqwest::Client::new()).serve())
             .build(),
     )
     .listen_and_serve("0.0.0.0:9080".parse().unwrap())

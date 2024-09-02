@@ -638,18 +638,18 @@ where
     Fut: Future<Output = HandlerResult<Out>> + Send + Sync,
     Out: Serialize + Deserialize,
 {
-    fn with_retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
+    fn retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
         self.retry_policy = RetryPolicy::Exponential {
-            initial_interval: retry_policy.initial_interval,
+            initial_interval: retry_policy.initial_delay,
             factor: retry_policy.factor,
-            max_interval: retry_policy.max_interval,
+            max_interval: retry_policy.max_delay,
             max_attempts: retry_policy.max_attempts,
             max_duration: retry_policy.max_duration,
         };
         self
     }
 
-    fn named(mut self, name: impl Into<String>) -> Self {
+    fn name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
         self
     }

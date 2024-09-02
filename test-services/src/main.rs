@@ -22,63 +22,63 @@ async fn main() {
     let mut builder = Endpoint::builder();
 
     if services == "*" || services.contains("Counter") {
-        builder = builder.with_service(counter::Counter::serve(counter::CounterImpl))
+        builder = builder.bind(counter::Counter::serve(counter::CounterImpl))
     }
     if services == "*" || services.contains("Proxy") {
-        builder = builder.with_service(proxy::Proxy::serve(proxy::ProxyImpl))
+        builder = builder.bind(proxy::Proxy::serve(proxy::ProxyImpl))
     }
     if services == "*" || services.contains("MapObject") {
-        builder = builder.with_service(map_object::MapObject::serve(map_object::MapObjectImpl))
+        builder = builder.bind(map_object::MapObject::serve(map_object::MapObjectImpl))
     }
     if services == "*" || services.contains("ListObject") {
-        builder = builder.with_service(list_object::ListObject::serve(list_object::ListObjectImpl))
+        builder = builder.bind(list_object::ListObject::serve(list_object::ListObjectImpl))
     }
     if services == "*" || services.contains("AwakeableHolder") {
-        builder = builder.with_service(awakeable_holder::AwakeableHolder::serve(
+        builder = builder.bind(awakeable_holder::AwakeableHolder::serve(
             awakeable_holder::AwakeableHolderImpl,
         ))
     }
     if services == "*" || services.contains("BlockAndWaitWorkflow") {
-        builder = builder.with_service(block_and_wait_workflow::BlockAndWaitWorkflow::serve(
+        builder = builder.bind(block_and_wait_workflow::BlockAndWaitWorkflow::serve(
             block_and_wait_workflow::BlockAndWaitWorkflowImpl,
         ))
     }
     if services == "*" || services.contains("CancelTestRunner") {
-        builder = builder.with_service(cancel_test::CancelTestRunner::serve(
+        builder = builder.bind(cancel_test::CancelTestRunner::serve(
             cancel_test::CancelTestRunnerImpl,
         ))
     }
     if services == "*" || services.contains("CancelTestBlockingService") {
-        builder = builder.with_service(cancel_test::CancelTestBlockingService::serve(
+        builder = builder.bind(cancel_test::CancelTestBlockingService::serve(
             cancel_test::CancelTestBlockingServiceImpl,
         ))
     }
     if services == "*" || services.contains("Failing") {
-        builder = builder.with_service(failing::Failing::serve(failing::FailingImpl::default()))
+        builder = builder.bind(failing::Failing::serve(failing::FailingImpl::default()))
     }
     if services == "*" || services.contains("KillTestRunner") {
-        builder = builder.with_service(kill_test::KillTestRunner::serve(
+        builder = builder.bind(kill_test::KillTestRunner::serve(
             kill_test::KillTestRunnerImpl,
         ))
     }
     if services == "*" || services.contains("KillTestSingleton") {
-        builder = builder.with_service(kill_test::KillTestSingleton::serve(
+        builder = builder.bind(kill_test::KillTestSingleton::serve(
             kill_test::KillTestSingletonImpl,
         ))
     }
     if services == "*" || services.contains("NonDeterministic") {
-        builder = builder.with_service(non_deterministic::NonDeterministic::serve(
+        builder = builder.bind(non_deterministic::NonDeterministic::serve(
             non_deterministic::NonDeterministicImpl::default(),
         ))
     }
     if services == "*" || services.contains("TestUtilsService") {
-        builder = builder.with_service(test_utils_service::TestUtilsService::serve(
+        builder = builder.bind(test_utils_service::TestUtilsService::serve(
             test_utils_service::TestUtilsServiceImpl,
         ))
     }
 
     if let Ok(key) = env::var("E2E_REQUEST_SIGNING_ENV") {
-        builder = builder.with_identity_key(&key).unwrap()
+        builder = builder.identity_key(&key).unwrap()
     }
 
     HttpServer::new(builder.build())

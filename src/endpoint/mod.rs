@@ -192,10 +192,10 @@ impl Builder {
         Self::default()
     }
 
-    /// Add a service.
+    /// Add a [`Service`] to this endpoint.
     ///
     /// When using the service/object/workflow macros, you need to pass the result of the `serve` method.
-    pub fn with_service<
+    pub fn bind<
         S: Service<Future = BoxFuture<'static, Result<(), Error>>>
             + Discoverable
             + Send
@@ -214,7 +214,7 @@ impl Builder {
     }
 
     /// Add identity key, e.g. `publickeyv1_ChjENKeMvCtRnqG2mrBK1HmPKufgFUc98K8B3ononQvp`.
-    pub fn with_identity_key(mut self, key: &str) -> Result<Self, KeyError> {
+    pub fn identity_key(mut self, key: &str) -> Result<Self, KeyError> {
         self.identity_verifier = self.identity_verifier.with_key(key)?;
         Ok(self)
     }
