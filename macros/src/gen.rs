@@ -55,7 +55,7 @@ impl<'a> ServiceGenerator<'a> {
         let handler_fns = handlers
             .iter()
             .map(
-                |Handler { attrs, ident, arg, is_shared, output, .. }| {
+                |Handler { attrs, ident, arg, is_shared, output_ok, output_err, .. }| {
                     let args = arg.iter();
 
                     let ctx = match (&service_ty, is_shared) {
@@ -68,7 +68,7 @@ impl<'a> ServiceGenerator<'a> {
 
                     quote! {
                         #( #attrs )*
-                        fn #ident(&self, context: #ctx, #( #args ),*) -> impl std::future::Future<Output=::restate_sdk::prelude::HandlerResult<#output>> + ::core::marker::Send;
+                        fn #ident(&self, context: #ctx, #( #args ),*) -> impl std::future::Future<Output=Result<#output_ok, #output_err>> + ::core::marker::Send;
                     }
                 },
             );
@@ -130,7 +130,7 @@ impl<'a> ServiceGenerator<'a> {
             quote! {
                 #handler_literal => {
                     #get_input_and_call
-                    let res = fut.await;
+                    let res = fut.await.map_err(::restate_sdk::errors::HandlerError::from);
                     ctx.handle_handler_result(res);
                     ctx.end();
                     Ok(())
@@ -302,7 +302,7 @@ impl<'a> ServiceGenerator<'a> {
                          ty, ..
                      }) => quote! { #ty }
             };
-            let res_ty = &handler.output;
+            let res_ty = &handler.output_ok;
             let input =  match &handler.arg {
                 None => quote! { () },
                 Some(_) => quote! { req }

@@ -3,13 +3,16 @@ use std::collections::HashMap;
 
 #[restate_sdk::service]
 trait RunExample {
-    async fn do_run() -> HandlerResult<Json<HashMap<String, String>>>;
+    async fn do_run() -> Result<Json<HashMap<String, String>>, HandlerError>;
 }
 
 struct RunExampleImpl(reqwest::Client);
 
 impl RunExample for RunExampleImpl {
-    async fn do_run(&self, context: Context<'_>) -> HandlerResult<Json<HashMap<String, String>>> {
+    async fn do_run(
+        &self,
+        context: Context<'_>,
+    ) -> Result<Json<HashMap<String, String>>, HandlerError> {
         let res = context
             .run(|| async move {
                 let req = self.0.get("https://httpbin.org/ip").build()?;

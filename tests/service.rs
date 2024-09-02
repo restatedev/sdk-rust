@@ -10,6 +10,12 @@ trait MyService {
     async fn no_output() -> HandlerResult<()>;
 
     async fn no_input_no_output() -> HandlerResult<()>;
+
+    async fn std_result() -> Result<(), std::io::Error>;
+
+    async fn std_result_with_terminal_error() -> Result<(), TerminalError>;
+
+    async fn std_result_with_handler_error() -> Result<(), HandlerError>;
 }
 
 #[restate_sdk::object]

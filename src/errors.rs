@@ -144,6 +144,4 @@ impl From<TerminalError> for Failure {
 }
 
 /// Result type for a Restate handler.
-///
-/// All Restate handlers *MUST* use this type as return type for their handlers.
 pub type HandlerResult<T> = Result<T, HandlerError>;

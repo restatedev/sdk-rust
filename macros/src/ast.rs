@@ -145,7 +145,8 @@ pub(crate) struct Handler {
     pub(crate) restate_name: String,
     pub(crate) ident: Ident,
     pub(crate) arg: Option<PatType>,
-    pub(crate) output: Type,
+    pub(crate) output_ok: Type,
+    pub(crate) output_err: Type,
 }
 
 impl Parse for Handler {
@@ -192,17 +193,18 @@ impl Parse for Handler {
         let return_type: ReturnType = input.parse()?;
         input.parse::<Token![;]>()?;
 
-        let output: Type = match &return_type {
-            ReturnType::Default => {
-                parse_quote!(())
-            }
+        let (ok_ty, err_ty) = match &return_type {
+            ReturnType::Default =>    return Err(Error::new(
+                return_type.span(),
+                "The return type cannot be empty, only Result or restate_sdk::prelude::HandlerResult is supported as return type",
+            )),
             ReturnType::Type(_, ty) => {
-                if let Some(ty) = extract_handler_result_parameter(ty) {
-                    ty
+                if let Some((ok_ty, err_ty)) = extract_handler_result_parameter(ty) {
+                    (ok_ty, err_ty)
                 } else {
                     return Err(Error::new(
                         return_type.span(),
-                        "Only restate_sdk::prelude::HandlerResult is supported as return type",
+                        "Only Result or restate_sdk::prelude::HandlerResult is supported as return type",
                     ));
                 }
             }
@@ -229,7 +231,8 @@ impl Parse for Handler {
             restate_name,
             ident,
             arg: args.pop(),
-            output,
+            output_ok: ok_ty,
+            output_err: err_ty,
         })
     }
 }
@@ -263,14 +266,16 @@ fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
         .transpose()
 }
 
-fn extract_handler_result_parameter(ty: &Type) -> Option<Type> {
+fn extract_handler_result_parameter(ty: &Type) -> Option<(Type, Type)> {
     let path = match ty {
         Type::Path(ty) => &ty.path,
         _ => return None,
     };
 
     let last = path.segments.last().unwrap();
-    if last.ident != "HandlerResult" {
+    let is_result = last.ident == "Result";
+    let is_handler_result = last.ident == "HandlerResult";
+    if !is_result && !is_handler_result {
         return None;
     }
 
@@ -279,12 +284,22 @@ fn extract_handler_result_parameter(ty: &Type) -> Option<Type> {
         _ => return None,
     };
 
-    if bracketed.args.len() != 1 {
-        return None;
-    }
-
-    match &bracketed.args[0] {
-        GenericArgument::Type(arg) => Some(arg.clone()),
-        _ => None,
+    if is_handler_result && bracketed.args.len() == 1 {
+        match &bracketed.args[0] {
+            GenericArgument::Type(arg) => Some((
+                arg.clone(),
+                parse_quote!(::restate_sdk::prelude::HandlerError),
+            )),
+            _ => None,
+        }
+    } else if is_result && bracketed.args.len() == 2 {
+        match (&bracketed.args[0], &bracketed.args[1]) {
+            (GenericArgument::Type(ok_arg), GenericArgument::Type(err_arg)) => {
+                Some((ok_arg.clone(), err_arg.clone()))
+            }
+            _ => None,
+        }
+    } else {
+        None
     }
 }
