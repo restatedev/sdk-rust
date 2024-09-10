@@ -69,9 +69,10 @@ The Rust SDK is currently in active development, and might break across releases
 
 The compatibility with Restate is described in the following table:
 
-| Restate Server\sdk-rust | 0.0/0.1/0.2 |
-|-------------------------|-------------|
-| 1.0                     | ✅           |
+| Restate Server\sdk-rust | 0.0/0.1/0.2 | 0.3 |
+|-------------------------|-------------|-----|
+| 1.0                     | ✅           | ❌   |
+| 1.1                     | ✅           | ✅   |
 
 ## Contributing
 
