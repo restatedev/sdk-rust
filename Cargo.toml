@@ -5,6 +5,7 @@ edition = "2021"
 description = "Restate SDK for Rust"
 license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
+rust-version = "1.76.0"
 
 [features]
 default = ["http_server", "rand", "uuid"]
