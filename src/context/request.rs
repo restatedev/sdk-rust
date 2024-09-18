@@ -87,7 +87,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     }
 
     /// Call a service. This returns a future encapsulating the response.
-    pub fn call(self) -> impl Future<Output = Result<Res, TerminalError>> + Send
+    pub fn call(self) -> impl CallFuture<Result<Res, TerminalError>> + Send
     where
         Req: Serialize + 'static,
         Res: Deserialize + 'static,
@@ -96,7 +96,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     }
 
     /// Send the request to the service, without waiting for the response.
-    pub fn send(self)
+    pub fn send(self) -> impl InvocationHandle
     where
         Req: Serialize + 'static,
     {
@@ -104,10 +104,17 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     }
 
     /// Schedule the request to the service, without waiting for the response.
-    pub fn send_with_delay(self, duration: Duration)
+    pub fn send_with_delay(self, duration: Duration) -> impl InvocationHandle
     where
         Req: Serialize + 'static,
     {
         self.ctx.send(self.request_target, self.req, Some(duration))
     }
 }
+
+pub trait InvocationHandle {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send;
+    fn cancel(&self);
+}
+
+pub trait CallFuture<O>: Future<Output = O> + InvocationHandle {}
