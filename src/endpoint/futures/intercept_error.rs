@@ -1,5 +1,6 @@
-use crate::context::{RunFuture, RunRetryPolicy};
+use crate::context::{CallFuture, InvocationHandle, RunFuture, RunRetryPolicy};
 use crate::endpoint::{ContextInternal, Error};
+use crate::errors::TerminalError;
 use pin_project_lite::pin_project;
 use std::future::Future;
 use std::pin::Pin;
@@ -58,3 +59,15 @@ where
         self
     }
 }
+
+impl<F: InvocationHandle> InvocationHandle for InterceptErrorFuture<F> {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        self.fut.invocation_id()
+    }
+
+    fn cancel(&self) {
+        self.fut.cancel()
+    }
+}
+
+impl<F, R> CallFuture<R> for InterceptErrorFuture<F> where F: CallFuture<Result<R, Error>> {}

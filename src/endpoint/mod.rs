@@ -10,9 +10,7 @@ use ::futures::future::BoxFuture;
 use ::futures::{Stream, StreamExt};
 use bytes::Bytes;
 pub use context::{ContextInternal, InputMetadata};
-use restate_sdk_shared_core::{
-    CoreVM, Header, HeaderMap, IdentityVerifier, KeyError, ResponseHead, VMError, VerifyError, VM,
-};
+use restate_sdk_shared_core::{CoreVM, Error as VMError, Header, HeaderMap, IdentityVerifier, KeyError,  VerifyError, VM};
 use std::collections::HashMap;
 use std::future::poll_fn;
 use std::pin::Pin;
@@ -176,8 +174,8 @@ impl Default for Builder {
         Self {
             svcs: Default::default(),
             discovery: crate::discovery::Endpoint {
-                max_protocol_version: 2,
-                min_protocol_version: 2,
+                max_protocol_version: 3,
+                min_protocol_version: 3,
                 protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
                 services: vec![],
             },
@@ -274,13 +272,11 @@ impl Endpoint {
             }
 
             return Ok(Response::ReplyNow {
-                response_head: ResponseHead {
-                    status_code: 200,
-                    headers: vec![Header {
-                        key: "content-type".into(),
-                        value: DISCOVERY_CONTENT_TYPE.into(),
-                    }],
-                },
+                status_code: 200,
+                headers: vec![Header {
+                    key: "content-type".into(),
+                    value: DISCOVERY_CONTENT_TYPE.into(),
+                }],
                 body: Bytes::from(
                     serde_json::to_string(&self.0.discovery)
                         .expect("Discovery should be serializable"),
@@ -296,13 +292,16 @@ impl Endpoint {
             Some(last_elements) => (last_elements[1].to_owned(), last_elements[2].to_owned()),
         };
 
-        let vm = CoreVM::new(headers).map_err(ErrorInner::VM)?;
+        let vm = CoreVM::new(headers, Default::default()).map_err(ErrorInner::VM)?;
         if !self.0.svcs.contains_key(&svc_name) {
             return Err(ErrorInner::UnknownService(svc_name.to_owned()).into());
         }
 
+        let response_head = vm.get_response_head();
+
         Ok(Response::BidiStream {
-            response_head: vm.get_response_head(),
+            status_code: response_head.status_code,
+            headers: response_head.headers,
             handler: BidiStreamRunner {
                 svc_name,
                 handler_name,
@@ -315,11 +314,13 @@ impl Endpoint {
 
 pub enum Response {
     ReplyNow {
-        response_head: ResponseHead,
+        status_code: u16,
+        headers: Vec<Header>,
         body: Bytes,
     },
     BidiStream {
-        response_head: ResponseHead,
+        status_code: u16,
+        headers: Vec<Header>,
         handler: BidiStreamRunner,
     },
 }
@@ -391,8 +392,8 @@ async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(
         match input_rx.recv().await {
             Some(Ok(b)) => vm.notify_input(b),
             Some(Err(e)) => vm.notify_error(
-                "Error when reading the body".into(),
-                e.to_string().into(),
+                VMError::new(500u16, format!("Error when reading the body: {e}"))
+               ,
                 None,
             ),
             None => vm.notify_input_closed(),

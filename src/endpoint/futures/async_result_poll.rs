@@ -1,7 +1,7 @@
 use crate::endpoint::context::ContextInternalInner;
 use crate::endpoint::ErrorInner;
 use restate_sdk_shared_core::{
-    AsyncResultHandle, SuspendedOrVMError, TakeOutputResult, VMError, Value, VM,
+    NotificationHandle, SuspendedOrVMError, TakeOutputResult, Value, VM,
 };
 use std::borrow::Cow;
 use std::future::Future;
@@ -16,7 +16,7 @@ pub(crate) struct VmAsyncResultPollFuture {
 impl VmAsyncResultPollFuture {
     pub fn new(
         inner: Cow<'_, Arc<Mutex<ContextInternalInner>>>,
-        handle: Result<AsyncResultHandle, VMError>,
+        handle: Result<NotificationHandle, restate_sdk_shared_core::Error>,
     ) -> Self {
         VmAsyncResultPollFuture {
             state: Some(match handle {
@@ -33,11 +33,11 @@ impl VmAsyncResultPollFuture {
 enum PollState {
     Init {
         ctx: Arc<Mutex<ContextInternalInner>>,
-        handle: AsyncResultHandle,
+        handle: NotificationHandle,
     },
     WaitingInput {
         ctx: Arc<Mutex<ContextInternalInner>>,
-        handle: AsyncResultHandle,
+        handle: NotificationHandle,
     },
     Failed(ErrorInner),
 }

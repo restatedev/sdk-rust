@@ -16,7 +16,7 @@
 //! ```
 //!
 //! You can catch terminal exceptions. For example, you can catch the terminal exception that comes out of a [call to another service][crate::context::ContextClient], and build your control flow around it.
-use restate_sdk_shared_core::Failure;
+use restate_sdk_shared_core::TerminalFailure;
 use std::error::Error as StdError;
 use std::fmt;
 
@@ -141,8 +141,8 @@ impl AsRef<dyn StdError> for TerminalError {
     }
 }
 
-impl From<Failure> for TerminalError {
-    fn from(value: Failure) -> Self {
+impl From<TerminalFailure> for TerminalError {
+    fn from(value: TerminalFailure) -> Self {
         Self(TerminalErrorInner {
             code: value.code,
             message: value.message,
@@ -150,7 +150,7 @@ impl From<Failure> for TerminalError {
     }
 }
 
-impl From<TerminalError> for Failure {
+impl From<TerminalError> for TerminalFailure {
     fn from(value: TerminalError) -> Self {
         Self {
             code: value.0.code,

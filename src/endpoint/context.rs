@@ -1,4 +1,6 @@
-use crate::context::{Request, RequestTarget, RunClosure, RunRetryPolicy};
+use crate::context::{
+    CallFuture, InvocationHandle, Request, RequestTarget, RunClosure, RunRetryPolicy,
+};
 use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -10,8 +12,8 @@ use futures::future::Either;
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, Failure, NonEmptyValue, RetryPolicy, RunEnterResult, RunExitResult, TakeOutputResult,
-    Target, Value, VM,
+    CoreVM, NonEmptyValue, NotificationHandle, RetryPolicy, RunExitResult, SendHandle,
+    TakeOutputResult, Target, TerminalFailure, Value, VM,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -21,7 +23,7 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 pub struct ContextInternalInner {
     pub(crate) vm: CoreVM,
@@ -47,7 +49,7 @@ impl ContextInternalInner {
 
     pub(super) fn fail(&mut self, e: Error) {
         self.vm
-            .notify_error(e.0.to_string().into(), format!("{:#}", e.0).into(), None);
+            .notify_error(e.0.to_string().into(), format!("{:#}", e.0).into());
         self.handler_state.mark_error(e);
     }
 }
@@ -215,6 +217,10 @@ impl ContextInternal {
                     variant: "state_keys",
                     syscall: "get_state",
                 }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
+                    syscall: "get_state",
+                }),
                 Err(e) => Err(e),
             });
 
@@ -230,11 +236,15 @@ impl ContextInternal {
             .map(|res| match res {
                 Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: "empty",
-                    syscall: "get_state",
+                    syscall: "get_keys",
                 }),
                 Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: "success",
-                    syscall: "get_state",
+                    syscall: "get_keys",
+                }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
+                    syscall: "get_keys",
                 }),
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
                 Ok(Value::StateKeys(s)) => Ok(Ok(s)),
@@ -272,9 +282,16 @@ impl ContextInternal {
 
     pub fn sleep(
         &self,
-        duration: Duration,
+        sleep_duration: Duration,
     ) -> impl Future<Output = Result<(), TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.inner).vm.sys_sleep(duration) };
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Duration since unix epoch cannot fail");
+        let maybe_handle = {
+            must_lock!(self.inner)
+                .vm
+                .sys_sleep(now + sleep_duration, Some(now))
+        };
 
         let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
             .map(|res| match res {
@@ -287,6 +304,10 @@ impl ContextInternal {
                 Err(e) => Err(e),
                 Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: "state_keys",
+                    syscall: "sleep",
+                }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
                     syscall: "sleep",
                 }),
             });
@@ -302,7 +323,7 @@ impl ContextInternal {
         &self,
         request_target: RequestTarget,
         req: Req,
-    ) -> impl Future<Output = Result<Res, TerminalError>> + Send + Sync {
+    ) -> impl CallFuture<Result<Res, TerminalError>> + Send + Sync {
         let mut inner_lock = must_lock!(self.inner);
 
         let input = match Req::serialize(&req) {
@@ -319,34 +340,20 @@ impl ContextInternal {
             }
         };
 
-        let maybe_handle = inner_lock.vm.sys_call(request_target.into(), input);
+        let maybe_handle = inner_lock.vm.sys_call(request_target.into(), input).map(|ch | ch.call_notification_handle);
         drop(inner_lock);
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "empty",
-                    syscall: "call",
-                }),
-                Ok(Value::Success(mut s)) => {
-                    let t = Res::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "call",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(t))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "call",
-                }),
-                Err(e) => Err(e),
-            });
+        let call_future_impl = CallFutureImpl {
+            poll_future: VmAsyncResultPollFuture::new(
+                Cow::Borrowed(&self.inner),
+                maybe_handle.clone(),
+            ),
+            res: PhantomData,
+            ctx: self.clone(),
+            call_handle: maybe_handle.ok(),
+        };
 
-        Either::Left(InterceptErrorFuture::new(
-            self.clone(),
-            poll_future.map_err(Error),
-        ))
+        Either::Left(InterceptErrorFuture::new(self.clone(), call_future_impl))
     }
 
     pub fn send<Req: Serialize>(
@@ -354,12 +361,26 @@ impl ContextInternal {
         request_target: RequestTarget,
         req: Req,
         delay: Option<Duration>,
-    ) {
+    ) -> impl InvocationHandle {
         let mut inner_lock = must_lock!(self.inner);
 
         match Req::serialize(&req) {
             Ok(t) => {
-                let _ = inner_lock.vm.sys_send(request_target.into(), t, delay);
+                let result = inner_lock.vm.sys_send(
+                    request_target.into(),
+                    t,
+                    delay.map(|delay| {
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .expect("Duration since unix epoch cannot fail")
+                            + delay
+                    }),
+                );
+                drop(inner_lock);
+                SendRequestHandle {
+                    ctx: self.clone(),
+                    send_handle: result.ok(),
+                }
             }
             Err(e) => {
                 inner_lock.fail(
@@ -369,8 +390,19 @@ impl ContextInternal {
                     }
                     .into(),
                 );
+                SendRequestHandle {
+                    ctx: self.clone(),
+                    send_handle: None,
+                }
             }
-        };
+        }
+    }
+
+    pub fn invocation_handle(&self, invocation_id: String) -> impl InvocationHandle {
+        InvocationIdBackedInvocationHandle {
+            ctx: self.clone(),
+            invocation_id,
+        }
     }
 
     pub fn awakeable<T: Deserialize>(
@@ -407,6 +439,10 @@ impl ContextInternal {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
                 Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: "state_keys",
+                    syscall: "awakeable",
+                }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
                     syscall: "awakeable",
                 }),
                 Err(e) => Err(e),
@@ -468,6 +504,10 @@ impl ContextInternal {
                     variant: "state_keys",
                     syscall: "promise",
                 }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
+                    syscall: "promise",
+                }),
                 Err(e) => Err(e),
             });
 
@@ -493,6 +533,10 @@ impl ContextInternal {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
                 Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: "state_keys",
+                    syscall: "peek_promise",
+                }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
                     syscall: "peek_promise",
                 }),
                 Err(e) => Err(e),
@@ -716,7 +760,7 @@ where
                         Err(e) => match e.0 {
                             HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
                                 attempt_duration: start_time.elapsed(),
-                                failure: Failure {
+                                failure: TerminalFailure {
                                     code: 500,
                                     message: err.to_string(),
                                 },
@@ -766,9 +810,218 @@ where
                             syscall: "run",
                         }
                         .into()),
+                        Value::InvocationId(_) => {
+                            Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                                variant: "invocation_id",
+                                syscall: "run",
+                            }
+                            .into())
+                        }
                     });
                 }
             }
         }
+    }
+}
+
+struct SendRequestHandle {
+    ctx: ContextInternal,
+    send_handle: Option<SendHandle>,
+}
+
+impl InvocationHandle for SendRequestHandle {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        if let Some(ref send_handle) = self.send_handle {
+            let maybe_handle = {
+                must_lock!(self.ctx.inner)
+                    .vm
+                    .sys_get_call_invocation_id(GetInvocationIdTarget::SendEntry(*send_handle))
+            };
+
+            let poll_future = VmAsyncResultPollFuture::new(
+                Cow::Borrowed(&self.ctx.inner),
+                maybe_handle,
+            )
+            .map(|res| match res {
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(Value::InvocationId(s)) => Ok(Ok(s)),
+                Err(e) => Err(e),
+                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "state_keys",
+                    syscall: "get_call_invocation_id",
+                }),
+                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "void",
+                    syscall: "get_call_invocation_id",
+                }),
+                Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "success",
+                    syscall: "get_call_invocation_id",
+                }),
+            });
+
+            Either::Left(InterceptErrorFuture::new(
+                self.ctx.clone(),
+                poll_future.map_err(Error),
+            ))
+        } else {
+            // If the send didn't succeed, trap the execution
+            Either::Right(TrapFuture::default())
+        }
+    }
+
+    fn cancel(&self) {
+        if let Some(ref send_handle) = self.send_handle {
+            let mut inner_lock = must_lock!(self.ctx.inner);
+            let _ = inner_lock
+                .vm
+                .sys_cancel_invocation(CancelInvocationTarget::SendEntry(*send_handle));
+        }
+        // If the send didn't succeed, then simply ignore the cancel
+    }
+}
+
+pin_project! {
+    struct CallFutureImpl<R> {
+        #[pin]
+        poll_future: VmAsyncResultPollFuture,
+        res: PhantomData<fn() -> R>,
+        ctx: ContextInternal,
+        call_handle: Option<NotificationHandle>,
+    }
+}
+
+impl<Res: Deserialize> Future for CallFutureImpl<Res> {
+    type Output = Result<Result<Res, TerminalError>, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+
+        this.poll_future
+            .poll(cx)
+            .map(|res| match res {
+                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "empty",
+                    syscall: "call",
+                }),
+                Ok(Value::Success(mut s)) => {
+                    let t = Res::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
+                        syscall: "call",
+                        err: Box::new(e),
+                    })?;
+                    Ok(Ok(t))
+                }
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "state_keys",
+                    syscall: "call",
+                }),
+                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "invocation_id",
+                    syscall: "call",
+                }),
+                Err(e) => Err(e),
+            })
+            .map(|res| res.map_err(Error))
+    }
+}
+
+impl<R> InvocationHandle for CallFutureImpl<R> {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        if let Some(ref call_handle) = self.call_handle {
+            let maybe_handle = {
+                must_lock!(self.ctx.inner)
+                    .vm
+                    .sys_get_call_invocation_id(GetInvocationIdTarget::CallEntry(*call_handle))
+            };
+
+            let poll_future = VmAsyncResultPollFuture::new(
+                Cow::Borrowed(&self.ctx.inner),
+                maybe_handle,
+            )
+            .map(|res| match res {
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(Value::InvocationId(s)) => Ok(Ok(s)),
+                Err(e) => Err(e),
+                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "state_keys",
+                    syscall: "get_call_invocation_id",
+                }),
+                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "void",
+                    syscall: "get_call_invocation_id",
+                }),
+                Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: "success",
+                    syscall: "get_call_invocation_id",
+                }),
+            });
+
+            Either::Left(InterceptErrorFuture::new(
+                self.ctx.clone(),
+                poll_future.map_err(Error),
+            ))
+        } else {
+            // If the send didn't succeed, trap the execution
+            Either::Right(TrapFuture::default())
+        }
+    }
+
+    fn cancel(&self) {
+        if let Some(ref call_handle) = self.call_handle {
+            let mut inner_lock = must_lock!(self.ctx.inner);
+            let _ = inner_lock
+                .vm
+                .sys_cancel_invocation(CancelInvocationTarget::CallEntry(*call_handle));
+        }
+        // If the send didn't succeed, then simply ignore the cancel
+    }
+}
+
+impl<Res: Deserialize> CallFuture<Result<Result<Res, TerminalError>, Error>>
+    for CallFutureImpl<Res>
+{
+}
+
+impl<A: InvocationHandle, B: InvocationHandle> InvocationHandle for Either<A, B> {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        match self {
+            Either::Left(l) => Either::Left(l.invocation_id()),
+            Either::Right(r) => Either::Right(r.invocation_id()),
+        }
+    }
+
+    fn cancel(&self) {
+        match self {
+            Either::Left(l) => l.cancel(),
+            Either::Right(r) => r.cancel(),
+        }
+    }
+}
+
+impl<A, B, O> CallFuture<O> for Either<A, B>
+where
+    A: CallFuture<O>,
+    B: CallFuture<O>,
+{
+}
+
+struct InvocationIdBackedInvocationHandle {
+    ctx: ContextInternal,
+    invocation_id: String,
+}
+
+impl InvocationHandle for InvocationIdBackedInvocationHandle {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        ready(Ok(self.invocation_id.clone()))
+    }
+
+    fn cancel(&self) {
+        let mut inner_lock = must_lock!(self.ctx.inner);
+        let _ = inner_lock
+            .vm
+            .sys_cancel_invocation(CancelInvocationTarget::InvocationId(
+                self.invocation_id.clone(),
+            ));
     }
 }

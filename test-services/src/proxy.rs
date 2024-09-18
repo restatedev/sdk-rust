@@ -46,7 +46,7 @@ pub(crate) trait Proxy {
     #[name = "call"]
     async fn call(req: Json<ProxyRequest>) -> HandlerResult<Json<Vec<u8>>>;
     #[name = "oneWayCall"]
-    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<()>;
+    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<String>;
     #[name = "manyCalls"]
     async fn many_calls(req: Json<Vec<ManyCallRequest>>) -> HandlerResult<()>;
 }
@@ -70,16 +70,19 @@ impl Proxy for ProxyImpl {
         &self,
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
-    ) -> HandlerResult<()> {
+    ) -> HandlerResult<String> {
         let request = ctx.request::<_, ()>(req.to_target(), req.message);
 
-        if let Some(delay_millis) = req.delay_millis {
-            request.send_with_delay(Duration::from_millis(delay_millis));
+        let invocation_id = if let Some(delay_millis) = req.delay_millis {
+            request
+                .send_after(Duration::from_millis(delay_millis))
+                .invocation_id()
+                .await?
         } else {
-            request.send();
-        }
+            request.send().invocation_id().await?
+        };
 
-        Ok(())
+        Ok(invocation_id)
     }
 
     async fn many_calls(
@@ -94,7 +97,7 @@ impl Proxy for ProxyImpl {
                 ctx.request::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
             if req.one_way_call {
                 if let Some(delay_millis) = req.proxy_request.delay_millis {
-                    restate_req.send_with_delay(Duration::from_millis(delay_millis));
+                    restate_req.send_after(Duration::from_millis(delay_millis));
                 } else {
                     restate_req.send();
                 }

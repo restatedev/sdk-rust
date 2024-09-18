@@ -77,7 +77,7 @@ impl PeriodicTaskImpl {
             .object_client::<PeriodicTaskClient>(context.key())
             .run()
             // And send with a delay
-            .send_with_delay(Duration::from_secs(10));
+            .send_after(Duration::from_secs(10));
     }
 }
 
