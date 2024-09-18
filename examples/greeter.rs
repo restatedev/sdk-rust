@@ -1,16 +1,37 @@
 use restate_sdk::prelude::*;
-use std::convert::Infallible;
+use std::time::Duration;
+use tracing::info;
 
 #[restate_sdk::service]
 trait Greeter {
-    async fn greet(name: String) -> Result<String, Infallible>;
+    async fn sleep() -> Result<(), HandlerError>;
+    async fn do_stuff() -> Result<String, HandlerError>;
 }
 
 struct GreeterImpl;
 
 impl Greeter for GreeterImpl {
-    async fn greet(&self, _: Context<'_>, name: String) -> Result<String, Infallible> {
-        Ok(format!("Greetings {name}"))
+    async fn sleep(&self, ctx: Context<'_>) -> Result<(), HandlerError> {
+        ctx.sleep(Duration::from_secs(120)).await?;
+        Ok(())
+    }
+
+    async fn do_stuff(&self, ctx: Context<'_>) -> Result<String, HandlerError> {
+        let call_handle = ctx.service_client::<GreeterClient>()
+            .sleep()
+            .call();
+
+        info!("Invocation id {}", call_handle.invocation_id().await?);
+
+        ctx.sleep(Duration::from_secs(5)).await?;
+
+        // Now cancel it
+        call_handle.cancel();
+
+        // Now await it
+        call_handle.await?;
+
+        Ok("This should have failed".to_string())
     }
 }
 

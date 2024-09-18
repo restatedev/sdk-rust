@@ -194,9 +194,10 @@ pub mod prelude {
     pub use crate::http_server::HttpServer;
 
     pub use crate::context::{
-        Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
-        ContextSideEffects, ContextTimers, ContextWriteState, HeaderMap, ObjectContext, Request,
-        RunFuture, RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+        CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
+        ContextSideEffects, ContextTimers, ContextWriteState, HeaderMap, InvocationHandle,
+        ObjectContext, Request, RunFuture, RunRetryPolicy, SharedObjectContext,
+        SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::Endpoint;
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
