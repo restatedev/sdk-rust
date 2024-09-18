@@ -72,7 +72,7 @@ impl Failing for FailingImpl {
         error_message: String,
     ) -> HandlerResult<()> {
         context
-            .run(|| async move { Err(TerminalError::new(error_message))? })
+            .run::<_, _, ()>(|| async move { Err(TerminalError::new(error_message))? })
             .await?;
 
         unreachable!("This should be unreachable")
