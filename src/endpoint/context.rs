@@ -30,6 +30,10 @@ pub struct ContextInternalInner {
     pub(crate) read: InputReceiver,
     pub(crate) write: OutputSender,
     pub(super) handler_state: HandlerStateNotifier,
+    // Flag to indicate whether span replay attribute should be set
+    // When replaying this is set on the sys call
+    // When not replaying this is reset on the sys call that transitioned the state
+    pub(super) tracing_replaying_flag: bool,
 }
 
 impl ContextInternalInner {
@@ -44,6 +48,7 @@ impl ContextInternalInner {
             read,
             write,
             handler_state,
+            tracing_replaying_flag: true,
         }
     }
 
@@ -54,6 +59,22 @@ impl ContextInternalInner {
             None,
         );
         self.handler_state.mark_error(e);
+    }
+
+    pub(super) fn set_tracing_replaying_flag(&mut self) {
+        if !self.vm.is_processing() {
+            // Replay record is not yet set in the span
+            if self.tracing_replaying_flag {
+                tracing::Span::current().record("replaying", true);
+                self.tracing_replaying_flag = false;
+            }
+        } else {
+            // Replay record is not yet reset in the span
+            if !self.tracing_replaying_flag {
+                tracing::Span::current().record("replaying", false);
+                self.tracing_replaying_flag = true;
+            }
+        }
     }
 }
 
