@@ -375,8 +375,8 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     #[must_use]
     fn run<R, F, T>(&self, run_closure: R) -> impl RunFuture<Result<T, TerminalError>> + 'ctx
     where
-        R: RunClosure<Fut = F, Output = T> + Send + Sync + 'ctx,
-        F: Future<Output = HandlerResult<T>> + Send + Sync + 'ctx,
+        R: RunClosure<Fut = F, Output = T> + Send + 'ctx,
+        F: Future<Output = HandlerResult<T>> + Send + 'ctx,
         T: Serialize + Deserialize + 'static,
     {
         self.inner_context().run(run_closure)

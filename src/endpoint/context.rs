@@ -530,10 +530,10 @@ impl ContextInternal {
     pub fn run<'a, Run, Fut, Out>(
         &'a self,
         run_closure: Run,
-    ) -> impl crate::context::RunFuture<Result<Out, TerminalError>> + Send + Sync + 'a
+    ) -> impl crate::context::RunFuture<Result<Out, TerminalError>> + Send + 'a
     where
-        Run: RunClosure<Fut = Fut, Output = Out> + Send + Sync + 'a,
-        Fut: Future<Output = HandlerResult<Out>> + Send + Sync + 'a,
+        Run: RunClosure<Fut = Fut, Output = Out> + Send + 'a,
+        Fut: Future<Output = HandlerResult<Out>> + Send + 'a,
         Out: Serialize + Deserialize + 'static,
     {
         let this = Arc::clone(&self.inner);
@@ -634,8 +634,8 @@ impl<Run, Fut, Ret> RunFuture<Run, Fut, Ret> {
 impl<Run, Fut, Out> crate::context::RunFuture<Result<Result<Out, TerminalError>, Error>>
     for RunFuture<Run, Fut, Out>
 where
-    Run: RunClosure<Fut = Fut, Output = Out> + Send + Sync,
-    Fut: Future<Output = HandlerResult<Out>> + Send + Sync,
+    Run: RunClosure<Fut = Fut, Output = Out> + Send,
+    Fut: Future<Output = HandlerResult<Out>> + Send,
     Out: Serialize + Deserialize,
 {
     fn retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
@@ -657,9 +657,9 @@ where
 
 impl<Run, Fut, Out> Future for RunFuture<Run, Fut, Out>
 where
-    Run: RunClosure<Fut = Fut, Output = Out> + Send + Sync,
+    Run: RunClosure<Fut = Fut, Output = Out> + Send,
     Out: Serialize + Deserialize,
-    Fut: Future<Output = HandlerResult<Out>> + Send + Sync,
+    Fut: Future<Output = HandlerResult<Out>> + Send,
 {
     type Output = Result<Result<Out, TerminalError>, Error>;
 
