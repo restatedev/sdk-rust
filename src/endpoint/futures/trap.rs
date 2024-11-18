@@ -1,3 +1,5 @@
+use crate::context::{CallFuture, InvocationHandle};
+use crate::errors::TerminalError;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -20,3 +22,13 @@ impl<T> Future for TrapFuture<T> {
         Poll::Pending
     }
 }
+
+impl<T> InvocationHandle for TrapFuture<T> {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        TrapFuture::default()
+    }
+
+    fn cancel(&self) {}
+}
+
+impl<T> CallFuture<T> for TrapFuture<T> {}
