@@ -207,7 +207,47 @@ impl<'ctx> WorkflowContext<'ctx> {
     }
 }
 
-/// Trait exposing Restate timers functionalities.
+///
+/// # Scheduling & Timers
+/// The Restate SDK includes durable timers.
+/// You can use these to let handlers sleep for a specified time, or to schedule a handler to be called at a later time.
+/// These timers are resilient to failures and restarts.
+/// Restate stores and keeps track of the timers and triggers them on time, even across failures and restarts.
+///
+/// ## Scheduling Async Tasks
+///
+/// To schedule a handler to be called at a later time, have a look at the documentation on [delayed calls][service_communication#delayed-calls].
+///
+///
+/// ## Durable sleep
+/// To sleep in a Restate application for ten seconds, do the following:
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// # use std::convert::Infallible;
+/// # use std::time::Duration;
+/// #
+/// # async fn handle(ctx: Context<'_>) -> Result<(), Infallible> {
+/// ctx.sleep(Duration::from_secs(10)).await?;
+/// #    Ok(())
+/// # }
+/// ```
+///
+/// **Tip: Cost savings on FaaS**:
+/// Restate suspends the handler while it is sleeping, to free up resources.
+/// This is beneficial for AWS Lambda deployments, since you don't pay for the time the handler is sleeping.
+///
+/// **Info: Sleeping in Virtual Objects**:
+/// Virtual Objects only process a single invocation at a time, so the Virtual Object will be blocked while sleeping.
+///
+/// <details className="grey-details">
+/// <summary>Clock synchronization Restate Server vs. SDK</summary>
+///
+/// The Restate SDK calculates the wake-up time based on the delay you specify.
+/// The Restate Server then uses this calculated time to wake up the handler.
+/// If the Restate Server and the SDK have different system clocks, the sleep duration might not be accurate.
+/// So make sure that the system clock of the Restate Server and the SDK have the same timezone and are synchronized.
+/// </details>
 pub trait ContextTimers<'ctx>: private::SealedContext<'ctx> {
     /// Sleep using Restate
     fn sleep(&self, duration: Duration) -> impl Future<Output = Result<(), TerminalError>> + 'ctx {
@@ -217,7 +257,170 @@ pub trait ContextTimers<'ctx>: private::SealedContext<'ctx> {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 
-/// Trait exposing Restate service to service communication functionalities.
+/// # Service Communication
+///
+/// A handler can call another handler and wait for the response (request-response), or it can send a message without waiting for the response.
+///
+/// ## Request-response calls
+///
+/// Request-response calls are requests where the client waits for the response.
+///
+/// You can do request-response calls to Services, Virtual Objects, and Workflows, in the following way:
+///
+/// ```
+/// # use crate::_examples::my_service::MyServiceClient;
+/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
+/// # use crate::_examples::my_workflow::MyWorkflowClient;
+/// # use restate_sdk::prelude::*;
+/// #
+/// # async fn greet1(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+///     // To a Service:
+///     let service_response = ctx
+///         .service_client::<MyServiceClient>()
+///         .my_handler(String::from("Hi!"))
+///         .call()
+///         .await?;
+///
+///     // To a Virtual Object:
+///     let object_response = ctx
+///         .object_client::<MyVirtualObjectClient>("Mary")
+///         .my_handler(String::from("Hi!"))
+///         .call()
+///         .await?;
+///
+///     // To a Workflow:
+///     let workflow_result = ctx
+///         .workflow_client::<MyWorkflowClient>("my-workflow-id")
+///         .run(String::from("Hi!"))
+///         .call()
+///         .await?;
+///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
+///         .interact_with_workflow()
+///         .call()
+///         .await?;
+///  #    Ok(())
+///  # }
+/// ```
+///
+/// 1. **Create a service client**.
+///     - For Virtual Objects, you also need to supply the key of the Virtual Object you want to call, here `"Mary"`.
+///     - For Workflows, you need to supply a workflow ID that is unique per workflow execution.
+/// 2. **Specify the handler** you want to call and supply the request.
+/// 3. **Await** the call to retrieve the response.
+///
+/// **Tip: No need for manual retry logic**:
+/// These calls are proxied by Restate, and get logged in the journal.
+/// In case of failures, Restate takes care of retries.
+///
+/// **Note: Workflow retention time**:
+/// Once the `run` handler of the workflow has finished, the other handlers can still be called up to the retention time of the workflow, by default 24 hours.
+/// This can be configured via the [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
+///
+/// **Caution: Deadlocks with Virtual Objects**:
+/// Request-response calls to Virtual Objects can lead to deadlocks, in which the Virtual Object remains locked and can't process any more requests.
+/// Some example cases:
+/// - Cross deadlock between Virtual Object A and B: A calls B, and B calls A, both using same keys.
+/// - Cyclical deadlock: A calls B, and B calls C, and C calls A again.
+///
+/// In this situation, you can use the CLI to unblock the Virtual Object manually by [cancelling invocations](https://docs.restate.dev/operate/invocation#cancelling-invocations).
+///
+/// ## Sending messages
+///
+/// Handlers can send messages (a.k.a. one-way calls, or fire-and-forget calls), as follows:
+///
+/// ```
+/// # use crate::_examples::my_service::MyServiceClient;
+/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
+/// # use crate::_examples::my_workflow::MyWorkflowClient;
+/// # use restate_sdk::prelude::*;
+/// #
+/// #
+/// # async fn greet2(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+///     // To a Service:
+///     ctx.service_client::<MyServiceClient>()
+///         .my_handler(String::from("Hi!"))
+///         .send();
+///
+///     // To a Virtual Object:
+///     ctx.object_client::<MyVirtualObjectClient>("Mary")
+///         .my_handler(String::from("Hi!"))
+///         .send();
+///
+///     // To a Workflow:
+///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
+///         .run(String::from("Hi!"))
+///         .send();
+///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
+///         .interact_with_workflow()
+///         .send();
+///  #    Ok(())
+///  # }
+/// ```
+///
+/// **Tip: No need for message queues**:
+/// Without Restate, you would usually put a message queue in between the two services, to guarantee the message delivery.
+/// Restate eliminates the need for a message queue because Restate durably logs the request and makes sure it gets executed.
+///
+/// ## Delayed calls
+///
+/// A delayed call is a one-way call that gets executed after a specified delay.
+///
+/// To schedule a delayed call, send a message with a delay parameter, as follows:
+///
+/// ```
+/// /// # use crate::_examples::my_service::MyServiceClient;
+/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
+/// # use crate::_examples::my_workflow::MyWorkflowClient;
+/// # use restate_sdk::prelude::*;
+/// # use std::time::Duration;
+/// #
+/// # async fn greet2(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+///     // To a Service:
+///     ctx.service_client::<MyServiceClient>()
+///         .my_handler(String::from("Hi!"))
+///         .send_with_delay(Duration::from_millis(5000));
+///
+///     // To a Virtual Object:
+///     ctx.object_client::<MyVirtualObjectClient>("Mary")
+///         .my_handler(String::from("Hi!"))
+///         .send_with_delay(Duration::from_millis(5000));
+///
+///     // To a Workflow:
+///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
+///         .run(String::from("Hi!"))
+///         .send_with_delay(Duration::from_millis(5000));
+///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
+///         .interact_with_workflow()
+///         .send_with_delay(Duration::from_millis(5000));
+///  #    Ok(())
+///  # }
+/// ```
+///
+/// **Tip: Scheduling async tasks**:
+/// You can also use this functionality to schedule async tasks.
+/// Restate will make sure the task gets executed at the desired time.
+///
+/// **Note: Ordering guarantees in Virtual Objects**:
+/// Invocations to a Virtual Object are executed serially.
+/// Invocations will execute in the same order in which they arrive at Restate.
+/// For example, assume a handler calls the same Virtual Object twice:
+///
+/// ```
+/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
+/// # use restate_sdk::prelude::*;
+/// # async fn greet4(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+///     ctx.object_client::<MyVirtualObjectClient>("Mary")
+///         .my_handler(String::from("I'm call A!"))
+///         .send();
+///     ctx.object_client::<MyVirtualObjectClient>("Mary")
+///         .my_handler(String::from("I'm call B!"))
+///         .send();
+/// #    Ok(())
+/// }
+/// ```
+///
+/// It is guaranteed that call A will execute before call B.
+/// It is not guaranteed though that call B will be executed immediately after call A, as invocations coming from other handlers/sources, could interleave these two calls.
 pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// Create a [`Request`].
     fn request<Req, Res>(
@@ -339,12 +542,79 @@ pub trait IntoWorkflowClient<'ctx>: Sized {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 
-/// Trait exposing Restate awakeables functionalities.
+/// # Awakeables
 ///
-/// Awakeables can be used to implement external asynchronous systems interactions,
-/// for example you can send a Kafka record including the awakeable id returned by [`ContextAwakeables::awakeable`],
-/// and then let another service consume from Kafka the responses of given external system interaction by using
-/// [`ContextAwakeables::resolve_awakeable`] or [`ContextAwakeables::reject_awakeable`].
+/// Awakeables pause an invocation while waiting for another process to complete a task.
+/// You can use this pattern to let a handler execute a task somewhere else and retrieve the result.
+/// This pattern is also known as the callback (task token) pattern.
+///
+/// ## Creating awakeables
+///
+/// 1. **Create an awakeable**. This contains a String identifier and a Promise.
+/// 2. **Trigger a task/process** and attach the awakeable ID (e.g., over Kafka, via HTTP, ...).
+///    For example, send an HTTP request to a service that executes the task, and attach the ID to the payload.
+///    You use `ctx.run` to avoid re-triggering the task on retries.
+/// 3. **Wait** until the other process has executed the task.
+///    The handler **receives the payload and resumes**.
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// #
+/// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
+/// /// 1. Create an awakeable
+/// let (id, promise) = ctx.awakeable::<String>();
+///
+/// /// 2. Trigger a task
+/// ctx.run(|| trigger_task_and_deliver_id(id.clone())).await?;
+///
+/// /// 3. Wait for the promise to be resolved
+/// let payload = promise.await?;
+/// # }
+/// # fn trigger_task_and_deliver_id(awakeable_id: String){}
+/// ```
+///
+///
+/// ## Completing awakeables
+///
+/// The external process completes the awakeable by either resolving it with an optional payload or by rejecting it
+/// with its ID and a reason for the failure. This throws [a terminal error][error_handling] in the waiting handler.
+///
+/// - Resolving over HTTP with its ID and an optional payload:
+///
+/// ```text
+/// curl localhost:8080/restate/awakeables/prom_1PePOqp/resolve
+///     -H 'content-type: application/json'
+///     -d '{"hello": "world"}'
+/// ```
+///
+/// - Rejecting over HTTP with its ID and a reason:
+///
+/// ```text
+/// curl localhost:8080/restate/awakeables/prom_1PePOqp/reject
+///     -H 'content-type: text/plain' \
+///     -d 'Very bad error!'
+/// ```
+///
+/// - Resolving via the SDK with its ID and an optional payload, or rejecting with its ID and a reason:
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// #
+/// # async fn handle(ctx: Context<'_>, id: String) -> Result<(), HandlerError> {
+/// // Resolve the awakeable
+/// ctx.resolve_awakeable(&id, "hello");
+///
+/// // Or reject the awakeable
+/// ctx.reject_awakeable(&id, TerminalError::new("my error reason"));
+/// # }
+/// ```
+///
+/// **Note**: You can return any payload that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][serialization]).
+///
+/// **Note**: When running on Function-as-a-Service platforms, such as AWS Lambda, Restate suspends the handler while waiting for the awakeable to be completed.
+/// Since you only pay for the time that the handler is actually running, you don't pay while waiting for the external process to return.
+///
+/// **Warning**: Virtual Objects only process a single invocation at a time, so the Virtual Object will be blocked while waiting on the awakeable to be resolved.
 pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
     /// Create an awakeable
     fn awakeable<T: Deserialize + 'static>(
@@ -369,7 +639,71 @@ pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 
-/// Trait exposing Restate functionalities to deal with non-deterministic operations.
+/// # Journaling Results
+///
+/// Restate uses an execution log for replay after failures and suspensions.
+/// This means that non-deterministic results (e.g. database responses, UUID generation) need to be stored in the execution log.
+/// The SDK offers some functionalities to help you with this:
+/// 1. **[Journaled actions][journaling_results#journaled-actions]**: Run any block of code and store the result in Restate. Restate replays the result instead of re-executing the block on retries.
+/// 3. **[Random generators][journaling_results#generating-randoms]**: Built-in helpers for generating stable UUIDs and random numbers.
+///
+/// ## Journaled actions
+/// You can store the result of a (non-deterministic) operation in the Restate execution log (e.g. database requests, HTTP calls, etc).
+/// Restate replays the result instead of re-executing the operation on retries.
+///
+/// Here is an example of a database request for which the string response is stored in Restate:
+/// ```
+/// # use restate_sdk::prelude::*;
+/// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
+/// let response = ctx.run(|| do_db_request()).await?;
+/// # Ok(())
+/// # }
+/// # fn do_db_request() -> Result<String, HandlerError>{
+/// # Ok("Hello".to_string())
+/// # }
+/// ```
+///
+/// You cannot use the Restate context within `ctx.run`.
+/// This includes actions such as getting state, calling another service, and nesting other journaled actions.
+///
+/// You can store any result value that implements the `Serialize` and `Deserialize` trait ([see serialization docs][serialization]).
+///
+/// **Caution: Immediately await journaled actions:**
+/// Always immediately await `ctx.run`, before doing any other context calls.
+/// If not, you might bump into non-determinism errors during replay,
+/// because the journaled result can get interleaved with the other context calls in the journal in a non-deterministic way.
+///
+///
+/// ## Generating randoms
+/// The SDK provides helper functions for the deterministic generation of UUIDs and random numbers. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
+///
+/// ### Generating UUIDs
+///
+/// You can use these UUIDs to generate stable idempotency keys, to deduplicate operations. For example, you can use this to let a payment service avoid duplicate payments during retries.
+///
+/// Do not use this in cryptographic contexts.
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// # use uuid::Uuid;
+/// # async fn uuid_generate(mut ctx: Context<'_>) {
+/// let uuid: Uuid = ctx.rand_uuid();
+/// # }
+/// ```
+///
+///
+/// ### Generating random numbers
+///
+/// This returns a new pseudorandom float within the range `[0,1]`.
+/// This is the equivalent of JS `Math.random()` but deterministically replayable.
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// # use rand::Rng;
+/// async fn rand_generate(mut ctx: Context<'_>) {
+/// let x: u32 = ctx.rand().gen();
+/// # }
+/// ```
 pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// Run a non-deterministic operation and record its result.
     #[must_use]
@@ -408,7 +742,49 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSideEffects<'ctx> for CTX {}
 
-/// Trait exposing Restate K/V read functionalities.
+/// # State
+/// You can store key-value state in Restate.
+/// Restate makes sure the state is consistent with the processing of the code execution.
+///
+/// **This feature is only available for Virtual Objects and Workflows:**
+/// - For **Virtual Objects**, the state is isolated per Virtual Object and lives forever (across invocations for that object).
+/// - For **Workflows**, you can think of it as if every workflow execution is a new object. So the state is isolated to a single workflow execution. The state can only be mutated by the `run` handler of the workflow. The other handlers can only read the state.
+///
+/// **Info: Command-line introspection**:
+/// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
+/// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
+///
+/// **Info: Serializing state**:
+/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][serialization]).
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// #
+/// # async fn my_handler(ctx: ObjectContext<'_>) -> Result<(), HandlerError> {
+///     /// 1. Listing state keys
+///     /// List all the state keys that have entries in the state store for this object, via:
+///     let keys = ctx.get_keys().await?;
+///
+///     /// 2. Getting a state value
+///     let my_string = ctx
+///         .get::<String>("my-key")
+///         .await?
+///         .unwrap_or(String::from("my-default"));
+///     let my_number = ctx.get::<f64>("my-number-key").await?.unwrap_or_default();
+///
+///     /// 3. Setting a state value
+///     ctx.set("my-key", String::from("my-value"));
+///
+///     /// 4. Clearing a state value
+///     ctx.clear("my-key");
+///
+///     /// 5. Clearing all state values
+///     /// Deletes all the state in Restate for the object
+///     ctx.clear_all();
+/// #    Ok(())
+/// # }
+/// ```
+///
 pub trait ContextReadState<'ctx>: private::SealedContext<'ctx> {
     /// Get state
     fn get<T: Deserialize + 'static>(
@@ -429,7 +805,49 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanReadState> Cont
 {
 }
 
-/// Trait exposing Restate K/V write functionalities.
+/// # State
+/// You can store key-value state in Restate.
+/// Restate makes sure the state is consistent with the processing of the code execution.
+///
+/// **This feature is only available for Virtual Objects and Workflows:**
+/// - For **Virtual Objects**, the state is isolated per Virtual Object and lives forever (across invocations for that object).
+/// - For **Workflows**, you can think of it as if every workflow execution is a new object. So the state is isolated to a single workflow execution. The state can only be mutated by the `run` handler of the workflow. The other handlers can only read the state.
+///
+/// **Info: Command-line introspection**:
+/// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
+/// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
+///
+/// **Info: Serializing state**:
+/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][serialization]).
+///
+/// ```
+/// # use restate_sdk::prelude::*;
+/// #
+/// # async fn my_handler(ctx: ObjectContext<'_>) -> Result<(), HandlerError> {
+///     /// 1. Listing state keys
+///     /// List all the state keys that have entries in the state store for this object, via:
+///     let keys = ctx.get_keys().await?;
+///
+///     /// 2. Getting a state value
+///     let my_string = ctx
+///         .get::<String>("my-key")
+///         .await?
+///         .unwrap_or(String::from("my-default"));
+///     let my_number = ctx.get::<f64>("my-number-key").await?.unwrap_or_default();
+///
+///     /// 3. Setting a state value
+///     ctx.set("my-key", String::from("my-value"));
+///
+///     /// 4. Clearing a state value
+///     ctx.clear("my-key");
+///
+///     /// 5. Clearing all state values
+///     /// Deletes all the state in Restate for the object
+///     ctx.clear_all();
+/// #    Ok(())
+/// # }
+/// ```
+///
 pub trait ContextWriteState<'ctx>: private::SealedContext<'ctx> {
     /// Set state
     fn set<T: Serialize + 'static>(&self, key: &str, t: T) {

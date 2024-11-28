@@ -34,6 +34,31 @@
 //! }
 //! ```
 //!
+//! You can define three types of services:
+//! - [Service](restate_sdk_macros::service)
+//! - [Virtual Object](object)
+//! - [Workflow](workflow)
+//!
+//! ## Features
+//! - [Service Communication][crate::context::ContextClient]
+//! - [Journaling Results][crate::context::ContextSideEffects]
+//! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState)
+//! - [Scheduling & Timers][crate::context::ContextTimers]
+//! - [Awakeables][crate::context::ContextAwakeables]
+//! - [Error Handling][crate::errors]
+//! - [Serialization][crate::serde]
+//! - [Serving][crate::http_server]
+//!
+//!
+//! # Logging
+//!
+//! You can set the logging level of the Rust SDK via the `RESTATE_LOGGING` environment variable and the level values can be `TRACE`, `DEBUG`, `INFO`, `WARN` or `ERROR`.
+//!
+//! The default log level is `INFO`.
+//!
+//! If you set the level to `TRACE`, you can also get more verbose logging of the journal by setting the environment variable `RESTATE_JOURNAL_LOGGING=TRACE`.
+//!
+//!
 //! For a general overview about Restate, check out the [Restate documentation](https://docs.restate.dev).
 
 pub mod endpoint;
@@ -168,24 +193,150 @@ pub use restate_sdk_macros::service;
 /// ```
 pub use restate_sdk_macros::object;
 
+///
+/// # Workflows
+///
 /// Entry-point macro to define a Restate [Workflow](https://docs.restate.dev/concepts/services#workflows).
 ///
-/// For more details, check the [`service` macro](macro@crate::service) documentation.
+/// Workflows are a sequence of steps that gets executed durably.
+/// A workflow can be seen as a special type of [Virtual Object](https://docs.restate.dev/concepts/services#virtual-objects) with some special characteristics:
+///
+/// - Each workflow definition has a `run` handler that implements the workflow logic.
+/// - The `run` handler executes exactly one time for each workflow instance (object / key).
+/// - A workflow definition can implement other handlers that can be called multiple times, and can interact with the workflow.
+/// - Workflows have access to the `WorkflowContext` and `SharedWorkflowContext`, giving them some extra functionality, for example [Durable Promises][workflows#signaling-workflows] to signal workflows.
+///
+/// **Note: Workflow retention time**:
+/// The retention time of a workflow execution is 24 hours after the finishing of the `run` handler.
+/// After this timeout any [K/V state][state] is cleared, the workflow's shared handlers cannot be called anymore, and the [Durable Promises][workflows#signaling-workflows] are discarded.
+/// The retention time can be configured via the [Admin API](https://docs.restate.dev//references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
+///
+/// ## Implementing workflows
+/// Have a look at the code example to get a better understanding of how workflows are implemented:
+///
+/// ```
+/// use restate_sdk::prelude::*;
+///
+/// #[restate_sdk::workflow]
+/// pub trait SignupWorkflow {
+///     async fn run(req: String) -> Result<bool, HandlerError>;
+///     #[shared]
+///     async fn click(click_secret: String) -> Result<(), HandlerError>;
+///     #[shared]
+///     async fn get_status() -> Result<String, HandlerError>;
+/// }
+///
+/// pub struct SignupWorkflowImpl;
+///
+/// impl SignupWorkflow for SignupWorkflowImpl {
+///     async fn run(&self, mut ctx: WorkflowContext<'_>, email: String) -> Result<bool, HandlerError> {
+///
+///         let secret = ctx.rand_uuid().to_string();
+///         ctx.run(|| send_email_with_link(email, secret)).await?;
+///         ctx.set("status", "Email sent".to_string());
+///
+///         let click_secret = ctx.promise::<String>("email.clicked").await?;
+///         ctx.set("status", "Email clicked".to_string());
+///
+///         Ok(click_secret == secret)
+///     }
+///     async fn click(&self, ctx: SharedWorkflowContext<'_>, click_secret: String) -> Result<(), HandlerError> {
+///         ctx.resolve_promise::<String>("email.clicked", click_secret);
+///         Ok(())
+///     }
+///     async fn get_status(&self, ctx: SharedWorkflowContext<'_>) -> Result<String, HandlerError> {
+///         Ok(ctx.get("status").unwrap_or("unknown".to_string()))
+///     }
+/// }
+/// # fn send_email_with_link(email: String, secret: String) -> Result<(), HandlerError> {
+/// #    Ok(())
+/// # }
+///
+/// #[tokio::main]
+/// async fn main() {
+///     tracing_subscriber::fmt::init();
+///     HttpServer::new(Endpoint::builder().bind(SignupWorkflowImpl.serve()).build())
+///         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+///         .await;
+/// }
+/// ```
+///
+/// ### The run handler
+///
+/// Every workflow needs a `run` handler.
+/// This handler has access to the same SDK features as Service and Virtual Object handlers.
+/// In the example above, we use [`ctx.run`][journaling_results] to log the sending of the email in Restate and avoid re-execution on replay.
+///
 ///
 /// ## Shared handlers
 ///
 /// To define a shared handler, simply annotate the handler with the `#[shared]` annotation:
 ///
-/// ```rust,no_run
-/// use restate_sdk::prelude::*;
+/// ### Querying workflows
 ///
-/// #[restate_sdk::workflow]
-/// trait Billing {
-///     async fn run() -> Result<u64, TerminalError>;
-///     #[shared]
-///     async fn get_status() -> Result<String, TerminalError>;
-/// }
+/// Similar to Virtual Objects, you can retrieve the [K/V state][state] of workflows via the other handlers defined in the workflow definition,
+/// In the example we expose the status of the workflow to external clients.
+/// Every workflow execution can be seen as a new object, so the state is isolated to a single workflow execution.
+/// The state can only be mutated by the `run` handler of the workflow. The other handlers can only read the state.
+///
+/// ### Signaling workflows
+///
+/// You can use Durable Promises to interact with your running workflows: to let the workflow block until an event occurs, or to send a signal / information into or out of a running workflow.
+/// These promises are durable and distributed, meaning they survive crashes and can be resolved or rejected by any handler in the workflow.
+///
+/// Do the following:
+/// 1. Create a promise that is durable and distributed in the `run` handler, and wait for its completion. In the example, we wait on the promise `email.clicked`.
+/// 2. Resolve or reject the promise in another handler in the workflow. This can be done at most one time.
+///     In the example, the `click` handler gets called when the user clicks a link in an email and resolves the `email.clicked` promise.
+///
+/// You can also use this pattern in reverse and let the `run` handler resolve promises that other handlers are waiting on.
+/// For example, the `run` handler could resolve a promise when it finishes a step of the workflow, so that other handlers can request whether this step has been completed.
+///
+/// ### Serving and registering workflows
+///
+/// You serve workflows in the same way as Services and Virtual Objects. Have a look at the [Serving docs][serving].
+/// Make sure you [register the endpoint or Lambda handler](https://docs.restate.dev/operate/registration) in Restate before invoking it.
+///
+/// **Tip: Workflows-as-code with Restate**:
+/// [Check out some examples of workflows-as-code with Restate on the use case page](https://docs.restate.dev/use-cases/workflows).
+///
+///
+/// ## Submitting workflows from a Restate service
+/// [**Submit/query/signal**][service_communication]:
+/// Call the workflow handlers in the same way as for Services and Virtual Objects.
+/// You can only call the `run` handler (submit) once per workflow ID (here `"someone"`).
+/// Check out the [Service Communication docs][service_communication] for more information.
+///
+/// ## Submitting workflows over HTTP
+/// [**Submit/query/signal**](https://docs.restate.dev/invoke/http#request-response-calls-over-http):
+/// Call any handler of the workflow in the same way as for Services and Virtual Objects.
+/// This returns the result of the handler once it has finished.
+/// Add `/send` to the path for one-way calls.
+/// You can only call the `run` handler once per workflow ID (here `"someone"`).
+///
+/// ```shell
+/// curl localhost:8080/SignupWorkflow/someone/run \
+///     -H 'content-type: application/json' \
+///     -d '"someone@restate.dev"'
 /// ```
+///
+/// [**Attach/peek**](https://docs.restate.dev/invoke/http#retrieve-result-of-invocations-and-workflows):
+/// This lets you retrieve the result of a workflow or check if it's finished.
+///
+/// ```shell
+/// curl localhost:8080/restate/workflow/SignupWorkflow/someone/attach
+/// curl localhost:8080/restate/workflow/SignupWorkflow/someone/output
+/// ```
+///
+/// ## Inspecting workflows
+///
+/// Have a look at the [introspection docs](https://docs.restate.dev/operate/introspection) on how to inspect workflows.
+/// You can use this to for example:
+/// - [Inspect the progress of a workflow by looking at the invocation journal](https://docs.restate.dev/operate/introspection#inspecting-the-invocation-journal)
+/// - [Inspect the K/V state of a workflow](https://docs.restate.dev/operate/introspection#inspecting-application-state)
+///
+///
+/// For more details, check the [`service` macro](macro@crate::service) documentation.
 pub use restate_sdk_macros::workflow;
 
 /// Prelude contains all the useful imports you need to get started with Restate.

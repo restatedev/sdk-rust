@@ -1,5 +1,21 @@
-//! Error types to use within handlers.
-
+//! # Error Handling
+//!
+//! Restate handles retries for failed invocations.
+//! By default, Restate does infinite retries with an exponential backoff strategy.
+//!
+//! For failures for which you do not want retries, but instead want the invocation to end and the error message
+//! to be propagated back to the caller, you can throw a **terminal error**.
+//!
+//! You can throw a terminal exception with an optional HTTP status code and a message anywhere in your handler, as follows:
+//!
+//! ```
+//! # use restate_sdk::prelude::*;
+//! # async fn handle() -> Result<(), HandlerError> {
+//! Err(TerminalError::new("This is a terminal error").into())
+//! # }
+//! ```
+//!
+//! You can catch terminal exceptions. For example, you can catch the terminal exception that comes out of a [call to another service][service_communication#request-response-calls], and build your control flow around it.
 use restate_sdk_shared_core::Failure;
 use std::error::Error as StdError;
 use std::fmt;

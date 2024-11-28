@@ -1,4 +1,59 @@
-//! Battery-packed HTTP server to expose services.
+//! # Serving
+//! Restate services run as an HTTP endpoint.
+//!
+//! ## Creating an HTTP endpoint
+//! 1. Create the endpoint
+//! 2. Bind one or multiple services to it.
+//! 3. Listen on the specified port (default `9080`) for connections and requests.
+//!
+//! ```
+//! use crate::_examples::my_service::{MyService, MyServiceImpl};
+//! use crate::_examples::my_virtual_object::{MyVirtualObject, MyVirtualObjectImpl};
+//! use crate::_examples::my_workflow::{MyWorkflow, MyWorkflowImpl};
+//! use restate_sdk::endpoint::Endpoint;
+//! use restate_sdk::http_server::HttpServer;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     tracing_subscriber::fmt::init();
+//!     HttpServer::new(
+//!         Endpoint::builder()
+//!             .bind(MyServiceImpl.serve())
+//!             .bind(MyVirtualObjectImpl.serve())
+//!             .bind(MyWorkflowImpl.serve())
+//!             .build(),
+//!     )
+//!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+//!     .await;
+//! }
+//! ```
+//!
+//!
+//! ## Validating request identity
+//!
+//! SDKs can validate that incoming requests come from a particular Restate
+//! instance. You can find out more about request identity in the [Security docs](https://docs.restate.dev/operate/security#locking-down-service-access).
+//! Add the identity key to your endpoint as follows:
+//!
+//! ```
+//! # use crate::_examples::my_service::{MyService, MyServiceImpl};
+//! # use restate_sdk::endpoint::Endpoint;
+//! # use restate_sdk::http_server::HttpServer;
+//! #
+//! # #[tokio::main]
+//! # async fn main() {
+//!  #    tracing_subscriber::fmt::init();
+//!     HttpServer::new(
+//!         Endpoint::builder()
+//!             .bind(MyServiceImpl.serve())
+//!             .identity_key("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
+//!             .unwrap()
+//!             .build(),
+//!     )
+//!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+//!     .await;
+//! # }
+//! ```
 
 use crate::endpoint::Endpoint;
 use crate::hyper::HyperEndpoint;
