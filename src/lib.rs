@@ -1,7 +1,26 @@
 //! # Restate Rust SDK
 //!
-//! [Restate](https://restate.dev/) is a system for easily building resilient applications using _distributed durable async/await_.
+//! [Restate](https://restate.dev/) is a system for easily building resilient applications.
 //! This crate is the Restate SDK for writing Restate services using Rust.
+//!
+//! ## New to Restate?
+//!
+//! If you are new to Restate, we recommend the following resources:
+//!
+//! - [Learn about the concepts of Restate](https://docs.restate.dev/concepts/durable_building_blocks)
+//! - Use cases:
+//!     - [Workflows](https://docs.restate.dev/use-cases/workflows)
+//!     - [Microservice orchestration](https://docs.restate.dev/use-cases/microservice-orchestration)
+//!     - [Event processing](https://docs.restate.dev/use-cases/event-processing)
+//!     - [Async tasks](https://docs.restate.dev/use-cases/async-tasks)
+//! - [Quickstart](https://docs.restate.dev/get_started/quickstart?sdk=rust)
+//! - [Do the Tour of Restate to try out the APIs](https://docs.restate.dev/get_started/tour/?sdk=rust)
+//!
+//! # SDK Overview
+//!
+//! The Restate Rust SDK lets you implement durable handlers. Handlers can be part of three types of services:
+//!
+//! Let's have a look at how to define them.
 //!
 //! ```rust,no_run
 //! // The prelude contains all the imports you need to get started
@@ -34,7 +53,8 @@
 //! }
 //! ```
 //!
-//! You can define three types of services:
+//! ## Service types
+//! Learn more about each service type:
 //! - [Service](restate_sdk_macros::service)
 //! - [Virtual Object](object)
 //! - [Workflow](workflow)
@@ -53,16 +73,19 @@
 //! - [Serving][crate::http_server]: Start an HTTP server to expose services.
 //!
 //!
-//! # Logging
+//! ### Logging
 //!
 //! You can set the logging level of the Rust SDK via the `RESTATE_LOGGING` environment variable and the level values can be `TRACE`, `DEBUG`, `INFO`, `WARN` or `ERROR`.
-//!
 //! The default log level is `INFO`.
 //!
 //! If you set the level to `TRACE`, you can also get more verbose logging of the journal by setting the environment variable `RESTATE_JOURNAL_LOGGING=TRACE`.
 //!
+//! # References
 //!
 //! For a general overview about Restate, check out the [Restate documentation](https://docs.restate.dev).
+//!
+//! You can find more Rust examples in the [examples repo](https://github.com/restatedev/examples)
+//!
 
 pub mod endpoint;
 pub mod service;
