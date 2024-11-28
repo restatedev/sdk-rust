@@ -216,7 +216,7 @@ impl<'ctx> WorkflowContext<'ctx> {
 ///
 /// ## Scheduling Async Tasks
 ///
-/// To schedule a handler to be called at a later time, have a look at the documentation on [delayed calls][service_communication#delayed-calls].
+/// To schedule a handler to be called at a later time, have a look at the documentation on [delayed calls][crate::context::ContextClient#delayed-calls].
 ///
 ///
 /// ## Durable sleep
@@ -577,7 +577,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// ## Completing awakeables
 ///
 /// The external process completes the awakeable by either resolving it with an optional payload or by rejecting it
-/// with its ID and a reason for the failure. This throws [a terminal error][error_handling] in the waiting handler.
+/// with its ID and a reason for the failure. This throws [a terminal error][crate::errors] in the waiting handler.
 ///
 /// - Resolving over HTTP with its ID and an optional payload:
 ///
@@ -609,7 +609,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// # }
 /// ```
 ///
-/// **Note**: You can return any payload that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][serialization]).
+/// **Note**: You can return any payload that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 /// **Note**: When running on Function-as-a-Service platforms, such as AWS Lambda, Restate suspends the handler while waiting for the awakeable to be completed.
 /// Since you only pay for the time that the handler is actually running, you don't pay while waiting for the external process to return.
@@ -644,8 +644,8 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// Restate uses an execution log for replay after failures and suspensions.
 /// This means that non-deterministic results (e.g. database responses, UUID generation) need to be stored in the execution log.
 /// The SDK offers some functionalities to help you with this:
-/// 1. **[Journaled actions][journaling_results#journaled-actions]**: Run any block of code and store the result in Restate. Restate replays the result instead of re-executing the block on retries.
-/// 3. **[Random generators][journaling_results#generating-randoms]**: Built-in helpers for generating stable UUIDs and random numbers.
+/// 1. **[Journaled actions][crate::context::ContextSideEffects#journaled-actions]**: Run any block of code and store the result in Restate. Restate replays the result instead of re-executing the block on retries.
+/// 3. **[Random generators][crate::context::ContextSideEffects#generating-randoms]**: Built-in helpers for generating stable UUIDs and random numbers.
 ///
 /// ## Journaled actions
 /// You can store the result of a (non-deterministic) operation in the Restate execution log (e.g. database requests, HTTP calls, etc).
@@ -666,7 +666,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// You cannot use the Restate context within `ctx.run`.
 /// This includes actions such as getting state, calling another service, and nesting other journaled actions.
 ///
-/// You can store any result value that implements the `Serialize` and `Deserialize` trait ([see serialization docs][serialization]).
+/// You can store any result value that implements the `Serialize` and `Deserialize` trait ([see serialization docs][crate::serde]).
 ///
 /// **Caution: Immediately await journaled actions:**
 /// Always immediately await `ctx.run`, before doing any other context calls.
@@ -755,7 +755,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSideEffects<'ctx> for CTX {
 /// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
 ///
 /// **Info: Serializing state**:
-/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][serialization]).
+/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 /// ```
 /// # use restate_sdk::prelude::*;
@@ -818,7 +818,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanReadState> Cont
 /// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
 ///
 /// **Info: Serializing state**:
-/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][serialization]).
+/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 /// ```
 /// # use restate_sdk::prelude::*;

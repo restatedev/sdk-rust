@@ -40,14 +40,17 @@
 //! - [Workflow](workflow)
 //!
 //! ## Features
-//! - [Service Communication][crate::context::ContextClient]
-//! - [Journaling Results][crate::context::ContextSideEffects]
-//! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState)
-//! - [Scheduling & Timers][crate::context::ContextTimers]
-//! - [Awakeables][crate::context::ContextAwakeables]
-//! - [Error Handling][crate::errors]
-//! - [Serialization][crate::serde]
-//! - [Serving][crate::http_server]
+//!
+//! Have a look at the following SDK capabilities:
+//!
+//! - [Service Communication][crate::context::ContextClient]: Durable RPC and messaging between services (optionally with a delay).
+//! - [Journaling Results][crate::context::ContextSideEffects]: Persist results in Restate's log to avoid re-execution on retries
+//! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
+//! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
+//! - [Awakeables][crate::context::ContextAwakeables]: Durable Futures to wait for events and the completion of external tasks.
+//! - [Error Handling][crate::errors]: Restate retries failures infinitely. Use `TerminalError` to stop retries.
+//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server.
+//! - [Serving][crate::http_server]: Start an HTTP server to expose services.
 //!
 //!
 //! # Logging
@@ -204,11 +207,11 @@ pub use restate_sdk_macros::object;
 /// - Each workflow definition has a `run` handler that implements the workflow logic.
 /// - The `run` handler executes exactly one time for each workflow instance (object / key).
 /// - A workflow definition can implement other handlers that can be called multiple times, and can interact with the workflow.
-/// - Workflows have access to the `WorkflowContext` and `SharedWorkflowContext`, giving them some extra functionality, for example [Durable Promises][workflows#signaling-workflows] to signal workflows.
+/// - Workflows have access to the `WorkflowContext` and `SharedWorkflowContext`, giving them some extra functionality, for example Durable Promises to signal workflows.
 ///
 /// **Note: Workflow retention time**:
 /// The retention time of a workflow execution is 24 hours after the finishing of the `run` handler.
-/// After this timeout any [K/V state][state] is cleared, the workflow's shared handlers cannot be called anymore, and the [Durable Promises][workflows#signaling-workflows] are discarded.
+/// After this timeout any [K/V state][crate::context::ContextReadState] is cleared, the workflow's shared handlers cannot be called anymore, and the Durable Promises are discarded.
 /// The retention time can be configured via the [Admin API](https://docs.restate.dev//references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
 ///
 /// ## Implementing workflows
@@ -265,7 +268,7 @@ pub use restate_sdk_macros::object;
 ///
 /// Every workflow needs a `run` handler.
 /// This handler has access to the same SDK features as Service and Virtual Object handlers.
-/// In the example above, we use [`ctx.run`][journaling_results] to log the sending of the email in Restate and avoid re-execution on replay.
+/// In the example above, we use [`ctx.run`][crate::context::ContextSideEffects] to log the sending of the email in Restate and avoid re-execution on replay.
 ///
 ///
 /// ## Shared handlers
@@ -274,7 +277,7 @@ pub use restate_sdk_macros::object;
 ///
 /// ### Querying workflows
 ///
-/// Similar to Virtual Objects, you can retrieve the [K/V state][state] of workflows via the other handlers defined in the workflow definition,
+/// Similar to Virtual Objects, you can retrieve the [K/V state][crate::context::ContextReadState] of workflows via the other handlers defined in the workflow definition,
 /// In the example we expose the status of the workflow to external clients.
 /// Every workflow execution can be seen as a new object, so the state is isolated to a single workflow execution.
 /// The state can only be mutated by the `run` handler of the workflow. The other handlers can only read the state.
@@ -294,7 +297,7 @@ pub use restate_sdk_macros::object;
 ///
 /// ### Serving and registering workflows
 ///
-/// You serve workflows in the same way as Services and Virtual Objects. Have a look at the [Serving docs][serving].
+/// You serve workflows in the same way as Services and Virtual Objects. Have a look at the [Serving docs][crate::http_server].
 /// Make sure you [register the endpoint or Lambda handler](https://docs.restate.dev/operate/registration) in Restate before invoking it.
 ///
 /// **Tip: Workflows-as-code with Restate**:
@@ -302,10 +305,10 @@ pub use restate_sdk_macros::object;
 ///
 ///
 /// ## Submitting workflows from a Restate service
-/// [**Submit/query/signal**][service_communication]:
+/// [**Submit/query/signal**][crate::context::ContextClient]:
 /// Call the workflow handlers in the same way as for Services and Virtual Objects.
 /// You can only call the `run` handler (submit) once per workflow ID (here `"someone"`).
-/// Check out the [Service Communication docs][service_communication] for more information.
+/// Check out the [Service Communication docs][crate::context::ContextClient] for more information.
 ///
 /// ## Submitting workflows over HTTP
 /// [**Submit/query/signal**](https://docs.restate.dev/invoke/http#request-response-calls-over-http):

@@ -15,7 +15,7 @@
 //! # }
 //! ```
 //!
-//! You can catch terminal exceptions. For example, you can catch the terminal exception that comes out of a [call to another service][service_communication#request-response-calls], and build your control flow around it.
+//! You can catch terminal exceptions. For example, you can catch the terminal exception that comes out of a [call to another service][crate::context::ContextClient], and build your control flow around it.
 use restate_sdk_shared_core::Failure;
 use std::error::Error as StdError;
 use std::fmt;
