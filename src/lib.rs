@@ -195,10 +195,18 @@
 //!
 //! ### Logging
 //!
-//! You can set the logging level of the Rust SDK via the `RESTATE_LOGGING` environment variable and the level values can be `TRACE`, `DEBUG`, `INFO`, `WARN` or `ERROR`.
-//! The default log level is `INFO`.
+//! The rust SDK uses the [tracing crate][tracing], so you need to configure the `tracing_subscriber` to get logs:
+//! ```rust,no_run
+//! #[tokio::main]
+//! async fn main() {
+//!     //! To enable logging
+//!     tracing_subscriber::fmt::init();
+//! 
+//!     // Start http server etc...
+//! }
+//! ```
 //!
-//! If you set the level to `TRACE`, you can also get more verbose logging of the journal by setting the environment variable `RESTATE_JOURNAL_LOGGING=TRACE`.
+//! For more information, have a look at the [tracing subscriber doc](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html#filtering-events-with-environment-variables).
 //!
 //! # References
 //!
