@@ -24,8 +24,6 @@
 //! - [Virtual Objects](https://docs.restate.dev/concepts/services/#virtual-objects): an object consists of a collection of durable handlers and isolated K/V state. Virtual Objects are useful for modeling stateful entities, where at most one handler can run at a time per object.
 //! - [Workflows](https://docs.restate.dev/concepts/services/#workflows): Workflows have a `run` handler that executes exactly once per workflow instance, and executes a set of steps durably. Workflows can have other handlers that can be called multiple times and interact with the workflow.
 //!
-//! Let's have a look at how to define them.
-//!
 //! ## Services
 //!
 //! [Services](https://docs.restate.dev/concepts/services/#services-1) and their handlers are defined as follows:
@@ -37,22 +35,22 @@
 //! // Define the service using Rust traits
 //! #[restate_sdk::service]
 //! trait MyService {
-//!     #[name = "myHandler"]
 //!     async fn my_handler(greeting: String) -> Result<String, HandlerError>;
 //! }
 //!
 //! // Implement the service
 //! struct MyServiceImpl;
 //! impl MyService for MyServiceImpl {
+//!
 //!     async fn my_handler(&self, ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
 //!         Ok(format!("{greeting}!"))
 //!     }
+//!
 //! }
 //!
 //! // Start the HTTP server to expose services
 //! #[tokio::main]
 //! async fn main() {
-//!     tracing_subscriber::fmt::init();
 //!     HttpServer::new(Endpoint::builder().bind(MyServiceImpl.serve()).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
@@ -86,6 +84,7 @@
 //! pub struct MyVirtualObjectImpl;
 //!
 //! impl MyVirtualObject for MyVirtualObjectImpl {
+//!
 //!     async fn my_handler(
 //!         &self,
 //!         ctx: ObjectContext<'_>,
@@ -93,6 +92,7 @@
 //!     ) -> Result<String, HandlerError> {
 //!         Ok(format!("{} {}", greeting, ctx.key()))
 //!     }
+//!
 //!     async fn my_concurrent_handler(
 //!         &self,
 //!         ctx: SharedObjectContext<'_>,
@@ -100,11 +100,11 @@
 //!     ) -> Result<String, HandlerError> {
 //!         Ok(format!("{} {}", greeting, ctx.key()))
 //!     }
+//!
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     tracing_subscriber::fmt::init();
 //!     HttpServer::new(
 //!         Endpoint::builder()
 //!             .bind(MyVirtualObjectImpl.serve())
@@ -139,22 +139,24 @@
 //! pub struct MyWorkflowImpl;
 //!
 //! impl MyWorkflow for MyWorkflowImpl {
+//!
 //!     async fn run(&self, ctx: WorkflowContext<'_>, req: String) -> Result<String, HandlerError> {
 //!         //! implement workflow logic here
 //!
 //!         Ok(String::from("success"))
 //!     }
+//!
 //!     async fn interact_with_workflow(&self, ctx: SharedWorkflowContext<'_>) -> Result<(), HandlerError> {
 //!         //! implement interaction logic here
 //!         //! e.g. resolve a promise that the workflow is waiting on
 //!
 //!         Ok(())
 //!     }
+//!
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     tracing_subscriber::fmt::init();
 //!     HttpServer::new(Endpoint::builder().bind(MyWorkflowImpl.serve()).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
@@ -373,8 +375,8 @@ pub use restate_sdk_macros::object;
 /// pub struct SignupWorkflowImpl;
 ///
 /// impl SignupWorkflow for SignupWorkflowImpl {
-///     async fn run(&self, mut ctx: WorkflowContext<'_>, email: String) -> Result<bool, HandlerError> {
 ///
+///     async fn run(&self, mut ctx: WorkflowContext<'_>, email: String) -> Result<bool, HandlerError> {
 ///         let secret = ctx.rand_uuid().to_string();
 ///         ctx.run(|| send_email_with_link(email.clone(), secret.clone())).await?;
 ///         ctx.set("status", "Email sent".to_string());
@@ -384,13 +386,16 @@ pub use restate_sdk_macros::object;
 ///
 ///         Ok(click_secret == secret)
 ///     }
+///
 ///     async fn click(&self, ctx: SharedWorkflowContext<'_>, click_secret: String) -> Result<(), HandlerError> {
 ///         ctx.resolve_promise::<String>("email.clicked", click_secret);
 ///         Ok(())
 ///     }
+///
 ///     async fn get_status(&self, ctx: SharedWorkflowContext<'_>) -> Result<String, HandlerError> {
 ///         Ok(ctx.get("status").await?.unwrap_or("unknown".to_string()))
 ///     }
+///
 /// }
 /// # async fn send_email_with_link(email: String, secret: String) -> Result<(), HandlerError> {
 /// #    Ok(())
@@ -398,7 +403,6 @@ pub use restate_sdk_macros::object;
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     tracing_subscriber::fmt::init();
 ///     HttpServer::new(Endpoint::builder().bind(SignupWorkflowImpl.serve()).build())
 ///         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 ///         .await;

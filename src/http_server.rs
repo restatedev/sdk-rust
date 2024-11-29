@@ -17,7 +17,6 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     tracing_subscriber::fmt::init();
 //!     HttpServer::new(
 //!         Endpoint::builder()
 //!             .bind(MyServiceImpl.serve())
@@ -46,7 +45,6 @@
 //! #
 //! # #[tokio::main]
 //! # async fn main() {
-//!  #    tracing_subscriber::fmt::init();
 //!     HttpServer::new(
 //!         Endpoint::builder()
 //!             .bind(MyServiceImpl.serve())

@@ -232,14 +232,14 @@ impl<'ctx> WorkflowContext<'ctx> {
 /// # }
 /// ```
 ///
-/// **Tip: Cost savings on FaaS**:
+/// **Cost savings on FaaS**:
 /// Restate suspends the handler while it is sleeping, to free up resources.
 /// This is beneficial for AWS Lambda deployments, since you don't pay for the time the handler is sleeping.
 ///
-/// **Info: Sleeping in Virtual Objects**:
+/// **Sleeping in Virtual Objects**:
 /// Virtual Objects only process a single invocation at a time, so the Virtual Object will be blocked while sleeping.
 ///
-/// <details className="grey-details">
+/// <details>
 /// <summary>Clock synchronization Restate Server vs. SDK</summary>
 ///
 /// The Restate SDK calculates the wake-up time based on the delay you specify.
@@ -309,21 +309,9 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// 2. **Specify the handler** you want to call and supply the request.
 /// 3. **Await** the call to retrieve the response.
 ///
-/// **Tip: No need for manual retry logic**:
-/// These calls are proxied by Restate, and get logged in the journal.
-/// In case of failures, Restate takes care of retries.
-///
-/// **Note: Workflow retention time**:
-/// Once the `run` handler of the workflow has finished, the other handlers can still be called up to the retention time of the workflow, by default 24 hours.
-/// This can be configured via the [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
-///
-/// **Caution: Deadlocks with Virtual Objects**:
-/// Request-response calls to Virtual Objects can lead to deadlocks, in which the Virtual Object remains locked and can't process any more requests.
-/// Some example cases:
-/// - Cross deadlock between Virtual Object A and B: A calls B, and B calls A, both using same keys.
-/// - Cyclical deadlock: A calls B, and B calls C, and C calls A again.
-///
-/// In this situation, you can use the CLI to unblock the Virtual Object manually by [cancelling invocations](https://docs.restate.dev/operate/invocation#cancelling-invocations).
+/// **No need for manual retry logic**:
+/// Restate proxies all the calls and logs them in the journal.
+/// In case of failures, Restate takes care of retries, so you don't need to implement this yourself here.
 ///
 /// ## Sending messages
 ///
@@ -359,7 +347,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///  # }
 /// ```
 ///
-/// **Tip: No need for message queues**:
+/// **No need for message queues**:
 /// Without Restate, you would usually put a message queue in between the two services, to guarantee the message delivery.
 /// Restate eliminates the need for a message queue because Restate durably logs the request and makes sure it gets executed.
 ///
@@ -400,11 +388,10 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///  # }
 /// ```
 ///
-/// **Tip: Scheduling async tasks**:
 /// You can also use this functionality to schedule async tasks.
 /// Restate will make sure the task gets executed at the desired time.
 ///
-/// **Note: Ordering guarantees in Virtual Objects**:
+/// ### Ordering guarantees in Virtual Objects
 /// Invocations to a Virtual Object are executed serially.
 /// Invocations will execute in the same order in which they arrive at Restate.
 /// For example, assume a handler calls the same Virtual Object twice:
@@ -427,6 +414,15 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///
 /// It is guaranteed that call A will execute before call B.
 /// It is not guaranteed though that call B will be executed immediately after call A, as invocations coming from other handlers/sources, could interleave these two calls.
+///
+/// ### Deadlocks with Virtual Objects
+/// Request-response calls to Virtual Objects can lead to deadlocks, in which the Virtual Object remains locked and can't process any more requests.
+/// Some example cases:
+/// - Cross deadlock between Virtual Object A and B: A calls B, and B calls A, both using same keys.
+/// - Cyclical deadlock: A calls B, and B calls C, and C calls A again.
+///
+/// In this situation, you can use the CLI to unblock the Virtual Object manually by [cancelling invocations](https://docs.restate.dev/operate/invocation#cancelling-invocations).
+///
 pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// Create a [`Request`].
     fn request<Req, Res>(
@@ -619,12 +615,12 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// # }
 /// ```
 ///
-/// **Note**: You can return any payload that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
+/// You can return any payload that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
-/// **Note**: When running on Function-as-a-Service platforms, such as AWS Lambda, Restate suspends the handler while waiting for the awakeable to be completed.
+/// When running on Function-as-a-Service platforms, such as AWS Lambda, Restate suspends the handler while waiting for the awakeable to be completed.
 /// Since you only pay for the time that the handler is actually running, you don't pay while waiting for the external process to return.
 ///
-/// **Warning**: Virtual Objects only process a single invocation at a time, so the Virtual Object will be blocked while waiting on the awakeable to be resolved.
+/// **Be aware**: Virtual Objects only process a single invocation at a time, so the Virtual Object will be blocked while waiting on the awakeable to be resolved.
 pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
     /// Create an awakeable
     fn awakeable<T: Deserialize + 'static>(
@@ -655,67 +651,36 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// This means that non-deterministic results (e.g. database responses, UUID generation) need to be stored in the execution log.
 /// The SDK offers some functionalities to help you with this:
 /// 1. **[Journaled actions][crate::context::ContextSideEffects#journaled-actions]**: Run any block of code and store the result in Restate. Restate replays the result instead of re-executing the block on retries.
-/// 3. **[Random generators][crate::context::ContextSideEffects#generating-randoms]**: Built-in helpers for generating stable UUIDs and random numbers.
+/// 2. **[UUID generator][crate::context::ContextSideEffects#generating-uuids]**: Built-in helpers for generating stable UUIDs. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
+/// 3. **[Random generator][crate::context::ContextSideEffects#generating-random-numbers]**: Built-in helpers for generating randoms. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
 ///
-/// ## Journaled actions
-/// You can store the result of a (non-deterministic) operation in the Restate execution log (e.g. database requests, HTTP calls, etc).
-/// Restate replays the result instead of re-executing the operation on retries.
-///
-/// Here is an example of a database request for which the string response is stored in Restate:
-/// ```rust,no_run
-/// # use restate_sdk::prelude::*;
-/// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
-/// let response = ctx.run(|| do_db_request()).await?;
-/// # Ok(())
-/// # }
-/// # async fn do_db_request() -> Result<String, HandlerError>{
-/// # Ok("Hello".to_string())
-/// # }
-/// ```
-///
-/// You cannot use the Restate context within `ctx.run`.
-/// This includes actions such as getting state, calling another service, and nesting other journaled actions.
-///
-/// You can store any result value that implements the `Serialize` and `Deserialize` trait ([see serialization docs][crate::serde]).
-///
-/// **Caution: Immediately await journaled actions:**
-/// Always immediately await `ctx.run`, before doing any other context calls.
-/// If not, you might bump into non-determinism errors during replay,
-/// because the journaled result can get interleaved with the other context calls in the journal in a non-deterministic way.
-///
-///
-/// ## Generating randoms
-/// The SDK provides helper functions for the deterministic generation of UUIDs and random numbers. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
-///
-/// ### Generating UUIDs
-///
-/// You can use these UUIDs to generate stable idempotency keys, to deduplicate operations. For example, you can use this to let a payment service avoid duplicate payments during retries.
-///
-/// Do not use this in cryptographic contexts.
-///
-/// ```rust,no_run
-/// # use restate_sdk::prelude::*;
-/// # use uuid::Uuid;
-/// # async fn uuid_generate(mut ctx: Context<'_>) {
-/// let uuid: Uuid = ctx.rand_uuid();
-/// # }
-/// ```
-///
-///
-/// ### Generating random numbers
-///
-/// This returns a new pseudorandom float within the range `[0,1]`.
-/// This is the equivalent of JS `Math.random()` but deterministically replayable.
-///
-/// ```rust,no_run
-/// # use restate_sdk::prelude::*;
-/// # use rand::Rng;
-/// async fn rand_generate(mut ctx: Context<'_>) {
-/// let x: u32 = ctx.rand().gen();
-/// # }
-/// ```
 pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
-    /// Run a non-deterministic operation and record its result.
+    /// ## Journaled actions
+    /// You can store the result of a (non-deterministic) operation in the Restate execution log (e.g. database requests, HTTP calls, etc).
+    /// Restate replays the result instead of re-executing the operation on retries.
+    ///
+    /// Here is an example of a database request for which the string response is stored in Restate:
+    /// ```rust,no_run
+    /// # use restate_sdk::prelude::*;
+    /// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
+    /// let response = ctx.run(|| do_db_request()).await?;
+    /// # Ok(())
+    /// # }
+    /// # async fn do_db_request() -> Result<String, HandlerError>{
+    /// # Ok("Hello".to_string())
+    /// # }
+    /// ```
+    ///
+    /// You cannot use the Restate context within `ctx.run`.
+    /// This includes actions such as getting state, calling another service, and nesting other journaled actions.
+    ///
+    /// You can store any result value that implements the `Serialize` and `Deserialize` trait ([see serialization docs][crate::serde]).
+    ///
+    /// **Caution: Immediately await journaled actions:**
+    /// Always immediately await `ctx.run`, before doing any other context calls.
+    /// If not, you might bump into non-determinism errors during replay,
+    /// because the journaled result can get interleaved with the other context calls in the journal in a non-deterministic way.
+    ///
     #[must_use]
     fn run<R, F, T>(&self, run_closure: R) -> impl RunFuture<Result<T, TerminalError>> + 'ctx
     where
@@ -733,7 +698,19 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
         private::SealedContext::random_seed(self)
     }
 
+    /// ### Generating random numbers
+    ///
     /// Return a [`rand::Rng`] instance inherently predictable, seeded with [`ContextSideEffects::random_seed`].
+    ///
+    /// For example, you can use this to generate a random number:
+    ///
+    /// ```rust,no_run
+    /// # use restate_sdk::prelude::*;
+    /// # use rand::Rng;
+    /// async fn rand_generate(mut ctx: Context<'_>) {
+    /// let x: u32 = ctx.rand().gen();
+    /// # }
+    /// ```
     ///
     /// This instance is useful to generate identifiers, idempotency keys, and for uniform sampling from a set of options.
     /// If a cryptographically secure value is needed, please generate that externally using [`ContextSideEffects::run`].
@@ -741,8 +718,21 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     fn rand(&mut self) -> &mut rand::prelude::StdRng {
         private::SealedContext::rand(self)
     }
-
-    /// Return a random [`uuid::Uuid`], generated using [`ContextSideEffects::rand`].
+    /// ### Generating UUIDs
+    ///
+    /// Returns a random [`uuid::Uuid`], generated using [`ContextSideEffects::rand`].
+    ///
+    /// You can use these UUIDs to generate stable idempotency keys, to deduplicate operations. For example, you can use this to let a payment service avoid duplicate payments during retries.
+    ///
+    /// Do not use this in cryptographic contexts.
+    ///
+    /// ```rust,no_run
+    /// # use restate_sdk::prelude::*;
+    /// # use uuid::Uuid;
+    /// # async fn uuid_generate(mut ctx: Context<'_>) {
+    /// let uuid: Uuid = ctx.rand_uuid();
+    /// # }
+    /// ```
     #[cfg(all(feature = "rand", feature = "uuid"))]
     fn rand_uuid(&mut self) -> uuid::Uuid {
         let rand = private::SealedContext::rand(self);
@@ -752,20 +742,13 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSideEffects<'ctx> for CTX {}
 
-/// # State
+/// # Reading state
 /// You can store key-value state in Restate.
 /// Restate makes sure the state is consistent with the processing of the code execution.
 ///
 /// **This feature is only available for Virtual Objects and Workflows:**
 /// - For **Virtual Objects**, the state is isolated per Virtual Object and lives forever (across invocations for that object).
 /// - For **Workflows**, you can think of it as if every workflow execution is a new object. So the state is isolated to a single workflow execution. The state can only be mutated by the `run` handler of the workflow. The other handlers can only read the state.
-///
-/// **Info: Command-line introspection**:
-/// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
-/// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
-///
-/// **Info: Serializing state**:
-/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
@@ -794,6 +777,13 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSideEffects<'ctx> for CTX {
 /// #    Ok(())
 /// # }
 /// ```
+///
+/// ### Command-line introspection
+/// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
+/// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
+///
+/// ### Serializing state
+/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 pub trait ContextReadState<'ctx>: private::SealedContext<'ctx> {
     /// Get state
@@ -815,20 +805,13 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanReadState> Cont
 {
 }
 
-/// # State
+/// # Writing State
 /// You can store key-value state in Restate.
 /// Restate makes sure the state is consistent with the processing of the code execution.
 ///
 /// **This feature is only available for Virtual Objects and Workflows:**
 /// - For **Virtual Objects**, the state is isolated per Virtual Object and lives forever (across invocations for that object).
 /// - For **Workflows**, you can think of it as if every workflow execution is a new object. So the state is isolated to a single workflow execution. The state can only be mutated by the `run` handler of the workflow. The other handlers can only read the state.
-///
-/// **Info: Command-line introspection**:
-/// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
-/// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
-///
-/// **Info: Serializing state**:
-/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
@@ -857,6 +840,13 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanReadState> Cont
 /// #    Ok(())
 /// # }
 /// ```
+///
+/// ## Command-line introspection
+/// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
+/// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
+///
+/// ### Serializing state
+/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 pub trait ContextWriteState<'ctx>: private::SealedContext<'ctx> {
     /// Set state
