@@ -6,7 +6,7 @@
 //! For failures for which you do not want retries, but instead want the invocation to end and the error message
 //! to be propagated back to the caller, you can return a [`TerminalError`].
 //!
-//! You can throw a terminal exception with an optional HTTP status code and a message anywhere in your handler, as follows:
+//! You can return a [`TerminalError`] with an optional HTTP status code and a message anywhere in your handler, as follows:
 //!
 //! ```rust,no_run
 //! # use restate_sdk::prelude::*;
