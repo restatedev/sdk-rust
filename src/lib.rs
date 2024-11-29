@@ -195,7 +195,7 @@
 //!
 //! ### Logging
 //!
-//! The rust SDK uses the [tracing crate][tracing], so you need to configure the `tracing_subscriber` to get logs:
+//! This crate uses the [tracing crate][tracing] to emit logs, so you'll need to configure a tracing subscriber to get logs. For example, to configure console logging using `tracing_subscriber::fmt`:
 //! ```rust,no_run
 //! #[tokio::main]
 //! async fn main() {
