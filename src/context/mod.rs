@@ -8,7 +8,6 @@ use std::time::Duration;
 
 mod request;
 mod run;
-
 pub use request::{Request, RequestTarget};
 pub use run::{RunClosure, RunFuture, RunRetryPolicy};
 
@@ -268,7 +267,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// You can do request-response calls to Services, Virtual Objects, and Workflows, in the following way:
 ///
 /// ```
-/// # #[path = "../examples/services"]
+/// # #[path = "../../examples/services"]
 /// # mod services;
 /// # use services::my_service::MyServiceClient;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
@@ -331,7 +330,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// Handlers can send messages (a.k.a. one-way calls, or fire-and-forget calls), as follows:
 ///
 /// ```
-/// # #[path = "../examples/services"]
+/// # #[path = "../../examples/services"]
 /// # mod services;
 /// # use services::my_service::MyServiceClient;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
@@ -411,7 +410,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// For example, assume a handler calls the same Virtual Object twice:
 ///
 /// ```
-/// # #[path = "../examples/services"]
+/// # #[path = "../../examples/services"]
 /// # mod services;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
 /// # use restate_sdk::prelude::*;
@@ -577,7 +576,9 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// /// 3. Wait for the promise to be resolved
 /// let payload = promise.await?;
 /// # }
-/// # fn trigger_task_and_deliver_id(awakeable_id: String){}
+/// # async fn trigger_task_and_deliver_id(awakeable_id: String) -> Result<(), HandlerError>{
+/// #    Ok(())
+/// # }
 /// ```
 ///
 ///
@@ -609,10 +610,11 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// #
 /// # async fn handle(ctx: Context<'_>, id: String) -> Result<(), HandlerError> {
 /// // Resolve the awakeable
-/// ctx.resolve_awakeable(&id, "hello");
+/// ctx.resolve_awakeable(&id, "hello".to_string());
 ///
 /// // Or reject the awakeable
 /// ctx.reject_awakeable(&id, TerminalError::new("my error reason"));
+/// # Ok(())
 /// # }
 /// ```
 ///
@@ -665,7 +667,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// let response = ctx.run(|| do_db_request()).await?;
 /// # Ok(())
 /// # }
-/// # fn do_db_request() -> Result<String, HandlerError>{
+/// # async fn do_db_request() -> Result<String, HandlerError>{
 /// # Ok("Hello".to_string())
 /// # }
 /// ```

@@ -10,7 +10,7 @@ pub trait MyWorkflow {
 pub struct MyWorkflowImpl;
 
 impl MyWorkflow for MyWorkflowImpl {
-    async fn run(&self, ctx: WorkflowContext<'_>, req: String) -> Result<String, HandlerError> {
+    async fn run(&self, _ctx: WorkflowContext<'_>, _req: String) -> Result<String, HandlerError> {
         // implement workflow logic here
 
         Ok(String::from("success"))

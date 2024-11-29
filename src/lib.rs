@@ -389,10 +389,10 @@ pub use restate_sdk_macros::object;
 ///         Ok(())
 ///     }
 ///     async fn get_status(&self, ctx: SharedWorkflowContext<'_>) -> Result<String, HandlerError> {
-///         Ok(ctx.get("status").unwrap_or("unknown".to_string()))
+///         Ok(ctx.get("status").await?.unwrap_or("unknown".to_string()))
 ///     }
 /// }
-/// # fn send_email_with_link(email: String, secret: String) -> Result<(), HandlerError> {
+/// # async fn send_email_with_link(email: String, secret: String) -> Result<(), HandlerError> {
 /// #    Ok(())
 /// # }
 ///

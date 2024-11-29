@@ -7,9 +7,11 @@
 //! 3. Listen on the specified port (default `9080`) for connections and requests.
 //!
 //! ```
-//! use crate::_examples::my_service::{MyService, MyServiceImpl};
-//! use crate::_examples::my_virtual_object::{MyVirtualObject, MyVirtualObjectImpl};
-//! use crate::_examples::my_workflow::{MyWorkflow, MyWorkflowImpl};
+//! # #[path = "../examples/services"]
+//! # mod services;
+//! # use services::my_service::{MyService, MyServiceImpl};
+//! # use services::my_virtual_object::{MyVirtualObject, MyVirtualObjectImpl};
+//! # use services::my_workflow::{MyWorkflow, MyWorkflowImpl};
 //! use restate_sdk::endpoint::Endpoint;
 //! use restate_sdk::http_server::HttpServer;
 //!
@@ -36,7 +38,9 @@
 //! Add the identity key to your endpoint as follows:
 //!
 //! ```
-//! # use crate::_examples::my_service::{MyService, MyServiceImpl};
+//! # #[path = "../examples/services"]
+//! # mod services;
+//! # use services::my_service::{MyService, MyServiceImpl};
 //! # use restate_sdk::endpoint::Endpoint;
 //! # use restate_sdk::http_server::HttpServer;
 //! #
