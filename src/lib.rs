@@ -16,6 +16,19 @@
 //! - [Quickstart](https://docs.restate.dev/get_started/quickstart?sdk=rust)
 //! - [Do the Tour of Restate to try out the APIs](https://docs.restate.dev/get_started/tour/?sdk=rust)
 //!
+//! # Features
+//!
+//! Have a look at the following SDK capabilities:
+//!
+//! - [Service Communication][crate::context::ContextClient]: Durable RPC and messaging between services (optionally with a delay).
+//! - [Journaling Results][crate::context::ContextSideEffects]: Persist results in Restate's log to avoid re-execution on retries
+//! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
+//! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
+//! - [Awakeables][crate::context::ContextAwakeables]: Durable Futures to wait for events and the completion of external tasks.
+//! - [Error Handling][crate::errors]: Restate retries failures infinitely. Use `TerminalError` to stop retries.
+//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server.
+//! - [Serving][crate::http_server]: Start an HTTP server to expose services.
+//!
 //! # SDK Overview
 //!
 //! The Restate Rust SDK lets you implement durable handlers. Handlers can be part of three types of services:
@@ -178,19 +191,6 @@
 //! - [Service](restate_sdk_macros::service)
 //! - [Virtual Object](object)
 //! - [Workflow](workflow)
-//!
-//! # Features
-//!
-//! Have a look at the following SDK capabilities:
-//!
-//! - [Service Communication][crate::context::ContextClient]: Durable RPC and messaging between services (optionally with a delay).
-//! - [Journaling Results][crate::context::ContextSideEffects]: Persist results in Restate's log to avoid re-execution on retries
-//! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
-//! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
-//! - [Awakeables][crate::context::ContextAwakeables]: Durable Futures to wait for events and the completion of external tasks.
-//! - [Error Handling][crate::errors]: Restate retries failures infinitely. Use `TerminalError` to stop retries.
-//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server.
-//! - [Serving][crate::http_server]: Start an HTTP server to expose services.
 //!
 //!
 //! ### Logging
@@ -421,7 +421,7 @@ pub use restate_sdk_macros::object;
 ///
 /// Every workflow needs a `run` handler.
 /// This handler has access to the same SDK features as Service and Virtual Object handlers.
-/// In the example above, we use [`ctx.run`][crate::context::ContextSideEffects] to log the sending of the email in Restate and avoid re-execution on replay.
+/// In the example above, we use [`ctx.run`][crate::context::ContextSideEffects::run] to log the sending of the email in Restate and avoid re-execution on replay.
 ///
 ///
 /// ## Shared handlers

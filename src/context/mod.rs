@@ -650,9 +650,9 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// Restate uses an execution log for replay after failures and suspensions.
 /// This means that non-deterministic results (e.g. database responses, UUID generation) need to be stored in the execution log.
 /// The SDK offers some functionalities to help you with this:
-/// 1. **[Journaled actions][crate::context::ContextSideEffects#journaled-actions]**: Run any block of code and store the result in Restate. Restate replays the result instead of re-executing the block on retries.
-/// 2. **[UUID generator][crate::context::ContextSideEffects#generating-uuids]**: Built-in helpers for generating stable UUIDs. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
-/// 3. **[Random generator][crate::context::ContextSideEffects#generating-random-numbers]**: Built-in helpers for generating randoms. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
+/// 1. **[Journaled actions][crate::context::ContextSideEffects::run]**: Run any block of code and store the result in Restate. Restate replays the result instead of re-executing the block on retries.
+/// 2. **[UUID generator][crate::context::ContextSideEffects::rand_uuid]**: Built-in helpers for generating stable UUIDs. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
+/// 3. **[Random generator][crate::context::ContextSideEffects::rand]**: Built-in helpers for generating randoms. Restate seeds the random number generator with the invocation ID, so it always returns the same value on retries.
 ///
 pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// ## Journaled actions
