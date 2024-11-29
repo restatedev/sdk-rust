@@ -8,7 +8,7 @@
 //!
 //! You can throw a terminal exception with an optional HTTP status code and a message anywhere in your handler, as follows:
 //!
-//! ```
+//! ```rust,no_run
 //! # use restate_sdk::prelude::*;
 //! # async fn handle() -> Result<(), HandlerError> {
 //! Err(TerminalError::new("This is a terminal error").into())

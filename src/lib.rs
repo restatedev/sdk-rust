@@ -358,7 +358,7 @@ pub use restate_sdk_macros::object;
 /// ## Implementing workflows
 /// Have a look at the code example to get a better understanding of how workflows are implemented:
 ///
-/// ```
+/// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
 /// #[restate_sdk::workflow]
@@ -376,7 +376,7 @@ pub use restate_sdk_macros::object;
 ///     async fn run(&self, mut ctx: WorkflowContext<'_>, email: String) -> Result<bool, HandlerError> {
 ///
 ///         let secret = ctx.rand_uuid().to_string();
-///         ctx.run(|| send_email_with_link(email, secret)).await?;
+///         ctx.run(|| send_email_with_link(email.clone(), secret.clone())).await?;
 ///         ctx.set("status", "Email sent".to_string());
 ///
 ///         let click_secret = ctx.promise::<String>("email.clicked").await?;

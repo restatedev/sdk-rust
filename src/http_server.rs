@@ -6,7 +6,7 @@
 //! 2. Bind one or multiple services to it.
 //! 3. Listen on the specified port (default `9080`) for connections and requests.
 //!
-//! ```
+//! ```rust,no_run
 //! # #[path = "../examples/services"]
 //! # mod services;
 //! # use services::my_service::{MyService, MyServiceImpl};
@@ -37,7 +37,7 @@
 //! instance. You can find out more about request identity in the [Security docs](https://docs.restate.dev/operate/security#locking-down-service-access).
 //! Add the identity key to your endpoint as follows:
 //!
-//! ```
+//! ```rust,no_run
 //! # #[path = "../examples/services"]
 //! # mod services;
 //! # use services::my_service::{MyService, MyServiceImpl};

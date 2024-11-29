@@ -221,7 +221,7 @@ impl<'ctx> WorkflowContext<'ctx> {
 /// ## Durable sleep
 /// To sleep in a Restate application for ten seconds, do the following:
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// # use std::convert::Infallible;
 /// # use std::time::Duration;
@@ -266,7 +266,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///
 /// You can do request-response calls to Services, Virtual Objects, and Workflows, in the following way:
 ///
-/// ```
+/// ```rust,no_run
 /// # #[path = "../../examples/services"]
 /// # mod services;
 /// # use services::my_service::MyServiceClient;
@@ -329,7 +329,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///
 /// Handlers can send messages (a.k.a. one-way calls, or fire-and-forget calls), as follows:
 ///
-/// ```
+/// ```rust,no_run
 /// # #[path = "../../examples/services"]
 /// # mod services;
 /// # use services::my_service::MyServiceClient;
@@ -369,7 +369,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///
 /// To schedule a delayed call, send a message with a delay parameter, as follows:
 ///
-/// ```
+/// ```rust,no_run
 /// # #[path = "../examples/services"]
 /// # mod services;
 /// # use services::my_service::MyServiceClient;
@@ -409,7 +409,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// Invocations will execute in the same order in which they arrive at Restate.
 /// For example, assume a handler calls the same Virtual Object twice:
 ///
-/// ```
+/// ```rust,no_run
 /// # #[path = "../../examples/services"]
 /// # mod services;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
@@ -563,7 +563,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// 3. **Wait** until the other process has executed the task.
 ///    The handler **receives the payload and resumes**.
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// #
 /// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
@@ -605,7 +605,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 ///
 /// - Resolving via the SDK with its ID and an optional payload, or rejecting with its ID and a reason:
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// #
 /// # async fn handle(ctx: Context<'_>, id: String) -> Result<(), HandlerError> {
@@ -661,7 +661,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// Restate replays the result instead of re-executing the operation on retries.
 ///
 /// Here is an example of a database request for which the string response is stored in Restate:
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
 /// let response = ctx.run(|| do_db_request()).await?;
@@ -692,7 +692,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 ///
 /// Do not use this in cryptographic contexts.
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// # use uuid::Uuid;
 /// # async fn uuid_generate(mut ctx: Context<'_>) {
@@ -706,7 +706,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
 /// This returns a new pseudorandom float within the range `[0,1]`.
 /// This is the equivalent of JS `Math.random()` but deterministically replayable.
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// # use rand::Rng;
 /// async fn rand_generate(mut ctx: Context<'_>) {
@@ -766,7 +766,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSideEffects<'ctx> for CTX {
 /// **Info: Serializing state**:
 /// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// #
 /// # async fn my_handler(ctx: ObjectContext<'_>) -> Result<(), HandlerError> {
@@ -829,7 +829,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanReadState> Cont
 /// **Info: Serializing state**:
 /// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
-/// ```
+/// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// #
 /// # async fn my_handler(ctx: ObjectContext<'_>) -> Result<(), HandlerError> {
