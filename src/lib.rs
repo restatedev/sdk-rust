@@ -59,11 +59,11 @@
 //!
 //! - Specify that you want to create a service by using the [`#[restate_sdk::service]` macro](restate_sdk_macros::service).
 //! - Create a trait with the service handlers.
-//!     - Handlers can accept zero or one parameter and return a `Result`.
-//!     - The type of the input parameter of the handler needs to implement [`Serialize`](crate::serde::Deserialize) and [`Deserialize`](crate::serde::Deserialize). See [Serialization docs](crate::serde).
-//!     - The Result contains the return value or a [`HandlerError`][crate::errors::HandlerError], which can be a [`TerminalError`] or any other Rust's `StdError`.
+//!     - Handlers can accept zero or one parameter and return a [`Result`].
+//!     - The type of the input parameter of the handler needs to implement [`Serialize`](crate::serde::Deserialize) and [`Deserialize`](crate::serde::Deserialize). See [`crate::serde`].
+//!     - The Result contains the return value or a [`HandlerError`][crate::errors::HandlerError], which can be a [`TerminalError`](crate::errors::TerminalError) or any other Rust's [`std::error::Error`].
 //!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/myHandler`. You can optionally override the handler name used via `#[name = "myHandler"]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
-//! - Implement the trait on a struct. The struct will contain the actual implementation of the handlers.
+//! - Implement the trait on a concrete type, for example on a struct.
 //! - The first parameter of a handler after `&self` is always a [`Context`](crate::context::Context) to interact with Restate.
 //!     The SDK stores the actions you do on the context in the Restate journal to make them durable.
 //! - Finally, create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
@@ -117,7 +117,7 @@
 //!
 //! - Specify that you want to create a Virtual Object by using the [`#[restate_sdk::object]` macro](restate_sdk_macros::object).
 //! - The first argument of each handler must be the [`ObjectContext`](crate::context::ObjectContext) parameter. Handlers with the `ObjectContext` parameter can write to the K/V state store. Only one handler can be active at a time per object, to ensure consistency.
-//! - You can retrieve the key of the object you are in via `ctx.key()`.
+//! - You can retrieve the key of the object you are in via [`ObjectContext.key`]. 
 //! - If you want to have a handler that executes concurrently to the others and doesn't have write access to the K/V state, add `#[shared]` to the handler definition in the trait.
 //!     Shared handlers need to use the [`SharedObjectContext`](crate::context::SharedObjectContext).
 //!     You can use these handlers, for example, to read K/V state and expose it to the outside world, or to interact with the blocking handler and resolve awakeables etc.
