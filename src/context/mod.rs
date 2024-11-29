@@ -615,7 +615,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 /// # }
 /// ```
 ///
-/// You can return any payload that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
+/// For more info about serialization of the payload, see [crate::serde]
 ///
 /// When running on Function-as-a-Service platforms, such as AWS Lambda, Restate suspends the handler while waiting for the awakeable to be completed.
 /// Since you only pay for the time that the handler is actually running, you don't pay while waiting for the external process to return.
@@ -674,7 +674,7 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// You cannot use the Restate context within `ctx.run`.
     /// This includes actions such as getting state, calling another service, and nesting other journaled actions.
     ///
-    /// You can store any result value that implements the `Serialize` and `Deserialize` trait ([see serialization docs][crate::serde]).
+    /// For more info about serialization of the return values, see [crate::serde].
     ///
     /// **Caution: Immediately await journaled actions:**
     /// Always immediately await `ctx.run`, before doing any other context calls.
@@ -778,12 +778,11 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSideEffects<'ctx> for CTX {
 /// # }
 /// ```
 ///
+/// For more info about serialization, see [crate::serde]
+///
 /// ### Command-line introspection
 /// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
 /// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
-///
-/// ### Serializing state
-/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 pub trait ContextReadState<'ctx>: private::SealedContext<'ctx> {
     /// Get state
@@ -841,12 +840,11 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanReadState> Cont
 /// # }
 /// ```
 ///
+/// For more info about serialization, see [crate::serde]
+///
 /// ## Command-line introspection
 /// You can inspect and edit the K/V state stored in Restate via `psql` and the CLI.
 /// Have a look at the [introspection docs](https://docs.restate.dev//operate/introspection#inspecting-application-state) for more information.
-///
-/// ### Serializing state
-/// You can store any type of value that that implements the `serde::Serialize` and `serde::Deserialize` traits ([see serialization docs][crate::serde]).
 ///
 pub trait ContextWriteState<'ctx>: private::SealedContext<'ctx> {
     /// Set state
