@@ -4,7 +4,7 @@
 //! By default, Restate does infinite retries with an exponential backoff strategy.
 //!
 //! For failures for which you do not want retries, but instead want the invocation to end and the error message
-//! to be propagated back to the caller, you can throw a **terminal error**.
+//! to be propagated back to the caller, you can return a [`TerminalError`].
 //!
 //! You can throw a terminal exception with an optional HTTP status code and a message anywhere in your handler, as follows:
 //!
