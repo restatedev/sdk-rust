@@ -8,7 +8,7 @@ pub trait MyService {
 pub struct MyServiceImpl;
 
 impl MyService for MyServiceImpl {
-    async fn my_handler(&self, ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
+    async fn my_handler(&self, _ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
         Ok(format!("{greeting}!"))
     }
 }

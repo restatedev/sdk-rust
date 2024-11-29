@@ -268,12 +268,14 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// You can do request-response calls to Services, Virtual Objects, and Workflows, in the following way:
 ///
 /// ```
-/// # use crate::_examples::my_service::MyServiceClient;
-/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
-/// # use crate::_examples::my_workflow::MyWorkflowClient;
+/// # #[path = "../examples/services"]
+/// # mod services;
+/// # use services::my_service::MyServiceClient;
+/// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # use services::my_workflow::MyWorkflowClient;
 /// # use restate_sdk::prelude::*;
 /// #
-/// # async fn greet1(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+/// # async fn greet(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
 ///     // To a Service:
 ///     let service_response = ctx
 ///         .service_client::<MyServiceClient>()
@@ -329,13 +331,14 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// Handlers can send messages (a.k.a. one-way calls, or fire-and-forget calls), as follows:
 ///
 /// ```
-/// # use crate::_examples::my_service::MyServiceClient;
-/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
-/// # use crate::_examples::my_workflow::MyWorkflowClient;
+/// # #[path = "../examples/services"]
+/// # mod services;
+/// # use services::my_service::MyServiceClient;
+/// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # use services::my_workflow::MyWorkflowClient;
 /// # use restate_sdk::prelude::*;
 /// #
-/// #
-/// # async fn greet2(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+/// # async fn greet(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
 ///     // To a Service:
 ///     ctx.service_client::<MyServiceClient>()
 ///         .my_handler(String::from("Hi!"))
@@ -368,13 +371,15 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// To schedule a delayed call, send a message with a delay parameter, as follows:
 ///
 /// ```
-/// /// # use crate::_examples::my_service::MyServiceClient;
-/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
-/// # use crate::_examples::my_workflow::MyWorkflowClient;
+/// # #[path = "../examples/services"]
+/// # mod services;
+/// # use services::my_service::MyServiceClient;
+/// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # use services::my_workflow::MyWorkflowClient;
 /// # use restate_sdk::prelude::*;
 /// # use std::time::Duration;
 /// #
-/// # async fn greet2(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+/// # async fn greet(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
 ///     // To a Service:
 ///     ctx.service_client::<MyServiceClient>()
 ///         .my_handler(String::from("Hi!"))
@@ -406,9 +411,11 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// For example, assume a handler calls the same Virtual Object twice:
 ///
 /// ```
-/// # use crate::_examples::my_virtual_object::MyVirtualObjectClient;
+/// # #[path = "../examples/services"]
+/// # mod services;
+/// # use services::my_virtual_object::MyVirtualObjectClient;
 /// # use restate_sdk::prelude::*;
-/// # async fn greet4(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+/// # async fn greet(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
 ///     ctx.object_client::<MyVirtualObjectClient>("Mary")
 ///         .my_handler(String::from("I'm call A!"))
 ///         .send();
