@@ -130,7 +130,7 @@
 //!
 //! - Specify that you want to create a Virtual Object by using the [`#[restate_sdk::object]` macro](restate_sdk_macros::object).
 //! - The first argument of each handler must be the [`ObjectContext`](crate::context::ObjectContext) parameter. Handlers with the `ObjectContext` parameter can write to the K/V state store. Only one handler can be active at a time per object, to ensure consistency.
-//! - You can retrieve the key of the object you are in via [`ObjectContext.key`]. 
+//! - You can retrieve the key of the object you are in via [`ObjectContext.key`].
 //! - If you want to have a handler that executes concurrently to the others and doesn't have write access to the K/V state, add `#[shared]` to the handler definition in the trait.
 //!     Shared handlers need to use the [`SharedObjectContext`](crate::context::SharedObjectContext).
 //!     You can use these handlers, for example, to read K/V state and expose it to the outside world, or to interact with the blocking handler and resolve awakeables etc.
@@ -201,7 +201,7 @@
 //! async fn main() {
 //!     //! To enable logging
 //!     tracing_subscriber::fmt::init();
-//! 
+//!
 //!     // Start http server etc...
 //! }
 //! ```
