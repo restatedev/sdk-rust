@@ -226,7 +226,7 @@ impl<'ctx> WorkflowContext<'ctx> {
 /// # use std::convert::Infallible;
 /// # use std::time::Duration;
 /// #
-/// # async fn handle(ctx: Context<'_>) -> Result<(), Infallible> {
+/// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
 /// ctx.sleep(Duration::from_secs(10)).await?;
 /// #    Ok(())
 /// # }
@@ -267,10 +267,10 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// You can do request-response calls to Services, Virtual Objects, and Workflows, in the following way:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services"]
+/// # #[path = "../../examples/services/mod.rs"]
 /// # mod services;
-/// # use services::my_service::MyServiceClient;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # use services::my_service::MyServiceClient;
 /// # use services::my_workflow::MyWorkflowClient;
 /// # use restate_sdk::prelude::*;
 /// #
@@ -330,10 +330,10 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// Handlers can send messages (a.k.a. one-way calls, or fire-and-forget calls), as follows:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services"]
+/// # #[path = "../../examples/services/mod.rs"]
 /// # mod services;
-/// # use services::my_service::MyServiceClient;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # use services::my_service::MyServiceClient;
 /// # use services::my_workflow::MyWorkflowClient;
 /// # use restate_sdk::prelude::*;
 /// #
@@ -370,10 +370,10 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// To schedule a delayed call, send a message with a delay parameter, as follows:
 ///
 /// ```rust,no_run
-/// # #[path = "../examples/services"]
+/// # #[path = "../../examples/services/mod.rs"]
 /// # mod services;
-/// # use services::my_service::MyServiceClient;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # use services::my_service::MyServiceClient;
 /// # use services::my_workflow::MyWorkflowClient;
 /// # use restate_sdk::prelude::*;
 /// # use std::time::Duration;
@@ -410,9 +410,9 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// For example, assume a handler calls the same Virtual Object twice:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services"]
-/// # mod services;
-/// # use services::my_virtual_object::MyVirtualObjectClient;
+/// # #[path = "../../examples/services/my_virtual_object.rs"]
+/// # mod my_virtual_object;
+/// # use my_virtual_object::MyVirtualObjectClient;
 /// # use restate_sdk::prelude::*;
 /// # async fn greet(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
 ///     ctx.object_client::<MyVirtualObjectClient>("Mary")
