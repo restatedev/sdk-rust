@@ -75,16 +75,16 @@
 //!
 //! ```rust,no_run
 //!use restate_sdk::prelude::*;
-//! 
+//!
 //! #[restate_sdk::object]
 //! pub trait MyVirtualObject {
 //!     async fn my_handler(name: String) -> Result<String, HandlerError>;
 //!     #[shared]
 //!     async fn my_concurrent_handler(name: String) -> Result<String, HandlerError>;
 //! }
-//! 
+//!
 //! pub struct MyVirtualObjectImpl;
-//! 
+//!
 //! impl MyVirtualObject for MyVirtualObjectImpl {
 //!     async fn my_handler(
 //!         &self,
@@ -101,7 +101,7 @@
 //!         Ok(format!("{} {}", greeting, ctx.key()))
 //!     }
 //! }
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     tracing_subscriber::fmt::init();
@@ -128,30 +128,30 @@
 //!
 //! ```rust,no_run
 //! use restate_sdk::prelude::*;
-//! 
+//!
 //! #[restate_sdk::workflow]
 //! pub trait MyWorkflow {
 //!     async fn run(req: String) -> Result<String, HandlerError>;
 //!     #[shared]
 //!     async fn interact_with_workflow() -> Result<(), HandlerError>;
 //! }
-//! 
+//!
 //! pub struct MyWorkflowImpl;
-//! 
+//!
 //! impl MyWorkflow for MyWorkflowImpl {
 //!     async fn run(&self, ctx: WorkflowContext<'_>, req: String) -> Result<String, HandlerError> {
 //!         //! implement workflow logic here
-//! 
+//!
 //!         Ok(String::from("success"))
 //!     }
 //!     async fn interact_with_workflow(&self, ctx: SharedWorkflowContext<'_>) -> Result<(), HandlerError> {
 //!         //! implement interaction logic here
 //!         //! e.g. resolve a promise that the workflow is waiting on
-//! 
+//!
 //!         Ok(())
 //!     }
 //! }
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     tracing_subscriber::fmt::init();
@@ -217,7 +217,6 @@ pub mod http_server;
 pub mod hyper;
 pub mod serde;
 
-use ::serde::de::StdError;
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
 ///
 /// ```rust,no_run
@@ -483,7 +482,6 @@ pub use restate_sdk_macros::object;
 ///
 /// For more details, check the [`service` macro](macro@crate::service) documentation.
 pub use restate_sdk_macros::workflow;
-use crate::errors::TerminalError;
 
 /// Prelude contains all the useful imports you need to get started with Restate.
 pub mod prelude {

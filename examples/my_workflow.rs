@@ -15,7 +15,10 @@ impl MyWorkflow for MyWorkflowImpl {
 
         Ok(String::from("success"))
     }
-    async fn interact_with_workflow(&self, ctx: SharedWorkflowContext<'_>) -> Result<(), HandlerError> {
+    async fn interact_with_workflow(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+    ) -> Result<(), HandlerError> {
         // implement interaction logic here
         // e.g. resolve a promise that the workflow is waiting on
 
