@@ -1,4 +1,3 @@
-use std::ops::Shl;
 use restate_sdk::prelude::*;
 
 #[restate_sdk::object]
