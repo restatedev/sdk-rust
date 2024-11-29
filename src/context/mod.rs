@@ -575,6 +575,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 ///
 /// /// 3. Wait for the promise to be resolved
 /// let payload = promise.await?;
+/// # Ok(())
 /// # }
 /// # async fn trigger_task_and_deliver_id(awakeable_id: String) -> Result<(), HandlerError>{
 /// #    Ok(())
