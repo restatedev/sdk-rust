@@ -2,10 +2,10 @@
 //!
 //! Restate sends data over the network for storing state, journaling actions, awakeables, etc.
 //!
-//! Therefore, all data structures need to have serializers and deserializers.
-//!
-//! You can use [Rust Serde](https://serde.rs/) for this.
-//! Either [use derive](https://serde.rs/derive.html) or implement the [`Serialize` and `Deserialize` traits](https://serde.rs/custom-serialization.html).
+//! Therefore, the types of the values that are stored, need to either:
+//! - be a primitive type
+//! - use a wrapper type [`Json`] for using [`serde-json`](https://serde.rs/)
+//! - have the [`Serialize`] and [`Deserialize`] trait implemented
 //!
 
 use bytes::Bytes;
