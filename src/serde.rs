@@ -1,4 +1,12 @@
-//! Serialization/Deserialization traits and concrete implementations for handlers and state.
+//! # Serialization
+//!
+//! Restate sends data over the network for storing state, journaling actions, awakeables, etc.
+//!
+//! Therefore, the types of the values that are stored, need to either:
+//! - be a primitive type
+//! - use a wrapper type [`Json`] for using [`serde-json`](https://serde.rs/)
+//! - have the [`Serialize`] and [`Deserialize`] trait implemented
+//!
 
 use bytes::Bytes;
 use std::convert::Infallible;
