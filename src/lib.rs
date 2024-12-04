@@ -20,6 +20,7 @@
 //!
 //! Have a look at the following SDK capabilities:
 //!
+//! - [SDK Overview](#sdk-overview): Overview of the SDK and how to implement services, virtual objects, and workflows.
 //! - [Service Communication][crate::context::ContextClient]: Durable RPC and messaging between services (optionally with a delay).
 //! - [Journaling Results][crate::context::ContextSideEffects]: Persist results in Restate's log to avoid re-execution on retries
 //! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
@@ -208,11 +209,7 @@
 //!
 //! For more information, have a look at the [tracing subscriber doc](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html#filtering-events-with-environment-variables).
 //!
-//! # References
-//!
-//! For a general overview about Restate, check out the [Restate documentation](https://docs.restate.dev).
-//!
-//! You can find more Rust examples in the [examples repo](https://github.com/restatedev/examples)
+//! Next, have a look at the other [SDK features](#features).
 //!
 
 pub mod endpoint;
