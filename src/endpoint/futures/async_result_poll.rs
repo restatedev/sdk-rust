@@ -83,7 +83,10 @@ impl Future for VmAsyncResultPollFuture {
 
                     // At this point let's try to take the async result
                     match inner_lock.vm.take_async_result(handle) {
-                        Ok(Some(v)) => return Poll::Ready(Ok(v)),
+                        Ok(Some(v)) => {
+                            inner_lock.set_tracing_replaying_flag();
+                            return Poll::Ready(Ok(v));
+                        }
                         Ok(None) => {
                             drop(inner_lock);
                             self.state = Some(PollState::WaitingInput { ctx, handle });
@@ -121,7 +124,10 @@ impl Future for VmAsyncResultPollFuture {
 
                     // Now try to take async result again
                     match inner_lock.vm.take_async_result(handle) {
-                        Ok(Some(v)) => return Poll::Ready(Ok(v)),
+                        Ok(Some(v)) => {
+                            inner_lock.set_tracing_replaying_flag();
+                            return Poll::Ready(Ok(v));
+                        }
                         Ok(None) => {
                             drop(inner_lock);
                             self.state = Some(PollState::WaitingInput { ctx, handle });
