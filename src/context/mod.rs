@@ -8,7 +8,6 @@ use std::time::Duration;
 
 mod request;
 mod run;
-use crate::errors;
 pub use request::{Request, RequestTarget};
 pub use run::{RunClosure, RunFuture, RunRetryPolicy};
 
