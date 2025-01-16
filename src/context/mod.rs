@@ -676,6 +676,39 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     ///
     /// For more info about serialization of the return values, see [crate::serde].
     ///
+    /// You can configure the retry policy for the `ctx.run` block:
+    /// ```rust,no_run
+    /// # use std::time::Duration;
+    /// # use restate_sdk::prelude::*;
+    /// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
+    /// let my_run_retry_policy = RunRetryPolicy::default()
+    ///     .initial_delay(Duration::from_millis(100))
+    ///     .exponentiation_factor(2.0)
+    ///     .max_delay(Duration::from_millis(1000))
+    ///     .max_attempts(10)
+    ///     .max_duration(Duration::from_secs(10));
+    /// ctx.run(|| write_to_other_system())
+    ///     .retry_policy(my_run_retry_policy)
+    ///     .await
+    ///     .map_err(|e| {
+    ///         // Handle the terminal error after retries exhausted
+    ///         // For example, undo previous actions (see sagas guide) and
+    ///         // propagate the error back to the caller
+    ///         e
+    ///      })?;
+    /// # Ok(())
+    /// # }
+    /// # async fn write_to_other_system() -> Result<String, HandlerError>{
+    /// # Ok("Hello".to_string())
+    /// # }
+    /// ```
+    ///
+    /// This way you can override the default retry behavior of your Restate service for specific operations.
+    /// Have a look at [`RunFuture::retry_policy`] for more information.
+    ///
+    /// If you set a maximum number of attempts, then the `ctx.run` block will fail with a [TerminalError] once the retries are exhausted.
+    /// Have a look at the [Sagas guide](https://docs.restate.dev/guides/sagas) to learn how to undo previous actions of the handler to keep the system in a consistent state.
+    ///
     /// **Caution: Immediately await journaled actions:**
     /// Always immediately await `ctx.run`, before doing any other context calls.
     /// If not, you might bump into non-determinism errors during replay,
