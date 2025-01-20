@@ -352,7 +352,7 @@ pub use restate_sdk_macros::object;
 /// [Workflows](https://docs.restate.dev/concepts/services#workflows) are a sequence of steps that gets executed durably.
 ///
 /// A workflow can be seen as a special type of [Virtual Object](https://docs.restate.dev/concepts/services#virtual-objects) with the following characteristics:
-/// 
+///
 /// - Each workflow definition has a **`run` handler** that implements the workflow logic.
 ///     - The `run` handler **executes exactly one time** for each workflow instance (object / key).
 ///     - The `run` handler executes a set of **durable steps/activities**. These can either be:
