@@ -349,18 +349,26 @@ pub use restate_sdk_macros::object;
 ///
 /// Entry-point macro to define a Restate [Workflow](https://docs.restate.dev/concepts/services#workflows).
 ///
-/// Workflows are a sequence of steps that gets executed durably.
-/// A workflow can be seen as a special type of [Virtual Object](https://docs.restate.dev/concepts/services#virtual-objects) with some special characteristics:
+/// [Workflows](https://docs.restate.dev/concepts/services#workflows) are a sequence of steps that gets executed durably.
 ///
-/// - Each workflow definition has a `run` handler that implements the workflow logic.
-/// - The `run` handler executes exactly one time for each workflow instance (object / key).
-/// - A workflow definition can implement other handlers that can be called multiple times, and can interact with the workflow.
-/// - Workflows have access to the `WorkflowContext` and `SharedWorkflowContext`, giving them some extra functionality, for example Durable Promises to signal workflows.
+/// A workflow can be seen as a special type of [Virtual Object](https://docs.restate.dev/concepts/services#virtual-objects) with the following characteristics:
+/// 
+/// - Each workflow definition has a **`Run` handler** that implements the workflow logic.
+///     - The `Run` handler **executes exactly one time** for each workflow instance (object / key).
+///     - The `Run` handler executes a set of **durable steps/activities**. These can either be:
+///         - Inline activities: for example a [run block](crate::context::ContextSideEffects) or [sleep](crate::context::ContextTimers)
+///         - [Calls to other handlers](crate::context::ContextClient) implementing the activities
+/// - You can **submit a workflow** in the same way as any handler invocation (via SDK clients or Restate services, over HTTP or Kafka).
+/// - A workflow definition can implement other handlers that can be called multiple times, and can **interact with the workflow**:
+///   - Query the workflow (get information out of it) by getting K/V state or awaiting promises that are resolved by the workflow.
+///   - Signal the workflow (send information to it) by resolving promises that the workflow waits on.
+/// - Workflows have access to the [`WorkflowContext`](crate::context::WorkflowContext) and [`SharedWorkflowContext`](crate::context::SharedWorkflowContext), giving them some extra functionality, for example [Durable Promises](#signaling-workflows) to signal workflows.
+/// - The K/V state of the workflow is isolated to the workflow execution, and can only be mutated by the `Run` handler.
 ///
 /// **Note: Workflow retention time**:
 /// The retention time of a workflow execution is 24 hours after the finishing of the `run` handler.
 /// After this timeout any [K/V state][crate::context::ContextReadState] is cleared, the workflow's shared handlers cannot be called anymore, and the Durable Promises are discarded.
-/// The retention time can be configured via the [Admin API](https://docs.restate.dev//references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
+/// The retention time can be configured via the [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
 ///
 /// ## Implementing workflows
 /// Have a look at the code example to get a better understanding of how workflows are implemented:
@@ -419,7 +427,7 @@ pub use restate_sdk_macros::object;
 /// Every workflow needs a `run` handler.
 /// This handler has access to the same SDK features as Service and Virtual Object handlers.
 /// In the example above, we use [`ctx.run`][crate::context::ContextSideEffects::run] to log the sending of the email in Restate and avoid re-execution on replay.
-///
+/// Or call other handlers to execute activities.
 ///
 /// ## Shared handlers
 ///
