@@ -38,6 +38,7 @@ tracing-subscriber = "0.3"
 trybuild = "1.0"
 reqwest = { version = "0.12", features = ["json"] }
 rand = "0.8.5"
+restate-test-utils = { path = "restate-test-utils" }
 
 [build-dependencies]
 jsonptr = "0.5.1"
@@ -47,4 +48,4 @@ syn = "2.0"
 typify = { version = "0.1.0" }
 
 [workspace]
-members = ["macros", "test-services"]
+members = ["macros", "test-services", "restate-test-utils"]
