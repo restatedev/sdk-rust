@@ -1,5 +1,5 @@
 use restate_test_utils::test_utils::TestContainer;
-use restate_sdk::{discovery::Service, prelude::*};
+use restate_sdk::{discovery::{self, Service}, prelude::*};
 
 // Should compile
 #[restate_sdk::service]
@@ -34,32 +34,25 @@ impl MyService for MyServiceImpl {
 #[tokio::test]
 async fn test_container_image() {
 
-    let test_container = TestContainer::new().await.unwrap();
+    let mut test_container = TestContainer::new("docker.io/restatedev/restate".to_string(), "latest".to_string()).await.unwrap();
 
-    // uses higher port number to avoid collisions
-    // with non-test instances running locally
-    let host_port:u16 = 19080;
-    let host_address = format!("0.0.0.0:{}", host_port);
+    let endpoint = Endpoint::builder()
+                    .bind(MyServiceImpl.serve())
+                    .build();
 
-    println!("starting host");
-    // boot restate server
-    tokio::spawn(async move {
-        HttpServer::new(
-            Endpoint::builder()
-                .bind(MyServiceImpl.serve())
-                .build(),
-        ).listen_and_serve(host_address.parse().unwrap()).await;
-    });
+    test_container.serve_endpoint(endpoint).await;
 
-    use restate_sdk::service::Discoverable;
-    let my_service:Service = ServeMyService::<MyServiceImpl>::discover();
-
-    let registered = test_container.register(host_port).await;
-
+    // optionally insert a delays via tokio sleep
     TestContainer::delay(1000).await;
 
-    let response = test_container.invoke(my_service, "my_handler".to_string()).await;
+    // optionally call invoke on service handlers
+    use restate_sdk::service::Discoverable;
+    let my_service:Service = ServeMyService::<MyServiceImpl>::discover();
+    let invoke_response = test_container.invoke(my_service, "my_handler".to_string()).await;
 
-    assert!(registered.is_ok());
+    assert!(invoke_response.is_ok());
+
+    println!("\n\ningress response:");
+    println!("{}\n\n", invoke_response.unwrap().text().await.unwrap());
 
 }

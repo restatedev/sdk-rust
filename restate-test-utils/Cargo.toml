@@ -13,7 +13,6 @@ futures = "0.3.31"
 http = "1.2.0"
 nu-ansi-term = "0.50.1"
 reqwest = {version= "0.12.12", features = ["json"]}
-restate-admin-rest-model = { git = "https://github.com/restatedev/restate/",  branch = "release/1.1.6", version = "1.1.6" }
 restate-sdk = { version = "0.3.2", path = ".." }
 restate-sdk-shared-core = "0.2.0"
 serde = "1.0.217"
