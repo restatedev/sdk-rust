@@ -52,7 +52,7 @@ async fn test_container_image() {
 
     assert!(invoke_response.is_ok());
 
-    println!("\n\ningress response:");
-    println!("{}\n\n", invoke_response.unwrap().text().await.unwrap());
+    println!("invoke response:");
+    println!("{}", invoke_response.unwrap().text().await.unwrap());
 
 }
