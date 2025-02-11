@@ -34,7 +34,7 @@ impl MyService for MyServiceImpl {
 #[tokio::test]
 async fn test_container_image() {
 
-    let mut test_container = TestContainer::new("docker.io/restatedev/restate".to_string(), "latest".to_string()).await.unwrap();
+    let mut test_container = TestContainer::new("docker.io/restatedev/restate", "latest").await.unwrap();
 
     let endpoint = Endpoint::builder()
                     .bind(MyServiceImpl.serve())
@@ -48,7 +48,7 @@ async fn test_container_image() {
     // optionally call invoke on service handlers
     use restate_sdk::service::Discoverable;
     let my_service:Service = ServeMyService::<MyServiceImpl>::discover();
-    let invoke_response = test_container.invoke(my_service, "my_handler".to_string()).await;
+    let invoke_response = test_container.invoke(my_service, "my_handler").await;
 
     assert!(invoke_response.is_ok());
 

@@ -42,7 +42,7 @@ pub struct TestContainer {
 impl TestContainer {
 
     //"docker.io/restatedev/restate", "latest"
-    pub async fn new(image:String, version:String) -> Result<Self, HandlerError> {
+    pub async fn new(image:&str, version:&str) -> Result<Self, HandlerError> {
 
         let image = GenericImage::new(image, version)
             .with_exposed_port(9070.tcp())
@@ -122,13 +122,13 @@ impl TestContainer {
         let client = reqwest::Client::builder().http2_prior_knowledge().build()?;
 
         // wait for server to respond
-        while let Err(_) = client.get(format!("{}/health", server_url).to_string())
+        while let Err(_) = client.get(format!("{}/health", server_url))
                                 .header("accept", "application/vnd.restate.endpointmanifest.v1+json")
                                 .send().await {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        client.get(format!("{}/health", server_url).to_string())
+        client.get(format!("{}/health", server_url))
             .header("accept", "application/vnd.restate.endpointmanifest.v1+json")
             .send().await?;
 
@@ -142,7 +142,7 @@ impl TestContainer {
 
         let register_admin_url = format!("http://{}:{}/deployments", host, admin_port);
 
-        client.post(register_admin_url.to_string())
+        client.post(register_admin_url)
             .json(&deployment_payload)
             .send().await?;
 
@@ -158,7 +158,7 @@ impl TestContainer {
         tokio::time::sleep(Duration::from_millis(milliseconds)).await;
     }
 
-    pub async fn invoke(&self, service:Service, handler:String) -> Result<Response, HandlerError> {
+    pub async fn invoke(&self, service:Service, handler:&str) -> Result<Response, HandlerError> {
 
         let host = self.container.get_host().await?;
         let ports = self.container.ports().await?;
@@ -168,14 +168,14 @@ impl TestContainer {
         let service_name:String = service.name.to_string();
         let handler_names:Vec<String> = service.handlers.iter().map(|h|h.name.to_string()).collect();
 
-        assert!(handler_names.contains(&handler));
+        assert!(handler_names.contains(&handler.to_string()));
 
         println!("\n\n{}\n\n", Style::new().bold().paint(format!("invoking {}/{}", service_name, handler)));
 
         let admin_port = ports.map_to_host_port_ipv4(9070.tcp()).unwrap();
         let admin_host = format!("http://{}:{}", host, admin_port);
 
-        let service_discovery_url = format!("{}/services/{}/handlers", admin_host, service_name).to_string();
+        let service_discovery_url = format!("{}/services/{}/handlers", admin_host, service_name);
 
         client.get(service_discovery_url)
             .send().await?;
@@ -185,7 +185,7 @@ impl TestContainer {
         let ingress_port = ports.map_to_host_port_ipv4(8080.tcp()).unwrap();
         let ingress_host = format!("http://{}:{}", host, ingress_port);
 
-        let ingress_handler_url = format!("{}/{}/{}", ingress_host, service_name, handler).to_string();
+        let ingress_handler_url = format!("{}/{}/{}", ingress_host, service_name, handler);
 
         let ingress_resopnse = client.post(ingress_handler_url)
             .send().await?;
