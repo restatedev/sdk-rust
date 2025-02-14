@@ -63,7 +63,7 @@ impl IngressClient {
         I::create_ingress(self, key.into())
     }
 
-    pub fn workflow_client<'a, I>(&'a self, id: impl Into<String>) -> I
+    pub fn workflow_ingress<'a, I>(&'a self, id: impl Into<String>) -> I
     where
         I: IntoWorkflowIngress<'a>,
     {
