@@ -9,6 +9,7 @@ pub(crate) struct ServiceGenerator<'a> {
     pub(crate) restate_name: &'a str,
     pub(crate) service_ident: &'a Ident,
     pub(crate) client_ident: Ident,
+    #[cfg(feature = "ingress_client")]
     pub(crate) ingress_ident: Ident,
     pub(crate) serve_ident: Ident,
     pub(crate) vis: &'a Visibility,
@@ -23,6 +24,7 @@ impl<'a> ServiceGenerator<'a> {
             restate_name: &s.restate_name,
             service_ident: &s.ident,
             client_ident: format_ident!("{}Client", s.ident),
+            #[cfg(feature = "ingress_client")]
             ingress_ident: format_ident!("{}Ingress", s.ident),
             serve_ident: format_ident!("Serve{}", s.ident),
             vis: &s.vis,
@@ -339,6 +341,7 @@ impl<'a> ServiceGenerator<'a> {
         }
     }
 
+    #[cfg(feature = "ingress_client")]
     fn struct_ingress(&self) -> TokenStream2 {
         let &Self {
             vis,
@@ -395,6 +398,7 @@ impl<'a> ServiceGenerator<'a> {
         }
     }
 
+    #[cfg(feature = "ingress_client")]
     fn impl_ingress(&self) -> TokenStream2 {
         let &Self {
             vis,
