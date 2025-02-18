@@ -1,24 +1,28 @@
 use std::time::Duration;
 
 use reqwest::{header::HeaderMap, Url};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use thiserror::Error;
 
 use super::{
     request::{IngressRequestOptions, SendResponse, SendStatus},
     result::{IngressResultOptions, ResultOp, ResultTarget},
 };
-use crate::{context::RequestTarget, errors::TerminalError};
+use crate::{
+    context::RequestTarget,
+    errors::TerminalError,
+    serde::{Deserialize, Serialize},
+};
 
 const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendResponseSchema {
     invocation_id: String,
     status: SendStatusSchema,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 enum SendStatusSchema {
     Accepted,
     PreviouslyAccepted,
@@ -33,7 +37,7 @@ impl From<SendStatusSchema> for SendStatus {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 struct TerminalErrorSchema {
     code: Option<u16>,
     message: String,
@@ -45,13 +49,29 @@ pub(super) struct IngressInternal {
     pub(super) headers: HeaderMap,
 }
 
+#[derive(Debug, Error)]
+pub enum IngressClientError {
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
+    #[error("terminal error [{}]: {}", ._0.code(), ._0.message())]
+    Terminal(TerminalError),
+    #[error(transparent)]
+    Serde(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl From<TerminalError> for IngressClientError {
+    fn from(value: TerminalError) -> Self {
+        Self::Terminal(value)
+    }
+}
+
 impl IngressInternal {
-    pub(super) async fn call<Req: Serialize, Res: DeserializeOwned>(
+    pub(super) async fn call<Req: Serialize, Res: Deserialize>(
         &self,
         target: RequestTarget,
         req: Req,
         opts: IngressRequestOptions,
-    ) -> Result<Result<Res, TerminalError>, reqwest::Error> {
+    ) -> Result<Res, IngressClientError> {
         let mut headers = self.headers.clone();
         if let Some(key) = opts.idempotency_key {
             headers.append(IDEMPOTENCY_KEY_HEADER, key);
@@ -59,7 +79,10 @@ impl IngressInternal {
 
         let url = format!("{}/{target}", self.url.as_str().trim_end_matches("/"));
 
-        let mut builder = self.client.post(url).headers(headers).json(&req);
+        let mut builder = self.client.post(url).headers(headers).body(
+            req.serialize()
+                .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
+        );
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
@@ -70,15 +93,13 @@ impl IngressInternal {
         if let Err(e) = res.error_for_status_ref() {
             let status = res.status().as_u16();
             if let Ok(e) = res.json::<TerminalErrorSchema>().await {
-                Ok(Err(TerminalError::new_with_code(
-                    e.code.unwrap_or(status),
-                    e.message,
-                )))
+                Err(TerminalError::new_with_code(e.code.unwrap_or(status), e.message).into())
             } else {
-                Err(e)
+                Err(e.into())
             }
         } else {
-            Ok(Ok(res.json::<Res>().await?))
+            Ok(Res::deserialize(&mut res.bytes().await?)
+                .map_err(|e| IngressClientError::Serde(Box::new(e)))?)
         }
     }
 
@@ -88,7 +109,7 @@ impl IngressInternal {
         req: Req,
         opts: IngressRequestOptions,
         delay: Option<Duration>,
-    ) -> Result<Result<SendResponse, TerminalError>, reqwest::Error> {
+    ) -> Result<SendResponse, IngressClientError> {
         let mut headers = self.headers.clone();
         let attachable = if let Some(key) = opts.idempotency_key {
             headers.append(IDEMPOTENCY_KEY_HEADER, key);
@@ -107,7 +128,10 @@ impl IngressInternal {
             format!("{}/{target}/send", self.url.as_str().trim_end_matches("/"))
         };
 
-        let mut builder = self.client.post(url).headers(headers).json(&req);
+        let mut builder = self.client.post(url).headers(headers).body(
+            req.serialize()
+                .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
+        );
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
@@ -118,29 +142,26 @@ impl IngressInternal {
         if let Err(e) = res.error_for_status_ref() {
             let status = res.status().as_u16();
             if let Ok(e) = res.json::<TerminalErrorSchema>().await {
-                Ok(Err(TerminalError::new_with_code(
-                    e.code.unwrap_or(status),
-                    e.message,
-                )))
+                Err(TerminalError::new_with_code(e.code.unwrap_or(status), e.message).into())
             } else {
-                Err(e)
+                Err(e.into())
             }
         } else {
             let res = res.json::<SendResponseSchema>().await?;
-            Ok(Ok(SendResponse {
+            Ok(SendResponse {
                 invocation_id: res.invocation_id,
                 status: res.status.into(),
                 attachable,
-            }))
+            })
         }
     }
 
-    pub(super) async fn result<Res: DeserializeOwned>(
+    pub(super) async fn result<Res: Deserialize>(
         &self,
         target: ResultTarget,
         op: ResultOp,
         opts: IngressResultOptions,
-    ) -> Result<Result<Res, TerminalError>, reqwest::Error> {
+    ) -> Result<Res, IngressClientError> {
         let url = format!("{}/{target}/{op}", self.url.as_str().trim_end_matches("/"));
 
         let mut builder = self.client.get(url).headers(self.headers.clone());
@@ -154,15 +175,13 @@ impl IngressInternal {
         if let Err(e) = res.error_for_status_ref() {
             let status = res.status().as_u16();
             if let Ok(e) = res.json::<TerminalErrorSchema>().await {
-                Ok(Err(TerminalError::new_with_code(
-                    e.code.unwrap_or(status),
-                    e.message,
-                )))
+                Err(TerminalError::new_with_code(e.code.unwrap_or(status), e.message).into())
             } else {
-                Err(e)
+                Err(e.into())
             }
         } else {
-            Ok(Ok(res.json::<Res>().await?))
+            Ok(Res::deserialize(&mut res.bytes().await?)
+                .map_err(|e| IngressClientError::Serde(Box::new(e)))?)
         }
     }
 }

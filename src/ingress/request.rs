@@ -1,10 +1,13 @@
 use std::{marker::PhantomData, time::Duration};
 
 use http::HeaderValue;
-use serde::{de::DeserializeOwned, Serialize};
 
-use super::internal::IngressInternal;
-use crate::{context::RequestTarget, errors::TerminalError};
+use super::internal::{IngressClientError, IngressInternal};
+use crate::{
+    context::RequestTarget,
+    errors::TerminalError,
+    serde::{Deserialize, Serialize},
+};
 
 /// A send response.
 #[derive(Debug, Clone)]
@@ -60,16 +63,16 @@ impl<'a, Req, Res> IngressRequest<'a, Req, Res> {
     }
 
     /// Call a service via the ingress. This returns a future encapsulating the response.
-    pub async fn call(self) -> Result<Result<Res, TerminalError>, reqwest::Error>
+    pub async fn call(self) -> Result<Res, IngressClientError>
     where
         Req: Serialize + 'static,
-        Res: DeserializeOwned + 'static,
+        Res: Deserialize + 'static,
     {
         self.inner.call(self.target, self.req, self.opts).await
     }
 
     /// Send the request to the ingress, without waiting for the response.
-    pub async fn send(self) -> Result<Result<SendResponse, TerminalError>, reqwest::Error>
+    pub async fn send(self) -> Result<SendResponse, IngressClientError>
     where
         Req: Serialize + 'static,
     {
@@ -82,7 +85,7 @@ impl<'a, Req, Res> IngressRequest<'a, Req, Res> {
     pub async fn send_with_delay(
         self,
         duration: Duration,
-    ) -> Result<Result<SendResponse, TerminalError>, reqwest::Error>
+    ) -> Result<SendResponse, IngressClientError>
     where
         Req: Serialize + 'static,
     {

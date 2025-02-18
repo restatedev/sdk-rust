@@ -4,10 +4,8 @@ use std::{
     time::Duration,
 };
 
-use serde::de::DeserializeOwned;
-
-use super::internal::IngressInternal;
-use crate::errors::TerminalError;
+use super::internal::{IngressClientError, IngressInternal};
+use crate::serde::Deserialize;
 
 /// The invocation or workflow target to retrieve the result from.
 #[derive(Debug, Clone)]
@@ -146,9 +144,9 @@ impl<'a, Res> IngressResult<'a, Res> {
     }
 
     /// Attach to an invocation or workflow and wait for it to finish.
-    pub async fn attach(self) -> Result<Result<Res, TerminalError>, reqwest::Error>
+    pub async fn attach(self) -> Result<Res, IngressClientError>
     where
-        Res: DeserializeOwned + 'static,
+        Res: Deserialize + 'static,
     {
         self.inner
             .result(self.target, ResultOp::Attach, self.opts)
@@ -156,9 +154,9 @@ impl<'a, Res> IngressResult<'a, Res> {
     }
 
     /// Peek at the output of an invocation or workflow.
-    pub async fn output(self) -> Result<Result<Res, TerminalError>, reqwest::Error>
+    pub async fn output(self) -> Result<Res, IngressClientError>
     where
-        Res: DeserializeOwned + 'static,
+        Res: Deserialize + 'static,
     {
         self.inner
             .result(self.target, ResultOp::Output, self.opts)
