@@ -11,7 +11,7 @@ rust-version = "1.76.0"
 default = ["http_server", "rand", "uuid"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
-ingress_client = ["dep:reqwest"]
+ingress_client = ["dep:reqwest", "restate-sdk-macros/ingress_client"]
 
 [dependencies]
 bytes = "1.6.1"

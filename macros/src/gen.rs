@@ -9,6 +9,7 @@ pub(crate) struct ServiceGenerator<'a> {
     pub(crate) restate_name: &'a str,
     pub(crate) service_ident: &'a Ident,
     pub(crate) client_ident: Ident,
+    pub(crate) ingress_ident: Ident,
     pub(crate) serve_ident: Ident,
     pub(crate) vis: &'a Visibility,
     pub(crate) attrs: &'a [Attribute],
@@ -22,6 +23,7 @@ impl<'a> ServiceGenerator<'a> {
             restate_name: &s.restate_name,
             service_ident: &s.ident,
             client_ident: format_ident!("{}Client", s.ident),
+            ingress_ident: format_ident!("{}Ingress", s.ident),
             serve_ident: format_ident!("Serve{}", s.ident),
             vis: &s.vis,
             attrs: &s.attrs,
@@ -336,6 +338,121 @@ impl<'a> ServiceGenerator<'a> {
             }
         }
     }
+
+    fn struct_ingress(&self) -> TokenStream2 {
+        let &Self {
+            vis,
+            ref ingress_ident,
+            ref service_ty,
+            service_ident,
+            ..
+        } = self;
+
+        let key_field = match service_ty {
+            ServiceType::Service => quote! {},
+            ServiceType::Object | ServiceType::Workflow => quote! {
+                key: String,
+            },
+        };
+
+        let into_client_impl = match service_ty {
+            ServiceType::Service => {
+                quote! {
+                    impl<'client> ::restate_sdk::ingress_client::IntoServiceIngress<'client> for #ingress_ident<'client> {
+                        fn create_ingress(client: &'client ::restate_sdk::ingress_client::IngressClient) -> Self {
+                            Self { client }
+                        }
+                    }
+                }
+            }
+            ServiceType::Object => quote! {
+                impl<'client> ::restate_sdk::ingress_client::IntoObjectIngress<'client> for #ingress_ident<'client> {
+                    fn create_ingress(client: &'client ::restate_sdk::ingress_client::IngressClient, key: String) -> Self {
+                        Self { client, key }
+                    }
+                }
+            },
+            ServiceType::Workflow => quote! {
+                impl<'client> ::restate_sdk::ingress_client::IntoWorkflowIngress<'client> for #ingress_ident<'client> {
+                    fn create_ingress(client: &'client ::restate_sdk::ingress_client::IngressClient, key: String) -> Self {
+                        Self { client, key }
+                    }
+                }
+            },
+        };
+
+        let doc_msg = format!(
+            "Struct exposing the ingress client to invoke [`{service_ident}`] without a context."
+        );
+        quote! {
+            #[doc = #doc_msg]
+            #vis struct #ingress_ident<'client> {
+                client: &'client ::restate_sdk::ingress_client::IngressClient,
+                #key_field
+            }
+
+            #into_client_impl
+        }
+    }
+
+    fn impl_ingress(&self) -> TokenStream2 {
+        let &Self {
+            vis,
+            ref ingress_ident,
+            handlers,
+            restate_name,
+            service_ty,
+            ..
+        } = self;
+
+        let service_literal = Literal::string(restate_name);
+
+        let handlers_fns = handlers.iter().map(|handler| {
+            let handler_ident = &handler.ident;
+            let handler_literal = Literal::string(&handler.restate_name);
+
+            let argument = match &handler.arg {
+                None => quote! {},
+                Some(PatType {
+                         ty, ..
+                     }) => quote! { req: #ty }
+            };
+            let argument_ty = match &handler.arg {
+                None => quote! { () },
+                Some(PatType {
+                         ty, ..
+                     }) => quote! { #ty }
+            };
+            let res_ty = &handler.output_ok;
+            let input =  match &handler.arg {
+                None => quote! { () },
+                Some(_) => quote! { req }
+            };
+            let request_target = match service_ty {
+                ServiceType::Service => quote! {
+                    ::restate_sdk::context::RequestTarget::service(#service_literal, #handler_literal)
+                },
+                ServiceType::Object => quote! {
+                    ::restate_sdk::context::RequestTarget::object(#service_literal, &self.key, #handler_literal)
+                },
+                ServiceType::Workflow => quote! {
+                    ::restate_sdk::context::RequestTarget::workflow(#service_literal, &self.key, #handler_literal)
+                }
+            };
+
+            quote! {
+                #vis fn #handler_ident(&self, #argument) -> ::restate_sdk::ingress_client::request::IngressRequest<'client, #argument_ty, #res_ty> {
+                    self.client.request(#request_target, #input)
+                }
+            }
+        });
+
+        quote! {
+            impl<'client> #ingress_ident<'client> {
+                #( #handlers_fns )*
+            }
+        }
+    }
 }
 
 impl<'a> ToTokens for ServiceGenerator<'a> {
@@ -347,6 +464,10 @@ impl<'a> ToTokens for ServiceGenerator<'a> {
             self.impl_discoverable(),
             self.struct_client(),
             self.impl_client(),
+            #[cfg(feature = "ingress_client")]
+            self.struct_ingress(),
+            #[cfg(feature = "ingress_client")]
+            self.impl_ingress(),
         ]);
     }
 }
