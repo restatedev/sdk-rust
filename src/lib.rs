@@ -222,6 +222,7 @@ pub mod errors;
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
+#[cfg(feature = "ingress_client")]
 pub mod ingress;
 pub mod serde;
 
