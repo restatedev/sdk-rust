@@ -1,5 +1,5 @@
 [package]
-name = "test-env"
+name = "restate-sdk-test-env"
 version = "0.3.2"
 edition = "2021"
 description = "Test Utilities for Restate SDK for Rust"

@@ -1,6 +1,6 @@
 use reqwest::StatusCode;
 use restate_sdk::prelude::*;
-use test_env::TestContainer;
+use restate_sdk_test_env::TestContainer;
 use tracing::info;
 
 // Should compile
