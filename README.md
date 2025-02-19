@@ -65,11 +65,10 @@ Just configure it as usual through [`tracing_subscriber`](https://docs.rs/tracin
 
 ### Testing
 
-The SDK uses [testcontainers](https://rust.testcontainers.org/) to support integration testing using docker deployed restate server.
-The  `test-env` crate provies a framwork for intializing the test environment, and an integration test example in `test-env/tests/test_container.rs`.
+The SDK uses [Testcontainers](https://rust.testcontainers.org/) to support integration testing using a Docker-deployed restate server.
+The `test-env` crate provides a framework for initializing the test environment, and an integration test example in `test-env/tests/test_container.rs`.
 
 ```rust
-
 #[tokio::test]
 async fn test_container() {
     tracing_subscriber::fmt::fmt()
@@ -114,7 +113,6 @@ async fn test_container() {
         response.text().await.unwrap()
     );
 }
-
 ```
 
 ## Versions
