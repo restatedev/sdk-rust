@@ -139,7 +139,7 @@ impl TestContainer {
             self.endpoint_server_port.as_ref().unwrap()
         ));
 
-        // boot restate server
+        // boot enpoint server
         self.endpoint_task = Some(tokio::spawn(async move {
             HttpServer::new(endpoint).serve(listener).await;
         }));
