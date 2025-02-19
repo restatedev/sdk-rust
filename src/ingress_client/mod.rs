@@ -1,3 +1,4 @@
+use awakeable::IngressAwakeable;
 use reqwest::{header::HeaderMap, Url};
 
 use self::{
@@ -7,6 +8,7 @@ use self::{
 };
 use crate::context::RequestTarget;
 
+pub mod awakeable;
 pub mod handle;
 pub mod internal;
 pub mod request;
@@ -96,6 +98,11 @@ impl IngressClient {
         H: IntoWorkflowHandle<'a>,
     {
         H::create_handle(self, id.into())
+    }
+
+    /// Create a new [`IngressAwakeable`].
+    pub fn awakeable(&self, key: impl Into<String>) -> IngressAwakeable<'_> {
+        IngressAwakeable::new(&self.inner, key)
     }
 }
 

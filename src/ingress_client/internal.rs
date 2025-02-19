@@ -1,9 +1,11 @@
 use std::time::Duration;
 
+use http::HeaderValue;
 use reqwest::{header::HeaderMap, Url};
 use thiserror::Error;
 
 use super::{
+    awakeable::IngressAwakeableOptions,
     handle::{HandleOp, HandleTarget, IngressHandleOptions},
     request::{IngressRequestOptions, SendResponse, SendStatus},
 };
@@ -14,6 +16,8 @@ use crate::{
 };
 
 const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
+const APPLICATION_JSON: HeaderValue = HeaderValue::from_static("application/json");
+const TEXT_PLAIN: HeaderValue = HeaderValue::from_static("text/plain");
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -182,6 +186,85 @@ impl IngressInternal {
         } else {
             Ok(Res::deserialize(&mut res.bytes().await?)
                 .map_err(|e| IngressClientError::Serde(Box::new(e)))?)
+        }
+    }
+
+    pub(super) async fn resolve_awakeable<T: Serialize + 'static>(
+        &self,
+        key: &str,
+        payload: Option<T>,
+        opts: IngressAwakeableOptions,
+    ) -> Result<(), IngressClientError> {
+        let url = format!(
+            "{}/restate/awakeables/{}/resolve",
+            self.url.as_str().trim_end_matches("/"),
+            key
+        );
+
+        let mut builder = self.client.post(url).headers(self.headers.clone());
+
+        if let Some(timeout) = opts.timeout {
+            builder = builder.timeout(timeout);
+        }
+
+        if let Some(payload) = payload {
+            builder = builder
+                .header(http::header::CONTENT_TYPE, APPLICATION_JSON)
+                .body(
+                    payload
+                        .serialize()
+                        .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
+                );
+        }
+
+        let res = builder.send().await?;
+
+        if let Err(e) = res.error_for_status_ref() {
+            let status = res.status().as_u16();
+            if let Ok(e) = res.json::<TerminalErrorSchema>().await {
+                Err(TerminalError::new_with_code(e.code.unwrap_or(status), e.message).into())
+            } else {
+                Err(e.into())
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(super) async fn reject_awakeable(
+        &self,
+        key: &str,
+        message: &str,
+        opts: IngressAwakeableOptions,
+    ) -> Result<(), IngressClientError> {
+        let url = format!(
+            "{}/restate/awakeables/{}/reject",
+            self.url.as_str().trim_end_matches("/"),
+            key
+        );
+
+        let mut builder = self
+            .client
+            .post(url)
+            .headers(self.headers.clone())
+            .header(http::header::CONTENT_TYPE, TEXT_PLAIN)
+            .body(message.to_string());
+
+        if let Some(timeout) = opts.timeout {
+            builder = builder.timeout(timeout);
+        }
+
+        let res = builder.send().await?;
+
+        if let Err(e) = res.error_for_status_ref() {
+            let status = res.status().as_u16();
+            if let Ok(e) = res.json::<TerminalErrorSchema>().await {
+                Err(TerminalError::new_with_code(e.code.unwrap_or(status), e.message).into())
+            } else {
+                Err(e.into())
+            }
+        } else {
+            Ok(())
         }
     }
 }
