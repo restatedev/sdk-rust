@@ -67,10 +67,10 @@ impl IngressClient {
         I::create_ingress(self, id.into())
     }
 
-    pub fn invocation_handle<'a, Res>(
-        &'a self,
+    pub fn invocation_handle<Res>(
+        &self,
         invocation_id: impl Into<String>,
-    ) -> IngressHandle<'a, Res> {
+    ) -> IngressHandle<'_, Res> {
         self.handle(HandleTarget::invocation(invocation_id))
     }
 
