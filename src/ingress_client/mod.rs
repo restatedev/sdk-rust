@@ -1,5 +1,5 @@
 use awakeable::IngressAwakeable;
-use reqwest::{header::HeaderMap, Url};
+use reqwest::Url;
 
 use self::{
     handle::{HandleTarget, IngressHandle},
@@ -25,19 +25,14 @@ impl IngressClient {
             inner: IngressInternal {
                 client: reqwest::Client::new(),
                 url,
-                headers: Default::default(),
             },
         }
     }
 
-    /// Create a new [`IngressClient`] with custom headers.
-    pub fn new_with_headers(url: Url, headers: HeaderMap) -> Self {
+    /// Create a new [`IngressClient`] with a custom client.
+    pub fn new_with_client(url: Url, client: reqwest::Client) -> Self {
         Self {
-            inner: IngressInternal {
-                client: reqwest::Client::new(),
-                url,
-                headers,
-            },
+            inner: IngressInternal { client, url },
         }
     }
 

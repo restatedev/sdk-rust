@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use http::HeaderValue;
-use reqwest::{header::HeaderMap, Url};
+use reqwest::Url;
 use thiserror::Error;
 
 use super::{
@@ -50,14 +50,13 @@ struct TerminalErrorSchema {
 pub(super) struct IngressInternal {
     pub(super) client: reqwest::Client,
     pub(super) url: Url,
-    pub(super) headers: HeaderMap,
 }
 
 #[derive(Debug, Error)]
 pub enum IngressClientError {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
-    #[error("terminal error [{}]: {}", ._0.code(), ._0.message())]
+    #[error("{0}")]
     Terminal(TerminalError),
     #[error(transparent)]
     Serde(Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -76,17 +75,20 @@ impl IngressInternal {
         req: Req,
         opts: IngressRequestOptions,
     ) -> Result<Res, IngressClientError> {
-        let mut headers = self.headers.clone();
-        if let Some(key) = opts.idempotency_key {
-            headers.append(IDEMPOTENCY_KEY_HEADER, key);
-        }
-
         let url = format!("{}/{target}", self.url.as_str().trim_end_matches("/"));
 
-        let mut builder = self.client.post(url).headers(headers).body(
-            req.serialize()
-                .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
-        );
+        let mut builder = self
+            .client
+            .post(url)
+            .header(http::header::CONTENT_TYPE, APPLICATION_JSON)
+            .body(
+                req.serialize()
+                    .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
+            );
+
+        if let Some(key) = opts.idempotency_key {
+            builder = builder.header(IDEMPOTENCY_KEY_HEADER, key);
+        }
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
@@ -114,14 +116,6 @@ impl IngressInternal {
         opts: IngressRequestOptions,
         delay: Option<Duration>,
     ) -> Result<SendResponse, IngressClientError> {
-        let mut headers = self.headers.clone();
-        let attachable = if let Some(key) = opts.idempotency_key {
-            headers.append(IDEMPOTENCY_KEY_HEADER, key);
-            true
-        } else {
-            false
-        };
-
         let url = if let Some(delay) = delay {
             format!(
                 "{}/{target}/send?delay={}ms",
@@ -132,10 +126,21 @@ impl IngressInternal {
             format!("{}/{target}/send", self.url.as_str().trim_end_matches("/"))
         };
 
-        let mut builder = self.client.post(url).headers(headers).body(
-            req.serialize()
-                .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
-        );
+        let mut builder = self
+            .client
+            .post(url)
+            .header(http::header::CONTENT_TYPE, APPLICATION_JSON)
+            .body(
+                req.serialize()
+                    .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
+            );
+
+        let attachable = if let Some(key) = opts.idempotency_key {
+            builder = builder.header(IDEMPOTENCY_KEY_HEADER, key);
+            true
+        } else {
+            false
+        };
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
@@ -168,7 +173,7 @@ impl IngressInternal {
     ) -> Result<Res, IngressClientError> {
         let url = format!("{}/{target}/{op}", self.url.as_str().trim_end_matches("/"));
 
-        let mut builder = self.client.get(url).headers(self.headers.clone());
+        let mut builder = self.client.get(url);
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
@@ -201,7 +206,7 @@ impl IngressInternal {
             key
         );
 
-        let mut builder = self.client.post(url).headers(self.headers.clone());
+        let mut builder = self.client.post(url);
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
@@ -246,7 +251,6 @@ impl IngressInternal {
         let mut builder = self
             .client
             .post(url)
-            .headers(self.headers.clone())
             .header(http::header::CONTENT_TYPE, TEXT_PLAIN)
             .body(message.to_string());
 

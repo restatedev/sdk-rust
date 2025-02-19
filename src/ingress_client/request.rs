@@ -1,7 +1,5 @@
 use std::{marker::PhantomData, time::Duration};
 
-use http::HeaderValue;
-
 use super::internal::{IngressClientError, IngressInternal};
 use crate::{
     context::RequestTarget,
@@ -34,7 +32,7 @@ pub struct IngressRequest<'a, Req, Res = ()> {
 
 #[derive(Default, Clone)]
 pub(super) struct IngressRequestOptions {
-    pub(super) idempotency_key: Option<HeaderValue>,
+    pub(super) idempotency_key: Option<String>,
     pub(super) timeout: Option<Duration>,
 }
 
@@ -50,8 +48,8 @@ impl<'a, Req, Res> IngressRequest<'a, Req, Res> {
     }
 
     /// Set the idempotency key for the request.
-    pub fn idempotency_key(mut self, value: HeaderValue) -> Self {
-        self.opts.idempotency_key = Some(value);
+    pub fn idempotency_key(mut self, value: impl Into<String>) -> Self {
+        self.opts.idempotency_key = Some(value.into());
         self
     }
 
