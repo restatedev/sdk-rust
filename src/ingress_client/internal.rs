@@ -197,7 +197,7 @@ impl IngressInternal {
     pub(super) async fn resolve_awakeable<T: Serialize + 'static>(
         &self,
         key: &str,
-        payload: Option<T>,
+        payload: T,
         opts: IngressAwakeableOptions,
     ) -> Result<(), IngressClientError> {
         let url = format!(
@@ -206,20 +206,18 @@ impl IngressInternal {
             key
         );
 
-        let mut builder = self.client.post(url);
+        let mut builder = self
+            .client
+            .post(url)
+            .header(http::header::CONTENT_TYPE, APPLICATION_JSON)
+            .body(
+                payload
+                    .serialize()
+                    .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
+            );
 
         if let Some(timeout) = opts.timeout {
             builder = builder.timeout(timeout);
-        }
-
-        if let Some(payload) = payload {
-            builder = builder
-                .header(http::header::CONTENT_TYPE, APPLICATION_JSON)
-                .body(
-                    payload
-                        .serialize()
-                        .map_err(|e| IngressClientError::Serde(Box::new(e)))?,
-                );
         }
 
         let res = builder.send().await?;

@@ -30,20 +30,13 @@ impl<'a> IngressAwakeable<'a> {
         self
     }
 
-    /// Resolve the awakeable
-    pub async fn resolve(self) -> Result<(), IngressClientError> {
-        self.inner
-            .resolve_awakeable(&self.key, None::<()>, self.opts)
-            .await
-    }
-
     /// Resolve the awakeable with a payload
-    pub async fn resolve_with_payload<T: Serialize + 'static>(
+    pub async fn resolve<T: Serialize + 'static>(
         self,
         payload: T,
     ) -> Result<(), IngressClientError> {
         self.inner
-            .resolve_awakeable(&self.key, Some(payload), self.opts)
+            .resolve_awakeable(&self.key, payload, self.opts)
             .await
     }
 
