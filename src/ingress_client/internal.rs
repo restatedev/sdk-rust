@@ -4,8 +4,8 @@ use reqwest::{header::HeaderMap, Url};
 use thiserror::Error;
 
 use super::{
+    handle::{HandleOp, HandleTarget, IngressHandleOptions},
     request::{IngressRequestOptions, SendResponse, SendStatus},
-    result::{IngressResultOptions, ResultOp, ResultTarget},
 };
 use crate::{
     context::RequestTarget,
@@ -156,11 +156,11 @@ impl IngressInternal {
         }
     }
 
-    pub(super) async fn result<Res: Deserialize>(
+    pub(super) async fn handle<Res: Deserialize>(
         &self,
-        target: ResultTarget,
-        op: ResultOp,
-        opts: IngressResultOptions,
+        target: HandleTarget,
+        op: HandleOp,
+        opts: IngressHandleOptions,
     ) -> Result<Res, IngressClientError> {
         let url = format!("{}/{target}/{op}", self.url.as_str().trim_end_matches("/"));
 

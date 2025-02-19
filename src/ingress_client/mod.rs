@@ -1,15 +1,15 @@
 use reqwest::{header::HeaderMap, Url};
 
 use self::{
+    handle::{HandleTarget, IngressHandle},
     internal::IngressInternal,
     request::IngressRequest,
-    result::{IngressResult, ResultTarget},
 };
 use crate::context::RequestTarget;
 
+pub mod handle;
 pub mod internal;
 pub mod request;
-pub mod result;
 
 /// A client for invoking handlers via the ingress.
 pub struct IngressClient {
@@ -44,9 +44,9 @@ impl IngressClient {
         IngressRequest::new(&self.inner, target, req)
     }
 
-    /// Create a new [`IngressResult`].
-    pub fn result<Res>(&self, target: ResultTarget) -> IngressResult<Res> {
-        IngressResult::new(&self.inner, target)
+    /// Create a new [`IngressHandle`].
+    pub fn handle<Res>(&self, target: HandleTarget) -> IngressHandle<Res> {
+        IngressHandle::new(&self.inner, target)
     }
 
     pub fn service_ingress<'a, I>(&'a self) -> I
@@ -70,32 +70,32 @@ impl IngressClient {
         I::create_ingress(self, id.into())
     }
 
-    pub fn invocation_result<'a, Res>(
+    pub fn invocation_handle<'a, Res>(
         &'a self,
         invocation_id: impl Into<String>,
-    ) -> IngressResult<'a, Res> {
-        self.result(ResultTarget::invocation(invocation_id))
+    ) -> IngressHandle<'a, Res> {
+        self.handle(HandleTarget::invocation(invocation_id))
     }
 
-    pub fn service_result<'a, R>(&'a self) -> R
+    pub fn service_handle<'a, H>(&'a self) -> H
     where
-        R: IntoServiceResult<'a>,
+        H: IntoServiceHandle<'a>,
     {
-        R::create_result(self)
+        H::create_handle(self)
     }
 
-    pub fn object_result<'a, R>(&'a self, key: impl Into<String>) -> R
+    pub fn object_handle<'a, H>(&'a self, key: impl Into<String>) -> H
     where
-        R: IntoObjectResult<'a>,
+        H: IntoObjectHandle<'a>,
     {
-        R::create_result(self, key.into())
+        H::create_handle(self, key.into())
     }
 
-    pub fn workflow_result<'a, R>(&'a self, id: impl Into<String>) -> R
+    pub fn workflow_handle<'a, H>(&'a self, id: impl Into<String>) -> H
     where
-        R: IntoWorkflowResult<'a>,
+        H: IntoWorkflowHandle<'a>,
     {
-        R::create_result(self, id.into())
+        H::create_handle(self, id.into())
     }
 }
 
@@ -114,17 +114,17 @@ pub trait IntoWorkflowIngress<'a>: Sized {
     fn create_ingress(client: &'a IngressClient, id: String) -> Self;
 }
 
-/// Trait used by codegen to retrieve the service result.
-pub trait IntoServiceResult<'a>: Sized {
-    fn create_result(client: &'a IngressClient) -> Self;
+/// Trait used by codegen to use the service handle.
+pub trait IntoServiceHandle<'a>: Sized {
+    fn create_handle(client: &'a IngressClient) -> Self;
 }
 
-/// Trait used by codegen to retrieve the object result.
-pub trait IntoObjectResult<'a>: Sized {
-    fn create_result(client: &'a IngressClient, key: String) -> Self;
+/// Trait used by codegen to use the object handle.
+pub trait IntoObjectHandle<'a>: Sized {
+    fn create_handle(client: &'a IngressClient, key: String) -> Self;
 }
 
-/// Trait used by codegen to retrieve the workflow result.
-pub trait IntoWorkflowResult<'a>: Sized {
-    fn create_result(client: &'a IngressClient, id: String) -> Self;
+/// Trait used by codegen to use the workflow handle.
+pub trait IntoWorkflowHandle<'a>: Sized {
+    fn create_handle(client: &'a IngressClient, id: String) -> Self;
 }

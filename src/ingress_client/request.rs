@@ -5,7 +5,6 @@ use http::HeaderValue;
 use super::internal::{IngressClientError, IngressInternal};
 use crate::{
     context::RequestTarget,
-    errors::TerminalError,
     serde::{Deserialize, Serialize},
 };
 

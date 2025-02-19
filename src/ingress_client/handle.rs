@@ -7,9 +7,9 @@ use std::{
 use super::internal::{IngressClientError, IngressInternal};
 use crate::serde::Deserialize;
 
-/// The invocation or workflow target to retrieve the result from.
+/// The target invocation or workflow to retrieve the handle of.
 #[derive(Debug, Clone)]
-pub enum ResultTarget {
+pub enum HandleTarget {
     Invocation {
         id: String,
     },
@@ -30,7 +30,7 @@ pub enum ResultTarget {
     },
 }
 
-impl ResultTarget {
+impl HandleTarget {
     pub fn invocation(id: impl Into<String>) -> Self {
         Self::Invocation { id: id.into() }
     }
@@ -69,20 +69,20 @@ impl ResultTarget {
     }
 }
 
-impl Display for ResultTarget {
+impl Display for HandleTarget {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ResultTarget::Invocation { id } => {
+            HandleTarget::Invocation { id } => {
                 write!(f, "restate/invocation/{id}")
             }
-            ResultTarget::Service {
+            HandleTarget::Service {
                 name,
                 handler,
                 idempotency_key,
             } => {
                 write!(f, "restate/invocation/{name}/{handler}/{idempotency_key}")
             }
-            ResultTarget::Object {
+            HandleTarget::Object {
                 name,
                 key,
                 handler,
@@ -91,44 +91,44 @@ impl Display for ResultTarget {
                 f,
                 "restate/invocation/{name}/{key}/{handler}/{idempotency_key}"
             ),
-            ResultTarget::Workflow { name, id } => {
+            HandleTarget::Workflow { name, id } => {
                 write!(f, "restate/workflow/{name}/{id}")
             }
         }
     }
 }
 
-/// The mode of operation to use when retrieving the result of an invocation or workflow.
+/// The mode of operation to use on the handle of the invocation or workflow.
 #[derive(Debug, Clone, Copy)]
-pub enum ResultOp {
+pub enum HandleOp {
     Attach,
     Output,
 }
 
-impl Display for ResultOp {
+impl Display for HandleOp {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ResultOp::Attach => write!(f, "attach"),
-            ResultOp::Output => write!(f, "output"),
+            HandleOp::Attach => write!(f, "attach"),
+            HandleOp::Output => write!(f, "output"),
         }
     }
 }
 
-/// This struct encapsulates the parameters for retrieving a result of an invocation or workflow.
-pub struct IngressResult<'a, Res = ()> {
+/// This struct encapsulates the parameters for operating on the handle of an invocation or workflow.
+pub struct IngressHandle<'a, Res = ()> {
     inner: &'a IngressInternal,
-    target: ResultTarget,
+    target: HandleTarget,
     res: PhantomData<Res>,
-    opts: IngressResultOptions,
+    opts: IngressHandleOptions,
 }
 
 #[derive(Default)]
-pub(super) struct IngressResultOptions {
+pub(super) struct IngressHandleOptions {
     pub(super) timeout: Option<Duration>,
 }
 
-impl<'a, Res> IngressResult<'a, Res> {
-    pub(super) fn new(inner: &'a IngressInternal, target: ResultTarget) -> Self {
+impl<'a, Res> IngressHandle<'a, Res> {
+    pub(super) fn new(inner: &'a IngressInternal, target: HandleTarget) -> Self {
         Self {
             inner,
             target,
@@ -143,23 +143,23 @@ impl<'a, Res> IngressResult<'a, Res> {
         self
     }
 
-    /// Attach to an invocation or workflow and wait for it to finish.
+    /// Attach to the invocation or workflow and wait for it to finish.
     pub async fn attach(self) -> Result<Res, IngressClientError>
     where
         Res: Deserialize + 'static,
     {
         self.inner
-            .result(self.target, ResultOp::Attach, self.opts)
+            .handle(self.target, HandleOp::Attach, self.opts)
             .await
     }
 
-    /// Peek at the output of an invocation or workflow.
+    /// Peek at the output of the invocation or workflow.
     pub async fn output(self) -> Result<Res, IngressClientError>
     where
         Res: Deserialize + 'static,
     {
         self.inner
-            .result(self.target, ResultOp::Output, self.opts)
+            .handle(self.target, HandleOp::Output, self.opts)
             .await
     }
 }
