@@ -41,7 +41,7 @@ async fn test_container() {
     let endpoint = Endpoint::builder().bind(MyServiceImpl.serve()).build();
 
     // simple test container intialization with default configuration
-    // let mut test_container = TestContainer::default().start(endpoint).await.unwrap();
+    //let test_container = TestContainer::default().start(endpoint).await.unwrap();
 
     // custom test container initialization with builder
     let test_container = TestContainer::builder()

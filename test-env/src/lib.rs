@@ -139,14 +139,14 @@ impl TestContainer {
             self.endpoint_server_port.as_ref().unwrap()
         ));
 
-        // boot enpoint server
+        // boot endpoint server
         self.endpoint_task = Some(tokio::spawn(async move {
             HttpServer::new(endpoint).serve(listener).await;
         }));
 
         let client = reqwest::Client::builder().http2_prior_knowledge().build()?;
 
-        // wait for server to respond
+        // wait for endpoint server to respond
         let mut retries = 0;
         while client
             .get(format!(
