@@ -9,6 +9,9 @@ repository = "https://github.com/restatedev/sdk-rust"
 [lib]
 proc-macro = true
 
+[features]
+ingress_client = []
+
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
