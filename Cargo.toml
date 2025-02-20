@@ -47,4 +47,4 @@ syn = "2.0"
 typify = { version = "0.1.0" }
 
 [workspace]
-members = ["macros", "test-services"]
+members = ["macros", "test-services", "test-env"]
