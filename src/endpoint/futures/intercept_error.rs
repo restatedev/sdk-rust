@@ -65,7 +65,7 @@ impl<F: InvocationHandle> InvocationHandle for InterceptErrorFuture<F> {
         self.fut.invocation_id()
     }
 
-    fn cancel(&self) {
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
         self.fut.cancel()
     }
 }

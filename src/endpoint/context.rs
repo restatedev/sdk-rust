@@ -8,12 +8,13 @@ use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
 use crate::errors::{HandlerErrorInner, HandlerResult, TerminalError};
 use crate::serde::{Deserialize, Serialize};
-use futures::future::Either;
+use futures::future::{Either, Shared};
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, NonEmptyValue, NotificationHandle, RetryPolicy, RunExitResult, SendHandle,
-    TakeOutputResult, Target, TerminalFailure, Value, VM,
+    CallHandle as CoreCallHandle, CoreVM, DoProgressResponse, Error as CoreError, NonEmptyValue,
+    NotificationHandle, RetryPolicy, RunExitResult, SendHandle as CoreSendHandle, TakeOutputResult,
+    Target, TerminalFailure, Value, VM,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -48,8 +49,10 @@ impl ContextInternalInner {
     }
 
     pub(super) fn fail(&mut self, e: Error) {
-        self.vm
-            .notify_error(e.0.to_string().into(), format!("{:#}", e.0).into());
+        self.vm.notify_error(
+            CoreError::new(500u16, e.0.to_string()).with_stacktrace(Cow::Owned(format!("{:#}", e.0))),
+            None,
+        );
         self.handler_state.mark_error(e);
     }
 }
@@ -96,6 +99,18 @@ macro_rules! must_lock {
     };
 }
 
+macro_rules! unwrap_or_trap {
+    ($inner_lock:expr, $res:expr) => {
+        match $res {
+            Ok(t) => t,
+            Err(e) => {
+                $inner_lock.fail(e.into());
+                return Either::Right(TrapFuture::default());
+            }
+        }
+    };
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct InputMetadata {
     pub invocation_id: String,
@@ -111,16 +126,22 @@ impl From<RequestTarget> for Target {
                 service: name,
                 handler,
                 key: None,
+                idempotency_key: None,
+                headers: vec![],
             },
             RequestTarget::Object { name, key, handler } => Target {
                 service: name,
                 handler,
                 key: Some(key),
+                idempotency_key: None,
+                headers: vec![],
             },
             RequestTarget::Workflow { name, key, handler } => Target {
                 service: name,
                 handler,
                 key: Some(key),
+                idempotency_key: None,
+                headers: vec![],
             },
         }
     }
@@ -199,59 +220,45 @@ impl ContextInternal {
     pub fn get<T: Deserialize>(
         &self,
         key: &str,
-    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.inner).vm.sys_state_get(key.to_owned()) };
+    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send {
+        let mut inner_lock = must_lock!(self.inner);
+        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get(key.to_owned()));
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Ok(Ok(None)),
-                Ok(Value::Success(mut s)) => {
-                    let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "get_state",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(Some(t)))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "get_state",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "get_state",
-                }),
-                Err(e) => Err(e),
-            });
+        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+            Ok(Value::Void) => Ok(Ok(None)),
+            Ok(Value::Success(mut s)) => {
+                let t =
+                    T::deserialize(&mut s).map_err(|e| Error::deserialization("get_state", e))?;
+                Ok(Ok(Some(t)))
+            }
+            Ok(Value::Failure(f)) => Ok(Err(f.into())),
+            Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                variant: <&'static str>::from(v),
+                syscall: "get_state",
+            }
+            .into()),
+            Err(e) => Err(e.into()),
+        });
 
-        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
+        Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
     }
 
-    pub fn get_keys(
-        &self,
-    ) -> impl Future<Output = Result<Vec<String>, TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.inner).vm.sys_state_get_keys() };
+    pub fn get_keys(&self) -> impl Future<Output = Result<Vec<String>, TerminalError>> + Send {
+        let mut inner_lock = must_lock!(self.inner);
+        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get_keys());
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "empty",
-                    syscall: "get_keys",
-                }),
-                Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "success",
-                    syscall: "get_keys",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "get_keys",
-                }),
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(s)) => Ok(Ok(s)),
-                Err(e) => Err(e),
-            });
+        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+            Ok(Value::Failure(f)) => Ok(Err(f.into())),
+            Ok(Value::StateKeys(s)) => Ok(Ok(s)),
+            Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                variant: <&'static str>::from(v),
+                syscall: "get_keys",
+            }
+            .into()),
+            Err(e) => Err(e.into()),
+        });
 
-        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
+        Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
     }
 
     pub fn set<T: Serialize>(&self, key: &str, t: T) {
@@ -261,13 +268,7 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_state_set(key.to_owned(), b);
             }
             Err(e) => {
-                inner_lock.fail(
-                    ErrorInner::Serialization {
-                        syscall: "set_state",
-                        err: Box::new(e),
-                    }
-                    .into(),
-                );
+                inner_lock.fail(Error::serialization("set_state", e));
             }
         }
     }
@@ -283,36 +284,28 @@ impl ContextInternal {
     pub fn sleep(
         &self,
         sleep_duration: Duration,
-    ) -> impl Future<Output = Result<(), TerminalError>> + Send + Sync {
+    ) -> impl Future<Output = Result<(), TerminalError>> + Send {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Duration since unix epoch cannot fail");
-        let maybe_handle = {
-            must_lock!(self.inner)
-                .vm
-                .sys_sleep(now + sleep_duration, Some(now))
-        };
+        let mut inner_lock = must_lock!(self.inner);
+        let handle = unwrap_or_trap!(
+            inner_lock,
+            inner_lock.vm.sys_sleep(now + sleep_duration, Some(now))
+        );
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Ok(Ok(())),
-                Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "success",
-                    syscall: "sleep",
-                }),
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Err(e) => Err(e),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "sleep",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "sleep",
-                }),
-            });
+        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+            Ok(Value::Void) => Ok(Ok(())),
+            Ok(Value::Failure(f)) => Ok(Err(f.into())),
+            Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                variant: <&'static str>::from(v),
+                syscall: "sleep",
+            }
+            .into()),
+            Err(e) => Err(e.into()),
+        });
 
-        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
+        Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
     }
 
     pub fn request<Req, Res>(&self, request_target: RequestTarget, req: Req) -> Request<Req, Res> {
@@ -322,80 +315,129 @@ impl ContextInternal {
     pub fn call<Req: Serialize, Res: Deserialize>(
         &self,
         request_target: RequestTarget,
+        idempotency_key: Option<String>,
         req: Req,
-    ) -> impl CallFuture<Result<Res, TerminalError>> + Send + Sync {
+    ) -> impl CallFuture<Result<Res, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
 
-        let input = match Req::serialize(&req) {
-            Ok(t) => t,
-            Err(e) => {
-                inner_lock.fail(
-                    ErrorInner::Serialization {
-                        syscall: "call",
-                        err: Box::new(e),
-                    }
-                    .into(),
-                );
-                return Either::Right(TrapFuture::default());
-            }
-        };
+        let mut target: Target = request_target.into();
+        target.idempotency_key = idempotency_key;
+        let input = unwrap_or_trap!(
+            inner_lock,
+            Req::serialize(&req).map_err(|e| Error::serialization("call", e))
+        );
 
-        let maybe_handle = inner_lock.vm.sys_call(request_target.into(), input).map(|ch | ch.call_notification_handle);
+        let call_handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_call(target, input));
         drop(inner_lock);
 
-        let call_future_impl = CallFutureImpl {
-            poll_future: VmAsyncResultPollFuture::new(
-                Cow::Borrowed(&self.inner),
-                maybe_handle.clone(),
-            ),
+        // Let's prepare the two futures here
+        let call_invocation_id_fut = InterceptErrorFuture::new(
+            self.clone(),
+            get_async_result(
+                Arc::clone(&self.inner),
+                call_handle.invocation_id_notification_handle,
+            )
+            .map(|res| match res {
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(Value::InvocationId(s)) => Ok(Ok(s)),
+                Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: <&'static str>::from(v),
+                    syscall: "call",
+                }.into()),
+                Err(e) => Err(e.into()),
+            }),
+        );
+        let call_result_future = InterceptErrorFuture::new(
+            self.clone(),
+            get_async_result(
+                Arc::clone(&self.inner),
+                call_handle.call_notification_handle,
+            )
+            .map(|res| match res {
+                Ok(Value::Success(mut s)) => {
+                    let t =
+                        Res::deserialize(&mut s).map_err(|e| Error::deserialization("call", e))?;
+                    Ok(Ok(t))
+                }
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: <&'static str>::from(v),
+                    syscall: "call",
+                }
+                .into()),
+                Err(e) => Err(e.into()),
+            }),
+        );
+
+        Either::Left(CallFutureImpl {
+            invocation_id_future: call_invocation_id_fut.shared(),
+            result_future: call_result_future,
             res: PhantomData,
             ctx: self.clone(),
-            call_handle: maybe_handle.ok(),
-        };
-
-        Either::Left(InterceptErrorFuture::new(self.clone(), call_future_impl))
+        })
     }
 
     pub fn send<Req: Serialize>(
         &self,
         request_target: RequestTarget,
+        idempotency_key: Option<String>,
         req: Req,
         delay: Option<Duration>,
     ) -> impl InvocationHandle {
         let mut inner_lock = must_lock!(self.inner);
 
-        match Req::serialize(&req) {
-            Ok(t) => {
-                let result = inner_lock.vm.sys_send(
-                    request_target.into(),
-                    t,
-                    delay.map(|delay| {
-                        SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .expect("Duration since unix epoch cannot fail")
-                            + delay
-                    }),
-                );
-                drop(inner_lock);
-                SendRequestHandle {
-                    ctx: self.clone(),
-                    send_handle: result.ok(),
-                }
+        let mut target: Target = request_target.into();
+        target.idempotency_key = idempotency_key;
+
+        let input = match Req::serialize(&req) {
+            Ok(b,) => b,
+              Err(e) =>   {
+                  inner_lock.fail(Error::serialization("call", e));
+                  return Either::Right(TrapFuture::<()>::default())
+              }
+        };
+
+        let send_handle = match
+            inner_lock.vm.sys_send(
+                target,
+                input,
+                delay.map(|delay| {
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Duration since unix epoch cannot fail")
+                        + delay
+                })
+            ) {
+            Ok(h,) => h,
+            Err(e) =>   {
+                inner_lock.fail(e.into());
+                return Either::Right(TrapFuture::<()>::default())
             }
-            Err(e) => {
-                inner_lock.fail(
-                    ErrorInner::Serialization {
-                        syscall: "call",
-                        err: Box::new(e),
-                    }
-                    .into(),
-                );
-                SendRequestHandle {
-                    ctx: self.clone(),
-                    send_handle: None,
+        };
+        drop(inner_lock);
+
+        let call_invocation_id_fut = InterceptErrorFuture::new(
+            self.clone(),
+            get_async_result(
+                Arc::clone(&self.inner),
+                send_handle.invocation_id_notification_handle,
+            )
+            .map(|res| match res {
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(Value::InvocationId(s)) => Ok(Ok(s)),
+                Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: <&'static str>::from(v),
+                    syscall: "call",
                 }
-            }
-        }
+                .into()),
+                Err(e) => Err(e.into()),
+            }),
+        );
+
+        Either::Left(SendRequestHandle {
+            invocation_id_future: call_invocation_id_fut.shared(),
+            ctx: self.clone(),
+        })
     }
 
     pub fn invocation_handle(&self, invocation_id: String) -> impl InvocationHandle {
@@ -409,48 +451,40 @@ impl ContextInternal {
         &self,
     ) -> (
         String,
-        impl Future<Output = Result<T, TerminalError>> + Send + Sync,
+        impl Future<Output = Result<T, TerminalError>> + Send,
     ) {
-        let maybe_awakeable_id_and_handle = { must_lock!(self.inner).vm.sys_awakeable() };
+        let mut inner_lock = must_lock!(self.inner);
+        let maybe_awakeable_id_and_handle = inner_lock.vm.sys_awakeable();
 
-        let (awakeable_id, maybe_handle) = match maybe_awakeable_id_and_handle {
-            Ok((s, handle)) => (s, Ok(handle)),
-            Err(e) => (
-                // TODO NOW this is REALLY BAD. The reason for this is that we would need to return a future of a future instead, which is not nice.
-                //  we assume for the time being this works because no user should use the awakeable without doing any other syscall first, which will prevent this invalid awakeable id to work in the first place.
-                "invalid".to_owned(),
-                Err(e),
-            ),
+        let (awakeable_id, handle) = match maybe_awakeable_id_and_handle {
+            Ok((s, handle)) => (s, handle),
+            Err(e) => {
+                inner_lock.fail(e.into());
+                return (
+                    // TODO NOW this is REALLY BAD. The reason for this is that we would need to return a future of a future instead, which is not nice.
+                    //  we assume for the time being this works because no user should use the awakeable without doing any other syscall first, which will prevent this invalid awakeable id to work in the first place.
+                    "invalid".to_owned(),
+                    Either::Right(TrapFuture::default()),
+                );
+            }
         };
+        drop(inner_lock);
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "empty",
-                    syscall: "awakeable",
-                }),
-                Ok(Value::Success(mut s)) => {
-                    let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "awakeable",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(t))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "awakeable",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "awakeable",
-                }),
-                Err(e) => Err(e),
-            });
+        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+            Ok(Value::Success(mut s)) => {
+                Ok(Ok(T::deserialize(&mut s).map_err(|e| Error::deserialization("awakeable", e))?))
+            }
+            Ok(Value::Failure(f)) => Ok(Err(f.into())),
+            Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                variant: <&'static str>::from(v),
+                syscall: "awakeable",
+            }.into()),
+            Err(e) => Err(e),
+        });
 
         (
             awakeable_id,
-            InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error)),
+            Either::Left(InterceptErrorFuture::new(self.clone(), poll_future)),
         )
     }
 
@@ -463,13 +497,7 @@ impl ContextInternal {
                     .sys_complete_awakeable(id.to_owned(), NonEmptyValue::Success(b));
             }
             Err(e) => {
-                inner_lock.fail(
-                    ErrorInner::Serialization {
-                        syscall: "resolve_awakeable",
-                        err: Box::new(e),
-                    }
-                    .into(),
-                );
+                inner_lock.fail(Error::serialization("resolve_awakeable", e));
             }
         }
     }
@@ -483,66 +511,53 @@ impl ContextInternal {
     pub fn promise<T: Deserialize>(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<T, TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.inner).vm.sys_get_promise(name.to_owned()) };
+    ) -> impl Future<Output = Result<T, TerminalError>> + Send {
+        let mut inner_lock = must_lock!(self.inner);
+        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_get_promise(name.to_owned()));
+        drop(inner_lock);
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "empty",
-                    syscall: "promise",
-                }),
-                Ok(Value::Success(mut s)) => {
-                    let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "promise",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(t))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "promise",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "promise",
-                }),
-                Err(e) => Err(e),
-            });
+        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+            Ok(Value::Success(mut s)) => {
+                let t = T::deserialize(&mut s).map_err(|e| Error::deserialization("promise", e))?;
+                Ok(Ok(t))
+            }
+            Ok(Value::Failure(f)) => Ok(Err(f.into())),
+            Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                variant: <&'static str>::from(v),
+                syscall: "promise",
+            }
+            .into()),
+            Err(e) => Err(e.into()),
+        });
 
-        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
+        Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
     }
 
     pub fn peek_promise<T: Deserialize>(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send + Sync {
-        let maybe_handle = { must_lock!(self.inner).vm.sys_peek_promise(name.to_owned()) };
+    ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send {
+        let mut inner_lock = must_lock!(self.inner);
+        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_peek_promise(name.to_owned()));
+        drop(inner_lock);
 
-        let poll_future = VmAsyncResultPollFuture::new(Cow::Borrowed(&self.inner), maybe_handle)
-            .map(|res| match res {
-                Ok(Value::Void) => Ok(Ok(None)),
-                Ok(Value::Success(mut s)) => {
-                    let t = T::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "peek_promise",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(Some(t)))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "peek_promise",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "peek_promise",
-                }),
-                Err(e) => Err(e),
-            });
+        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+            Ok(Value::Void) => Ok(Ok(None)),
+            Ok(Value::Success(mut s)) => {
+                let t = T::deserialize(&mut s)
+                    .map_err(|e| Error::deserialization("peek_promise", e))?;
+                Ok(Ok(Some(t)))
+            }
+            Ok(Value::Failure(f)) => Ok(Err(f.into())),
+            Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                variant: <&'static str>::from(v),
+                syscall: "peek_promise",
+            }
+            .into()),
+            Err(e) => Err(e),
+        });
 
-        InterceptErrorFuture::new(self.clone(), poll_future.map_err(Error))
+        Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
     }
 
     pub fn resolve_promise<T: Serialize>(&self, name: &str, t: T) {
@@ -585,6 +600,7 @@ impl ContextInternal {
         InterceptErrorFuture::new(self.clone(), RunFuture::new(this, run_closure))
     }
 
+    // Used by codegen
     pub fn handle_handler_result<T: Serialize>(&self, res: HandlerResult<T>) {
         let mut inner_lock = must_lock!(self.inner);
 
@@ -708,279 +724,190 @@ where
     type Output = Result<Result<Out, TerminalError>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
+        unimplemented!()
+        // let mut this = self.project();
 
-        loop {
-            match this.state.as_mut().project() {
-                RunStateProj::New => {
-                    let enter_result = {
-                        must_lock!(this
-                            .inner_ctx
-                            .as_mut()
-                            .expect("Future should not be polled after returning Poll::Ready"))
-                        .vm
-                        .sys_run_enter(this.name.to_owned())
-                    };
-
-                    // Enter the side effect
-                    match enter_result.map_err(ErrorInner::VM)? {
-                        RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
-                            let t = Out::deserialize(&mut v).map_err(|e| {
-                                ErrorInner::Deserialization {
-                                    syscall: "run",
-                                    err: Box::new(e),
-                                }
-                            })?;
-                            return Poll::Ready(Ok(Ok(t)));
-                        }
-                        RunEnterResult::Executed(NonEmptyValue::Failure(f)) => {
-                            return Poll::Ready(Ok(Err(f.into())))
-                        }
-                        RunEnterResult::NotExecuted(_) => {}
-                    };
-
-                    // We need to run the closure
-                    this.state.set(RunState::ClosureRunning {
-                        start_time: Instant::now(),
-                        fut: this
-                            .closure
-                            .take()
-                            .expect("Future should not be polled after returning Poll::Ready")
-                            .run(),
-                    });
-                }
-                RunStateProj::ClosureRunning { start_time, fut } => {
-                    let res = match ready!(fut.poll(cx)) {
-                        Ok(t) => RunExitResult::Success(Out::serialize(&t).map_err(|e| {
-                            ErrorInner::Serialization {
-                                syscall: "run",
-                                err: Box::new(e),
-                            }
-                        })?),
-                        Err(e) => match e.0 {
-                            HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
-                                attempt_duration: start_time.elapsed(),
-                                failure: TerminalFailure {
-                                    code: 500,
-                                    message: err.to_string(),
-                                },
-                            },
-                            HandlerErrorInner::Terminal(t) => {
-                                RunExitResult::TerminalFailure(TerminalError(t).into())
-                            }
-                        },
-                    };
-
-                    let inner_ctx = this
-                        .inner_ctx
-                        .take()
-                        .expect("Future should not be polled after returning Poll::Ready");
-
-                    let handle = {
-                        must_lock!(inner_ctx)
-                            .vm
-                            .sys_run_exit(res, mem::take(this.retry_policy))
-                    };
-
-                    this.state.set(RunState::PollFutureRunning {
-                        fut: VmAsyncResultPollFuture::new(Cow::Owned(inner_ctx), handle),
-                    });
-                }
-                RunStateProj::PollFutureRunning { fut } => {
-                    let value = ready!(fut.poll(cx))?;
-
-                    return Poll::Ready(match value {
-                        Value::Void => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                            variant: "empty",
-                            syscall: "run",
-                        }
-                        .into()),
-                        Value::Success(mut s) => {
-                            let t = Out::deserialize(&mut s).map_err(|e| {
-                                ErrorInner::Deserialization {
-                                    syscall: "run",
-                                    err: Box::new(e),
-                                }
-                            })?;
-                            Ok(Ok(t))
-                        }
-                        Value::Failure(f) => Ok(Err(f.into())),
-                        Value::StateKeys(_) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                            variant: "state_keys",
-                            syscall: "run",
-                        }
-                        .into()),
-                        Value::InvocationId(_) => {
-                            Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                                variant: "invocation_id",
-                                syscall: "run",
-                            }
-                            .into())
-                        }
-                    });
-                }
-            }
-        }
+        // loop {
+        //     match this.state.as_mut().project() {
+        //         RunStateProj::New => {
+        //             let enter_result = {
+        //                 must_lock!(this
+        //                     .inner_ctx
+        //                     .as_mut()
+        //                     .expect("Future should not be polled after returning Poll::Ready"))
+        //                 .vm
+        //                 .sys_run_enter(this.name.to_owned())
+        //             };
+        //
+        //             // Enter the side effect
+        //             match enter_result.map_err(ErrorInner::VM)? {
+        //                 RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
+        //                     let t = Out::deserialize(&mut v).map_err(|e| {
+        //                         ErrorInner::Deserialization {
+        //                             syscall: "run",
+        //                             err: Box::new(e),
+        //                         }
+        //                     })?;
+        //                     return Poll::Ready(Ok(Ok(t)));
+        //                 }
+        //                 RunEnterResult::Executed(NonEmptyValue::Failure(f)) => {
+        //                     return Poll::Ready(Ok(Err(f.into())))
+        //                 }
+        //                 RunEnterResult::NotExecuted(_) => {}
+        //             };
+        //
+        //             // We need to run the closure
+        //             this.state.set(RunState::ClosureRunning {
+        //                 start_time: Instant::now(),
+        //                 fut: this
+        //                     .closure
+        //                     .take()
+        //                     .expect("Future should not be polled after returning Poll::Ready")
+        //                     .run(),
+        //             });
+        //         }
+        //         RunStateProj::ClosureRunning { start_time, fut } => {
+        //             let res = match ready!(fut.poll(cx)) {
+        //                 Ok(t) => RunExitResult::Success(Out::serialize(&t).map_err(|e| {
+        //                     ErrorInner::Serialization {
+        //                         syscall: "run",
+        //                         err: Box::new(e),
+        //                     }
+        //                 })?),
+        //                 Err(e) => match e.0 {
+        //                     HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
+        //                         attempt_duration: start_time.elapsed(),
+        //                         failure: TerminalFailure {
+        //                             code: 500,
+        //                             message: err.to_string(),
+        //                         },
+        //                     },
+        //                     HandlerErrorInner::Terminal(t) => {
+        //                         RunExitResult::TerminalFailure(TerminalError(t).into())
+        //                     }
+        //                 },
+        //             };
+        //
+        //             let inner_ctx = this
+        //                 .inner_ctx
+        //                 .take()
+        //                 .expect("Future should not be polled after returning Poll::Ready");
+        //
+        //             let handle = {
+        //                 must_lock!(inner_ctx)
+        //                     .vm
+        //                     .sys_run_exit(res, mem::take(this.retry_policy))
+        //             };
+        //
+        //             this.state.set(RunState::PollFutureRunning {
+        //                 fut: VmAsyncResultPollFuture::maybe_new(Cow::Owned(inner_ctx), handle),
+        //             });
+        //         }
+        //         RunStateProj::PollFutureRunning { fut } => {
+        //             let value = ready!(fut.poll(cx))?;
+        //
+        //             return Poll::Ready(match value {
+        //                 Value::Void => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+        //                     variant: "empty",
+        //                     syscall: "run",
+        //                 }
+        //                 .into()),
+        //                 Value::Success(mut s) => {
+        //                     let t = Out::deserialize(&mut s).map_err(|e| {
+        //                         ErrorInner::Deserialization {
+        //                             syscall: "run",
+        //                             err: Box::new(e),
+        //                         }
+        //                     })?;
+        //                     Ok(Ok(t))
+        //                 }
+        //                 Value::Failure(f) => Ok(Err(f.into())),
+        //                 Value::StateKeys(_) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+        //                     variant: "state_keys",
+        //                     syscall: "run",
+        //                 }
+        //                 .into()),
+        //                 Value::InvocationId(_) => {
+        //                     Err(ErrorInner::UnexpectedValueVariantForSyscall {
+        //                         variant: "invocation_id",
+        //                         syscall: "run",
+        //                     }
+        //                     .into())
+        //                 }
+        //             });
+        //         }
+        //     }
+        // }
     }
 }
 
-struct SendRequestHandle {
+struct SendRequestHandle<InvIdFut: Future> {
+    invocation_id_future: Shared<InvIdFut>,
     ctx: ContextInternal,
-    send_handle: Option<SendHandle>,
 }
 
-impl InvocationHandle for SendRequestHandle {
+impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send> InvocationHandle
+    for SendRequestHandle<InvIdFut>
+{
     fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
-        if let Some(ref send_handle) = self.send_handle {
-            let maybe_handle = {
-                must_lock!(self.ctx.inner)
-                    .vm
-                    .sys_get_call_invocation_id(GetInvocationIdTarget::SendEntry(*send_handle))
-            };
-
-            let poll_future = VmAsyncResultPollFuture::new(
-                Cow::Borrowed(&self.ctx.inner),
-                maybe_handle,
-            )
-            .map(|res| match res {
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::InvocationId(s)) => Ok(Ok(s)),
-                Err(e) => Err(e),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "get_call_invocation_id",
-                }),
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "void",
-                    syscall: "get_call_invocation_id",
-                }),
-                Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "success",
-                    syscall: "get_call_invocation_id",
-                }),
-            });
-
-            Either::Left(InterceptErrorFuture::new(
-                self.ctx.clone(),
-                poll_future.map_err(Error),
-            ))
-        } else {
-            // If the send didn't succeed, trap the execution
-            Either::Right(TrapFuture::default())
-        }
+        let cloned_invocation_id_fut = Shared::clone(&self.invocation_id_future);
+        async move { cloned_invocation_id_fut.await }
     }
 
-    fn cancel(&self) {
-        if let Some(ref send_handle) = self.send_handle {
-            let mut inner_lock = must_lock!(self.ctx.inner);
-            let _ = inner_lock
-                .vm
-                .sys_cancel_invocation(CancelInvocationTarget::SendEntry(*send_handle));
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
+        let cloned_invocation_id_fut = Shared::clone(&self.invocation_id_future);
+        let cloned_ctx = Arc::clone(&self.ctx.inner);
+        async move {
+            let inv_id = cloned_invocation_id_fut.await?;
+            let mut inner_lock = must_lock!(cloned_ctx);
+            let _ = inner_lock.vm.sys_cancel_invocation(inv_id);
+            drop(inner_lock);
+            Ok(())
         }
-        // If the send didn't succeed, then simply ignore the cancel
     }
 }
 
 pin_project! {
-    struct CallFutureImpl<R> {
+    struct CallFutureImpl<InvIdFut: Future, ResultFut, Res> {
+       #[pin]
+        invocation_id_future: Shared<InvIdFut>,
         #[pin]
-        poll_future: VmAsyncResultPollFuture,
-        res: PhantomData<fn() -> R>,
+        result_future: ResultFut,
+        res: PhantomData<fn() -> Res>,
         ctx: ContextInternal,
-        call_handle: Option<NotificationHandle>,
     }
 }
 
-impl<Res: Deserialize> Future for CallFutureImpl<Res> {
-    type Output = Result<Result<Res, TerminalError>, Error>;
+impl<InvIdFut: Future, ResultFut: Future<Output = Result<Res, TerminalError>> + Send, Res> Future
+    for CallFutureImpl<InvIdFut, ResultFut, Res>
+{
+    type Output = ResultFut::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-
-        this.poll_future
-            .poll(cx)
-            .map(|res| match res {
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "empty",
-                    syscall: "call",
-                }),
-                Ok(Value::Success(mut s)) => {
-                    let t = Res::deserialize(&mut s).map_err(|e| ErrorInner::Deserialization {
-                        syscall: "call",
-                        err: Box::new(e),
-                    })?;
-                    Ok(Ok(t))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "call",
-                }),
-                Ok(Value::InvocationId(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "invocation_id",
-                    syscall: "call",
-                }),
-                Err(e) => Err(e),
-            })
-            .map(|res| res.map_err(Error))
+        this.result_future.poll(cx)
     }
 }
 
-impl<R> InvocationHandle for CallFutureImpl<R> {
-    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
-        if let Some(ref call_handle) = self.call_handle {
-            let maybe_handle = {
-                must_lock!(self.ctx.inner)
-                    .vm
-                    .sys_get_call_invocation_id(GetInvocationIdTarget::CallEntry(*call_handle))
-            };
-
-            let poll_future = VmAsyncResultPollFuture::new(
-                Cow::Borrowed(&self.ctx.inner),
-                maybe_handle,
-            )
-            .map(|res| match res {
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
-                Ok(Value::InvocationId(s)) => Ok(Ok(s)),
-                Err(e) => Err(e),
-                Ok(Value::StateKeys(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "state_keys",
-                    syscall: "get_call_invocation_id",
-                }),
-                Ok(Value::Void) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "void",
-                    syscall: "get_call_invocation_id",
-                }),
-                Ok(Value::Success(_)) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-                    variant: "success",
-                    syscall: "get_call_invocation_id",
-                }),
-            });
-
-            Either::Left(InterceptErrorFuture::new(
-                self.ctx.clone(),
-                poll_future.map_err(Error),
-            ))
-        } else {
-            // If the send didn't succeed, trap the execution
-            Either::Right(TrapFuture::default())
-        }
-    }
-
-    fn cancel(&self) {
-        if let Some(ref call_handle) = self.call_handle {
-            let mut inner_lock = must_lock!(self.ctx.inner);
-            let _ = inner_lock
-                .vm
-                .sys_cancel_invocation(CancelInvocationTarget::CallEntry(*call_handle));
-        }
-        // If the send didn't succeed, then simply ignore the cancel
-    }
-}
-
-impl<Res: Deserialize> CallFuture<Result<Result<Res, TerminalError>, Error>>
-    for CallFutureImpl<Res>
+impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send, ResultFut, Res>
+    InvocationHandle for CallFutureImpl<InvIdFut, ResultFut, Res>
 {
+    fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
+        let cloned_invocation_id_fut = Shared::clone(&self.invocation_id_future);
+        async move { cloned_invocation_id_fut.await }
+    }
+
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
+        let cloned_invocation_id_fut = Shared::clone(&self.invocation_id_future);
+        let cloned_ctx = Arc::clone(&self.ctx.inner);
+        async move {
+            let inv_id = cloned_invocation_id_fut.await?;
+            let mut inner_lock = must_lock!(cloned_ctx);
+            let _ = inner_lock.vm.sys_cancel_invocation(inv_id);
+            drop(inner_lock);
+            Ok(())
+        }
+    }
 }
 
 impl<A: InvocationHandle, B: InvocationHandle> InvocationHandle for Either<A, B> {
@@ -991,10 +918,10 @@ impl<A: InvocationHandle, B: InvocationHandle> InvocationHandle for Either<A, B>
         }
     }
 
-    fn cancel(&self) {
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
         match self {
-            Either::Left(l) => l.cancel(),
-            Either::Right(r) => r.cancel(),
+            Either::Left(l) => Either::Left(l.cancel()),
+            Either::Right(r) => Either::Right(r.cancel()),
         }
     }
 }
@@ -1004,6 +931,8 @@ where
     A: CallFuture<O>,
     B: CallFuture<O>,
 {
+
+
 }
 
 struct InvocationIdBackedInvocationHandle {
@@ -1016,12 +945,99 @@ impl InvocationHandle for InvocationIdBackedInvocationHandle {
         ready(Ok(self.invocation_id.clone()))
     }
 
-    fn cancel(&self) {
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.ctx.inner);
         let _ = inner_lock
             .vm
-            .sys_cancel_invocation(CancelInvocationTarget::InvocationId(
-                self.invocation_id.clone(),
-            ));
+            .sys_cancel_invocation(self.invocation_id.clone());
+        ready(Ok(()))
     }
+}
+
+impl Error {
+    fn serialization<E: std::error::Error + Send + Sync + 'static>(
+        syscall: &'static str,
+        e: E,
+    ) -> Self {
+        ErrorInner::Serialization {
+            syscall,
+            err: Box::new(e),
+        }
+        .into()
+    }
+
+    fn deserialization<E: std::error::Error + Send + Sync + 'static>(
+        syscall: &'static str,
+        e: E,
+    ) -> Self {
+        ErrorInner::Deserialization {
+            syscall,
+            err: Box::new(e),
+        }
+        .into()
+    }
+}
+
+fn get_async_result(
+    ctx: Arc<Mutex<ContextInternalInner>>,
+    handle: NotificationHandle,
+) -> impl Future<Output = Result<Value, Error>> + Send {
+    async move {
+        loop {
+            let mut inner_lock = must_lock!(ctx);
+
+            // Let's consume some output to begin with
+            let out = inner_lock.vm.take_output();
+            match out {
+                TakeOutputResult::Buffer(b) => {
+                    if !inner_lock.write.send(b) {
+                        return Err(ErrorInner::Suspended);
+                    }
+                }
+                TakeOutputResult::EOF => return Err(ErrorInner::UnexpectedOutputClosed),
+            }
+
+            // Let's do some progress now
+            match inner_lock.vm.do_progress(vec![handle]) {
+                Ok(DoProgressResponse::AnyCompleted) => {
+                    // We're good, we got the response
+                    break;
+                }
+                Ok(DoProgressResponse::ReadFromInput) => {
+                    drop(inner_lock);
+                    match inner_lock.read.recv().await {
+                        Some(Ok(b)) => must_lock!(ctx).vm.notify_input(b),
+                        Some(Err(e)) => must_lock!(ctx).vm.notify_error(
+                            CoreError::new(500u16, format!("Error when reading the body {e:?}",)),
+                            None,
+                        ),
+                        None => must_lock!(ctx).vm.notify_input_closed(),
+                    }
+                    continue;
+                }
+                Ok(DoProgressResponse::ExecuteRun(_)) => {
+                    unimplemented!()
+                }
+                Ok(DoProgressResponse::WaitingPendingRun) => {
+                    unimplemented!()
+                }
+                Ok(DoProgressResponse::CancelSignalReceived) => {
+                    unimplemented!()
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            };
+        }
+        let mut inner_lock = must_lock!(ctx);
+
+        // At this point let's try to take the notification
+        match inner_lock.vm.take_notification(handle) {
+            Ok(Some(v)) => return Ok(v),
+            Ok(None) => {
+                panic!("This is not supposed to happen, handle was flagged as completed")
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }.map_err(Error::from)
 }

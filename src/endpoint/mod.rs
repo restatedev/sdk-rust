@@ -10,7 +10,9 @@ use ::futures::future::BoxFuture;
 use ::futures::{Stream, StreamExt};
 use bytes::Bytes;
 pub use context::{ContextInternal, InputMetadata};
-use restate_sdk_shared_core::{CoreVM, Error as VMError, Header, HeaderMap, IdentityVerifier, KeyError,  VerifyError, VM};
+use restate_sdk_shared_core::{
+    CoreVM, Error as CoreError, Header, HeaderMap, IdentityVerifier, KeyError, VerifyError, VM,
+};
 use std::collections::HashMap;
 use std::future::poll_fn;
 use std::pin::Pin;
@@ -103,7 +105,7 @@ pub(crate) enum ErrorInner {
     #[error("Received a request for unknown service handler '{0}/{1}'")]
     UnknownServiceHandler(String, String),
     #[error("Error when processing the request: {0:?}")]
-    VM(#[from] VMError),
+    VM(#[from] CoreError),
     #[error("Error when verifying identity: {0:?}")]
     IdentityVerification(#[from] VerifyError),
     #[error("Cannot convert header '{0}', reason: {1}")]
@@ -138,6 +140,27 @@ pub(crate) enum ErrorInner {
         #[source]
         err: BoxError,
     },
+}
+
+impl From<restate_sdk_shared_core::SuspendedError> for ErrorInner {
+    fn from(_: restate_sdk_shared_core::SuspendedError) -> Self {
+        Self::Suspended
+    }
+}
+
+impl From<restate_sdk_shared_core::SuspendedOrVMError> for ErrorInner {
+    fn from(value: restate_sdk_shared_core::SuspendedOrVMError) -> Self {
+        match value {
+            restate_sdk_shared_core::SuspendedOrVMError::Suspended(e) => e.into(),
+            restate_sdk_shared_core::SuspendedOrVMError::VM(e) => e.into(),
+        }
+    }
+}
+
+impl From<CoreError> for Error {
+    fn from(e: CoreError) -> Self {
+        ErrorInner::from(e).into()
+    }
 }
 
 struct BoxedService(
@@ -392,8 +415,7 @@ async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(
         match input_rx.recv().await {
             Some(Ok(b)) => vm.notify_input(b),
             Some(Err(e)) => vm.notify_error(
-                VMError::new(500u16, format!("Error when reading the body: {e}"))
-               ,
+                CoreError::new(500u16, format!("Error when reading the body: {e}")),
                 None,
             ),
             None => vm.notify_input_closed(),

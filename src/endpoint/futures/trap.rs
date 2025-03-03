@@ -28,7 +28,9 @@ impl<T> InvocationHandle for TrapFuture<T> {
         TrapFuture::default()
     }
 
-    fn cancel(&self) {}
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
+        TrapFuture::default()
+    }
 }
 
 impl<T> CallFuture<T> for TrapFuture<T> {}

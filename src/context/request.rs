@@ -72,6 +72,7 @@ impl fmt::Display for RequestTarget {
 pub struct Request<'a, Req, Res = ()> {
     ctx: &'a ContextInternal,
     request_target: RequestTarget,
+    idempotency_key: Option<String>,
     req: Req,
     res: PhantomData<Res>,
 }
@@ -81,9 +82,16 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         Self {
             ctx,
             request_target,
+            idempotency_key: None,
             req,
             res: PhantomData,
         }
+    }
+
+    /// Add idempotency key to the request
+    pub fn idempotency_key(mut self, idempotency_key: impl Into<String>) -> Self {
+        self.idempotency_key = Some(idempotency_key.into());
+        self
     }
 
     /// Call a service. This returns a future encapsulating the response.
@@ -92,7 +100,8 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         Req: Serialize + 'static,
         Res: Deserialize + 'static,
     {
-        self.ctx.call(self.request_target, self.req)
+        self.ctx
+            .call(self.request_target, self.idempotency_key, self.req)
     }
 
     /// Send the request to the service, without waiting for the response.
@@ -100,7 +109,8 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     where
         Req: Serialize + 'static,
     {
-        self.ctx.send(self.request_target, self.req, None)
+        self.ctx
+            .send(self.request_target, self.idempotency_key, self.req, None)
     }
 
     /// Schedule the request to the service, without waiting for the response.
@@ -108,13 +118,18 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     where
         Req: Serialize + 'static,
     {
-        self.ctx.send(self.request_target, self.req, Some(delay))
+        self.ctx.send(
+            self.request_target,
+            self.idempotency_key,
+            self.req,
+            Some(delay),
+        )
     }
 }
 
 pub trait InvocationHandle {
     fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send;
-    fn cancel(&self);
+    fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send;
 }
 
 pub trait CallFuture<O>: Future<Output = O> + InvocationHandle {}

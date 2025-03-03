@@ -10,7 +10,7 @@ use http::{response, HeaderName, HeaderValue, Request, Response};
 use http_body_util::{BodyExt, Either, Full};
 use hyper::body::{Body, Frame, Incoming};
 use hyper::service::Service;
-use restate_sdk_shared_core::ResponseHead;
+use restate_sdk_shared_core::{Header, ResponseHead};
 use std::convert::Infallible;
 use std::future::{ready, Ready};
 use std::ops::Deref;
@@ -56,13 +56,18 @@ impl Service<Request<Incoming>> for HyperEndpoint {
 
         match endpoint_response {
             endpoint::Response::ReplyNow {
-                response_head,
+                status_code,
+                headers,
                 body,
-            } => ready(Ok(response_builder_from_response_head(response_head)
-                .body(Either::Left(Full::new(body)))
-                .expect("Headers should be valid"))),
+            } => ready(Ok(response_builder_from_response_head(
+                status_code,
+                headers,
+            )
+            .body(Either::Left(Full::new(body)))
+            .expect("Headers should be valid"))),
             endpoint::Response::BidiStream {
-                response_head,
+                status_code,
+                headers,
                 handler,
             } => {
                 let input_receiver =
@@ -73,24 +78,30 @@ impl Service<Request<Incoming>> for HyperEndpoint {
 
                 let handler_fut = Box::pin(handler.handle(input_receiver, output_sender));
 
-                ready(Ok(response_builder_from_response_head(response_head)
-                    .body(Either::Right(BidiStreamRunner {
-                        fut: Some(handler_fut),
-                        output_rx,
-                        end_stream: false,
-                    }))
-                    .expect("Headers should be valid")))
+                ready(Ok(response_builder_from_response_head(
+                    status_code,
+                    headers,
+                )
+                .body(Either::Right(BidiStreamRunner {
+                    fut: Some(handler_fut),
+                    output_rx,
+                    end_stream: false,
+                }))
+                .expect("Headers should be valid")))
             }
         }
     }
 }
 
-fn response_builder_from_response_head(response_head: ResponseHead) -> response::Builder {
+fn response_builder_from_response_head(
+    status_code: u16,
+    headers: Vec<Header>,
+) -> response::Builder {
     let mut response_builder = Response::builder()
-        .status(response_head.status_code)
+        .status(status_code)
         .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE);
 
-    for header in response_head.headers {
+    for header in headers {
         response_builder = response_builder.header(header.key.deref(), header.value.deref());
     }
 

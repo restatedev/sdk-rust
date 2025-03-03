@@ -632,7 +632,7 @@ pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
         &self,
     ) -> (
         String,
-        impl Future<Output = Result<T, TerminalError>> + Send + Sync + 'ctx,
+        impl Future<Output = Result<T, TerminalError>> + Send  + 'ctx,
     ) {
         self.inner_context().awakeable()
     }
