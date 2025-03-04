@@ -1,5 +1,5 @@
 use crate::context::{
-    CallFuture, InvocationHandle, Request, RequestTarget, RunClosure, RunRetryPolicy,
+    CallFuture, InvocationHandle, Request, RequestTarget, RunClosure, RunFuture, RunRetryPolicy,
 };
 use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
@@ -8,20 +8,21 @@ use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
 use crate::errors::{HandlerErrorInner, HandlerResult, TerminalError};
 use crate::serde::{Deserialize, Serialize};
-use futures::future::{Either, Shared};
+use futures::future::{BoxFuture, Either, Shared};
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, Error as CoreError, NonEmptyValue, NotificationHandle, RetryPolicy, TakeOutputResult,
-    Target, Value, VM,
+    CoreVM, DoProgressResponse, Error as CoreError, NonEmptyValue, NotificationHandle, RetryPolicy,
+    RunExitResult, TakeOutputResult, Target, Value, VM,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::{ready, Future};
 use std::marker::PhantomData;
+use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
 pub struct ContextInternalInner {
@@ -586,15 +587,14 @@ impl ContextInternal {
     pub fn run<'a, Run, Fut, Out>(
         &'a self,
         run_closure: Run,
-    ) -> impl crate::context::RunFuture<Result<Out, TerminalError>> + Send + 'a
+    ) -> impl RunFuture<Result<Out, TerminalError>> + Send + 'a
     where
         Run: RunClosure<Fut = Fut, Output = Out> + Send + 'a,
         Fut: Future<Output = HandlerResult<Out>> + Send + 'a,
         Out: Serialize + Deserialize + 'static,
     {
         let this = Arc::clone(&self.inner);
-
-        InterceptErrorFuture::new(self.clone(), RunFuture::new(this, run_closure))
+        InterceptErrorFuture::new(self.clone(), RunFutureImpl::new(this, run_closure))
     }
 
     // Used by codegen
@@ -648,52 +648,80 @@ impl ContextInternal {
 }
 
 pin_project! {
-    struct RunFuture<Run, Fut, Ret> {
+    struct RunFutureImpl<Run, Ret, RunFnFut> {
         name: String,
         retry_policy: RetryPolicy,
         phantom_data: PhantomData<fn() -> Ret>,
-        closure: Option<Run>,
-        inner_ctx: Option<Arc<Mutex<ContextInternalInner>>>,
         #[pin]
-        state: RunState<Fut>,
+        state: RunState<Run, RunFnFut, Ret>,
     }
 }
 
 pin_project! {
     #[project = RunStateProj]
-    enum RunState<Fut> {
-        New,
+    enum RunState<Run, RunFnFut, Ret> {
+        New {
+            ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+            closure: Option<Run>,
+        },
         ClosureRunning {
+            ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+            handle: NotificationHandle,
             start_time: Instant,
             #[pin]
-            fut: Fut,
+            closure_fut: RunFnFut,
         },
-        PollFutureRunning {
-            #[pin]
-            fut: VmAsyncResultPollFuture
+        WaitingResultFut {
+            result_fut: BoxFuture<'static, Result<Result<Ret, TerminalError>, Error>>
         }
     }
 }
 
-impl<Run, Fut, Ret> RunFuture<Run, Fut, Ret> {
-    fn new(inner_ctx: Arc<Mutex<ContextInternalInner>>, closure: Run) -> Self {
+impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
+    fn new(ctx: Arc<Mutex<ContextInternalInner>>, closure: Run) -> Self {
         Self {
             name: "".to_string(),
             retry_policy: RetryPolicy::Infinite,
             phantom_data: PhantomData,
-            inner_ctx: Some(inner_ctx),
-            closure: Some(closure),
-            state: RunState::New,
+            state: RunState::New {
+                ctx: Some(ctx),
+                closure: Some(closure),
+            },
         }
+    }
+
+    fn boxed_result_fut(
+        ctx: Arc<Mutex<ContextInternalInner>>,
+        handle: NotificationHandle,
+    ) -> BoxFuture<'static, Result<Result<Ret, TerminalError>, Error>>
+    where
+        Ret: Deserialize,
+    {
+        get_async_result(Arc::clone(&ctx), handle)
+            .map(|res| match res {
+                Ok(Value::Success(mut s)) => {
+                    let t =
+                        Ret::deserialize(&mut s).map_err(|e| Error::deserialization("run", e))?;
+                    Ok(Ok(t))
+                }
+                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
+                    variant: <&'static str>::from(v),
+                    syscall: "run",
+                }
+                .into()),
+                Err(e) => Err(e),
+            })
+            .boxed()
     }
 }
 
-impl<Run, Fut, Out> crate::context::RunFuture<Result<Result<Out, TerminalError>, Error>>
-    for RunFuture<Run, Fut, Out>
+impl<Run, Ret, RunFnFut> RunFuture<Result<Result<Ret, TerminalError>, Error>>
+    for RunFutureImpl<Run, Ret, RunFnFut>
 where
-    Run: RunClosure<Fut = Fut, Output = Out> + Send,
-    Fut: Future<Output = HandlerResult<Out>> + Send,
-    Out: Serialize + Deserialize,
+    Run: RunClosure<Fut = RunFnFut, Output = Ret> + Send,
+    Ret: Serialize + Deserialize,
+    RunFnFut: Future<Output = HandlerResult<Ret>> + Send,
 {
     fn retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
         self.retry_policy = RetryPolicy::Exponential {
@@ -712,129 +740,103 @@ where
     }
 }
 
-impl<Run, Fut, Out> Future for RunFuture<Run, Fut, Out>
+impl<Run, Ret, RunFnFut> Future for RunFutureImpl<Run, Ret, RunFnFut>
 where
-    Run: RunClosure<Fut = Fut, Output = Out> + Send,
-    Out: Serialize + Deserialize,
-    Fut: Future<Output = HandlerResult<Out>> + Send,
+    Run: RunClosure<Fut = RunFnFut, Output = Ret> + Send,
+    Ret: Serialize + Deserialize,
+    RunFnFut: Future<Output = HandlerResult<Ret>> + Send,
 {
-    type Output = Result<Result<Out, TerminalError>, Error>;
+    type Output = Result<Result<Ret, TerminalError>, Error>;
 
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        unimplemented!()
-        // let mut this = self.project();
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
 
-        // loop {
-        //     match this.state.as_mut().project() {
-        //         RunStateProj::New => {
-        //             let enter_result = {
-        //                 must_lock!(this
-        //                     .inner_ctx
-        //                     .as_mut()
-        //                     .expect("Future should not be polled after returning Poll::Ready"))
-        //                 .vm
-        //                 .sys_run_enter(this.name.to_owned())
-        //             };
-        //
-        //             // Enter the side effect
-        //             match enter_result.map_err(ErrorInner::VM)? {
-        //                 RunEnterResult::Executed(NonEmptyValue::Success(mut v)) => {
-        //                     let t = Out::deserialize(&mut v).map_err(|e| {
-        //                         ErrorInner::Deserialization {
-        //                             syscall: "run",
-        //                             err: Box::new(e),
-        //                         }
-        //                     })?;
-        //                     return Poll::Ready(Ok(Ok(t)));
-        //                 }
-        //                 RunEnterResult::Executed(NonEmptyValue::Failure(f)) => {
-        //                     return Poll::Ready(Ok(Err(f.into())))
-        //                 }
-        //                 RunEnterResult::NotExecuted(_) => {}
-        //             };
-        //
-        //             // We need to run the closure
-        //             this.state.set(RunState::ClosureRunning {
-        //                 start_time: Instant::now(),
-        //                 fut: this
-        //                     .closure
-        //                     .take()
-        //                     .expect("Future should not be polled after returning Poll::Ready")
-        //                     .run(),
-        //             });
-        //         }
-        //         RunStateProj::ClosureRunning { start_time, fut } => {
-        //             let res = match ready!(fut.poll(cx)) {
-        //                 Ok(t) => RunExitResult::Success(Out::serialize(&t).map_err(|e| {
-        //                     ErrorInner::Serialization {
-        //                         syscall: "run",
-        //                         err: Box::new(e),
-        //                     }
-        //                 })?),
-        //                 Err(e) => match e.0 {
-        //                     HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
-        //                         attempt_duration: start_time.elapsed(),
-        //                         failure: TerminalFailure {
-        //                             code: 500,
-        //                             message: err.to_string(),
-        //                         },
-        //                     },
-        //                     HandlerErrorInner::Terminal(t) => {
-        //                         RunExitResult::TerminalFailure(TerminalError(t).into())
-        //                     }
-        //                 },
-        //             };
-        //
-        //             let inner_ctx = this
-        //                 .inner_ctx
-        //                 .take()
-        //                 .expect("Future should not be polled after returning Poll::Ready");
-        //
-        //             let handle = {
-        //                 must_lock!(inner_ctx)
-        //                     .vm
-        //                     .sys_run_exit(res, mem::take(this.retry_policy))
-        //             };
-        //
-        //             this.state.set(RunState::PollFutureRunning {
-        //                 fut: VmAsyncResultPollFuture::maybe_new(Cow::Owned(inner_ctx), handle),
-        //             });
-        //         }
-        //         RunStateProj::PollFutureRunning { fut } => {
-        //             let value = ready!(fut.poll(cx))?;
-        //
-        //             return Poll::Ready(match value {
-        //                 Value::Void => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-        //                     variant: "empty",
-        //                     syscall: "run",
-        //                 }
-        //                 .into()),
-        //                 Value::Success(mut s) => {
-        //                     let t = Out::deserialize(&mut s).map_err(|e| {
-        //                         ErrorInner::Deserialization {
-        //                             syscall: "run",
-        //                             err: Box::new(e),
-        //                         }
-        //                     })?;
-        //                     Ok(Ok(t))
-        //                 }
-        //                 Value::Failure(f) => Ok(Err(f.into())),
-        //                 Value::StateKeys(_) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
-        //                     variant: "state_keys",
-        //                     syscall: "run",
-        //                 }
-        //                 .into()),
-        //                 Value::InvocationId(_) => {
-        //                     Err(ErrorInner::UnexpectedValueVariantForSyscall {
-        //                         variant: "invocation_id",
-        //                         syscall: "run",
-        //                     }
-        //                     .into())
-        //                 }
-        //             });
-        //         }
-        //     }
-        // }
+        loop {
+            match this.state.as_mut().project() {
+                RunStateProj::New { ctx, closure, .. } => {
+                    let ctx = ctx
+                        .take()
+                        .expect("Future should not be polled after returning Poll::Ready");
+                    let closure = closure
+                        .take()
+                        .expect("Future should not be polled after returning Poll::Ready");
+                    let mut inner_ctx = must_lock!(ctx);
+
+                    let handle = inner_ctx
+                        .vm
+                        .sys_run(this.name.to_owned())
+                        .map_err(ErrorInner::from)?;
+
+                    // Now we do progress once to check whether this closure should be executed or not.
+                    match inner_ctx.vm.do_progress(vec![handle]) {
+                        Ok(DoProgressResponse::ExecuteRun(handle_to_run)) => {
+                            // In case it returns ExecuteRun, it must be the handle we just gave it,
+                            // and it means we need to execute the closure
+                            assert_eq!(handle, handle_to_run);
+
+                            drop(inner_ctx);
+                            this.state.set(RunState::ClosureRunning {
+                                ctx: Some(ctx),
+                                handle,
+                                start_time: Instant::now(),
+                                closure_fut: closure.run(),
+                            });
+                        }
+                        _ => {
+                            drop(inner_ctx);
+                            // In all the other cases, just move on waiting the result,
+                            // the poll future state will take care of doing whatever needs to be done here,
+                            // that is propagating state machine error, or result, or whatever
+                            this.state.set(RunState::WaitingResultFut {
+                                result_fut: Self::boxed_result_fut(Arc::clone(&ctx), handle),
+                            })
+                        }
+                    }
+                }
+                RunStateProj::ClosureRunning {
+                    ctx,
+                    handle,
+                    start_time,
+                    closure_fut,
+                } => {
+                    let res = match ready!(closure_fut.poll(cx)) {
+                        Ok(t) => RunExitResult::Success(Ret::serialize(&t).map_err(|e| {
+                            ErrorInner::Serialization {
+                                syscall: "run",
+                                err: Box::new(e),
+                            }
+                        })?),
+                        Err(e) => match e.0 {
+                            HandlerErrorInner::Retryable(err) => RunExitResult::RetryableFailure {
+                                attempt_duration: start_time.elapsed(),
+                                error: CoreError::new(500u16, err.to_string()),
+                            },
+                            HandlerErrorInner::Terminal(t) => {
+                                RunExitResult::TerminalFailure(TerminalError(t).into())
+                            }
+                        },
+                    };
+
+                    let ctx = ctx
+                        .take()
+                        .expect("Future should not be polled after returning Poll::Ready");
+                    let handle = *handle;
+
+                    let _ = {
+                        must_lock!(ctx).vm.propose_run_completion(
+                            handle,
+                            res,
+                            mem::take(this.retry_policy),
+                        )
+                    };
+
+                    this.state.set(RunState::WaitingResultFut {
+                        result_fut: Self::boxed_result_fut(Arc::clone(&ctx), handle),
+                    });
+                }
+                RunStateProj::WaitingResultFut { result_fut } => return result_fut.poll_unpin(cx),
+            }
+        }
     }
 }
 
