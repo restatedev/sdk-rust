@@ -197,8 +197,8 @@ impl Default for Builder {
         Self {
             svcs: Default::default(),
             discovery: crate::discovery::Endpoint {
-                max_protocol_version: 3,
-                min_protocol_version: 3,
+                max_protocol_version: 4,
+                min_protocol_version: 4,
                 protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
                 services: vec![],
             },
