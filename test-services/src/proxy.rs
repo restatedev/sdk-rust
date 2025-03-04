@@ -11,6 +11,7 @@ pub(crate) struct ProxyRequest {
     service_name: String,
     virtual_object_key: Option<String>,
     handler_name: String,
+    idempotency_key: Option<String>,
     message: Vec<u8>,
     delay_millis: Option<u64>,
 }
@@ -46,7 +47,7 @@ pub(crate) trait Proxy {
     #[name = "call"]
     async fn call(req: Json<ProxyRequest>) -> HandlerResult<Json<Vec<u8>>>;
     #[name = "oneWayCall"]
-    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<()>;
+    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<String>;
     #[name = "manyCalls"]
     async fn many_calls(req: Json<Vec<ManyCallRequest>>) -> HandlerResult<()>;
 }
@@ -59,27 +60,33 @@ impl Proxy for ProxyImpl {
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
     ) -> HandlerResult<Json<Vec<u8>>> {
-        Ok(ctx
-            .request::<Vec<u8>, Vec<u8>>(req.to_target(), req.message)
-            .call()
-            .await?
-            .into())
+        let mut request = ctx.request::<Vec<u8>, Vec<u8>>(req.to_target(), req.message);
+        if let Some(idempotency_key) = req.idempotency_key {
+            request = request.idempotency_key(idempotency_key);
+        }
+        Ok(request.call().await?.into())
     }
 
     async fn one_way_call(
         &self,
         ctx: Context<'_>,
         Json(req): Json<ProxyRequest>,
-    ) -> HandlerResult<()> {
-        let request = ctx.request::<_, ()>(req.to_target(), req.message);
-
-        if let Some(delay_millis) = req.delay_millis {
-            request.send_with_delay(Duration::from_millis(delay_millis));
-        } else {
-            request.send();
+    ) -> HandlerResult<String> {
+        let mut request = ctx.request::<_, ()>(req.to_target(), req.message);
+        if let Some(idempotency_key) = req.idempotency_key {
+            request = request.idempotency_key(idempotency_key);
         }
 
-        Ok(())
+        let invocation_id = if let Some(delay_millis) = req.delay_millis {
+            request
+                .send_after(Duration::from_millis(delay_millis))
+                .invocation_id()
+                .await?
+        } else {
+            request.send().invocation_id().await?
+        };
+
+        Ok(invocation_id)
     }
 
     async fn many_calls(
@@ -90,11 +97,14 @@ impl Proxy for ProxyImpl {
         let mut futures: Vec<BoxFuture<'_, Result<Vec<u8>, TerminalError>>> = vec![];
 
         for req in requests {
-            let restate_req =
+            let mut restate_req =
                 ctx.request::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
+            if let Some(idempotency_key) = req.proxy_request.idempotency_key {
+                restate_req = restate_req.idempotency_key(idempotency_key);
+            }
             if req.one_way_call {
                 if let Some(delay_millis) = req.proxy_request.delay_millis {
-                    restate_req.send_with_delay(Duration::from_millis(delay_millis));
+                    restate_req.send_after(Duration::from_millis(delay_millis));
                 } else {
                     restate_req.send();
                 }

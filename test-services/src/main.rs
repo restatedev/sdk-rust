@@ -9,6 +9,7 @@ mod map_object;
 mod non_deterministic;
 mod proxy;
 mod test_utils_service;
+mod virtual_object_command_interpreter;
 
 use restate_sdk::prelude::{Endpoint, HttpServer};
 use std::env;
@@ -75,6 +76,13 @@ async fn main() {
         builder = builder.bind(test_utils_service::TestUtilsService::serve(
             test_utils_service::TestUtilsServiceImpl,
         ))
+    }
+    if services == "*" || services.contains("VirtualObjectCommandInterpreter") {
+        builder = builder.bind(
+            virtual_object_command_interpreter::VirtualObjectCommandInterpreter::serve(
+                virtual_object_command_interpreter::VirtualObjectCommandInterpreterImpl,
+            ),
+        )
     }
 
     if let Ok(key) = env::var("E2E_REQUEST_SIGNING_ENV") {
