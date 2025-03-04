@@ -12,18 +12,16 @@ use futures::future::{Either, Shared};
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CallHandle as CoreCallHandle, CoreVM, DoProgressResponse, Error as CoreError, NonEmptyValue,
-    NotificationHandle, RetryPolicy, RunExitResult, SendHandle as CoreSendHandle, TakeOutputResult,
-    Target, TerminalFailure, Value, VM,
+    CoreVM, Error as CoreError, NonEmptyValue, NotificationHandle, RetryPolicy, TakeOutputResult,
+    Target, Value, VM,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::{ready, Future};
 use std::marker::PhantomData;
-use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
 pub struct ContextInternalInner {
@@ -50,7 +48,8 @@ impl ContextInternalInner {
 
     pub(super) fn fail(&mut self, e: Error) {
         self.vm.notify_error(
-            CoreError::new(500u16, e.0.to_string()).with_stacktrace(Cow::Owned(format!("{:#}", e.0))),
+            CoreError::new(500u16, e.0.to_string())
+                .with_stacktrace(Cow::Owned(format!("{:#}", e.0))),
             None,
         );
         self.handler_state.mark_error(e);
@@ -237,7 +236,7 @@ impl ContextInternal {
                 syscall: "get_state",
             }
             .into()),
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         });
 
         Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
@@ -255,7 +254,7 @@ impl ContextInternal {
                 syscall: "get_keys",
             }
             .into()),
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         });
 
         Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
@@ -302,7 +301,7 @@ impl ContextInternal {
                 syscall: "sleep",
             }
             .into()),
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         });
 
         Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
@@ -331,7 +330,7 @@ impl ContextInternal {
         drop(inner_lock);
 
         // Let's prepare the two futures here
-        let call_invocation_id_fut = InterceptErrorFuture::new(
+        let invocation_id_fut = InterceptErrorFuture::new(
             self.clone(),
             get_async_result(
                 Arc::clone(&self.inner),
@@ -343,36 +342,34 @@ impl ContextInternal {
                 Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: <&'static str>::from(v),
                     syscall: "call",
-                }.into()),
-                Err(e) => Err(e.into()),
+                }
+                .into()),
+                Err(e) => Err(e),
             }),
         );
-        let call_result_future = InterceptErrorFuture::new(
+        let result_future = InterceptErrorFuture::new(
             self.clone(),
             get_async_result(
                 Arc::clone(&self.inner),
                 call_handle.call_notification_handle,
             )
             .map(|res| match res {
-                Ok(Value::Success(mut s)) => {
-                    let t =
-                        Res::deserialize(&mut s).map_err(|e| Error::deserialization("call", e))?;
-                    Ok(Ok(t))
-                }
-                Ok(Value::Failure(f)) => Ok(Err(f.into())),
+                Ok(Value::Success(mut s)) => Ok(Ok(
+                    Res::deserialize(&mut s).map_err(|e| Error::deserialization("call", e))?
+                )),
+                Ok(Value::Failure(f)) => Ok(Err(TerminalError::from(f))),
                 Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                     variant: <&'static str>::from(v),
                     syscall: "call",
                 }
                 .into()),
-                Err(e) => Err(e.into()),
+                Err(e) => Err(e),
             }),
         );
 
         Either::Left(CallFutureImpl {
-            invocation_id_future: call_invocation_id_fut.shared(),
-            result_future: call_result_future,
-            res: PhantomData,
+            invocation_id_future: invocation_id_fut.shared(),
+            result_future,
             ctx: self.clone(),
         })
     }
@@ -390,33 +387,32 @@ impl ContextInternal {
         target.idempotency_key = idempotency_key;
 
         let input = match Req::serialize(&req) {
-            Ok(b,) => b,
-              Err(e) =>   {
-                  inner_lock.fail(Error::serialization("call", e));
-                  return Either::Right(TrapFuture::<()>::default())
-              }
+            Ok(b) => b,
+            Err(e) => {
+                inner_lock.fail(Error::serialization("call", e));
+                return Either::Right(TrapFuture::<()>::default());
+            }
         };
 
-        let send_handle = match
-            inner_lock.vm.sys_send(
-                target,
-                input,
-                delay.map(|delay| {
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("Duration since unix epoch cannot fail")
-                        + delay
-                })
-            ) {
-            Ok(h,) => h,
-            Err(e) =>   {
+        let send_handle = match inner_lock.vm.sys_send(
+            target,
+            input,
+            delay.map(|delay| {
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Duration since unix epoch cannot fail")
+                    + delay
+            }),
+        ) {
+            Ok(h) => h,
+            Err(e) => {
                 inner_lock.fail(e.into());
-                return Either::Right(TrapFuture::<()>::default())
+                return Either::Right(TrapFuture::<()>::default());
             }
         };
         drop(inner_lock);
 
-        let call_invocation_id_fut = InterceptErrorFuture::new(
+        let invocation_id_fut = InterceptErrorFuture::new(
             self.clone(),
             get_async_result(
                 Arc::clone(&self.inner),
@@ -430,12 +426,12 @@ impl ContextInternal {
                     syscall: "call",
                 }
                 .into()),
-                Err(e) => Err(e.into()),
+                Err(e) => Err(e),
             }),
         );
 
         Either::Left(SendRequestHandle {
-            invocation_id_future: call_invocation_id_fut.shared(),
+            invocation_id_future: invocation_id_fut.shared(),
             ctx: self.clone(),
         })
     }
@@ -471,14 +467,15 @@ impl ContextInternal {
         drop(inner_lock);
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
-            Ok(Value::Success(mut s)) => {
-                Ok(Ok(T::deserialize(&mut s).map_err(|e| Error::deserialization("awakeable", e))?))
-            }
+            Ok(Value::Success(mut s)) => Ok(Ok(
+                T::deserialize(&mut s).map_err(|e| Error::deserialization("awakeable", e))?
+            )),
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
             Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
                 variant: <&'static str>::from(v),
                 syscall: "awakeable",
-            }.into()),
+            }
+            .into()),
             Err(e) => Err(e),
         });
 
@@ -527,7 +524,7 @@ impl ContextInternal {
                 syscall: "promise",
             }
             .into()),
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         });
 
         Either::Left(InterceptErrorFuture::new(self.clone(), poll_future))
@@ -723,7 +720,7 @@ where
 {
     type Output = Result<Result<Out, TerminalError>, Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         unimplemented!()
         // let mut this = self.project();
 
@@ -850,8 +847,7 @@ impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send> Invocation
     for SendRequestHandle<InvIdFut>
 {
     fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
-        let cloned_invocation_id_fut = Shared::clone(&self.invocation_id_future);
-        async move { cloned_invocation_id_fut.await }
+        Shared::clone(&self.invocation_id_future)
     }
 
     fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
@@ -868,18 +864,19 @@ impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send> Invocation
 }
 
 pin_project! {
-    struct CallFutureImpl<InvIdFut: Future, ResultFut, Res> {
-       #[pin]
+    struct CallFutureImpl<InvIdFut: Future, ResultFut> {
+        #[pin]
         invocation_id_future: Shared<InvIdFut>,
         #[pin]
         result_future: ResultFut,
-        res: PhantomData<fn() -> Res>,
         ctx: ContextInternal,
     }
 }
 
-impl<InvIdFut: Future, ResultFut: Future<Output = Result<Res, TerminalError>> + Send, Res> Future
-    for CallFutureImpl<InvIdFut, ResultFut, Res>
+impl<InvIdFut, ResultFut, Res> Future for CallFutureImpl<InvIdFut, ResultFut>
+where
+    InvIdFut: Future<Output = Result<String, TerminalError>> + Send,
+    ResultFut: Future<Output = Result<Res, TerminalError>> + Send,
 {
     type Output = ResultFut::Output;
 
@@ -889,12 +886,12 @@ impl<InvIdFut: Future, ResultFut: Future<Output = Result<Res, TerminalError>> + 
     }
 }
 
-impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send, ResultFut, Res>
-    InvocationHandle for CallFutureImpl<InvIdFut, ResultFut, Res>
+impl<InvIdFut, ResultFut> InvocationHandle for CallFutureImpl<InvIdFut, ResultFut>
+where
+    InvIdFut: Future<Output = Result<String, TerminalError>> + Send,
 {
     fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
-        let cloned_invocation_id_fut = Shared::clone(&self.invocation_id_future);
-        async move { cloned_invocation_id_fut.await }
+        Shared::clone(&self.invocation_id_future)
     }
 
     fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send {
@@ -910,7 +907,19 @@ impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send, ResultFut,
     }
 }
 
-impl<A: InvocationHandle, B: InvocationHandle> InvocationHandle for Either<A, B> {
+impl<InvIdFut, ResultFut, Res> CallFuture<Result<Res, TerminalError>>
+    for CallFutureImpl<InvIdFut, ResultFut>
+where
+    InvIdFut: Future<Output = Result<String, TerminalError>> + Send,
+    ResultFut: Future<Output = Result<Res, TerminalError>> + Send,
+{
+}
+
+impl<A, B> InvocationHandle for Either<A, B>
+where
+    A: InvocationHandle,
+    B: InvocationHandle,
+{
     fn invocation_id(&self) -> impl Future<Output = Result<String, TerminalError>> + Send {
         match self {
             Either::Left(l) => Either::Left(l.invocation_id()),
@@ -931,8 +940,6 @@ where
     A: CallFuture<O>,
     B: CallFuture<O>,
 {
-
-
 }
 
 struct InvocationIdBackedInvocationHandle {
@@ -982,62 +989,5 @@ fn get_async_result(
     ctx: Arc<Mutex<ContextInternalInner>>,
     handle: NotificationHandle,
 ) -> impl Future<Output = Result<Value, Error>> + Send {
-    async move {
-        loop {
-            let mut inner_lock = must_lock!(ctx);
-
-            // Let's consume some output to begin with
-            let out = inner_lock.vm.take_output();
-            match out {
-                TakeOutputResult::Buffer(b) => {
-                    if !inner_lock.write.send(b) {
-                        return Err(ErrorInner::Suspended);
-                    }
-                }
-                TakeOutputResult::EOF => return Err(ErrorInner::UnexpectedOutputClosed),
-            }
-
-            // Let's do some progress now
-            match inner_lock.vm.do_progress(vec![handle]) {
-                Ok(DoProgressResponse::AnyCompleted) => {
-                    // We're good, we got the response
-                    break;
-                }
-                Ok(DoProgressResponse::ReadFromInput) => {
-                    drop(inner_lock);
-                    match inner_lock.read.recv().await {
-                        Some(Ok(b)) => must_lock!(ctx).vm.notify_input(b),
-                        Some(Err(e)) => must_lock!(ctx).vm.notify_error(
-                            CoreError::new(500u16, format!("Error when reading the body {e:?}",)),
-                            None,
-                        ),
-                        None => must_lock!(ctx).vm.notify_input_closed(),
-                    }
-                    continue;
-                }
-                Ok(DoProgressResponse::ExecuteRun(_)) => {
-                    unimplemented!()
-                }
-                Ok(DoProgressResponse::WaitingPendingRun) => {
-                    unimplemented!()
-                }
-                Ok(DoProgressResponse::CancelSignalReceived) => {
-                    unimplemented!()
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
-        }
-        let mut inner_lock = must_lock!(ctx);
-
-        // At this point let's try to take the notification
-        match inner_lock.vm.take_notification(handle) {
-            Ok(Some(v)) => return Ok(v),
-            Ok(None) => {
-                panic!("This is not supposed to happen, handle was flagged as completed")
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }.map_err(Error::from)
+    VmAsyncResultPollFuture::new(ctx, handle).map_err(Error::from)
 }

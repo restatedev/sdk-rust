@@ -5,7 +5,6 @@ use futures::FutureExt;
 use restate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -64,7 +63,7 @@ pub(crate) trait TestUtilsService {
     #[name = "getEnvVariable"]
     async fn get_env_variable(env: String) -> HandlerResult<String>;
     #[name = "cancelInvocation"]
-    async fn cancel_invocation(invocation_id: String) -> Result<(), Infallible>;
+    async fn cancel_invocation(invocation_id: String) -> Result<(), TerminalError>;
     #[name = "interpretCommands"]
     async fn interpret_commands(req: Json<InterpretRequest>) -> HandlerResult<()>;
 }
@@ -162,8 +161,8 @@ impl TestUtilsService for TestUtilsServiceImpl {
         &self,
         ctx: Context<'_>,
         invocation_id: String,
-    ) -> Result<(), Infallible> {
-        ctx.invocation_handle(invocation_id).cancel();
+    ) -> Result<(), TerminalError> {
+        ctx.invocation_handle(invocation_id).cancel().await?;
         Ok(())
     }
 

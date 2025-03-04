@@ -1,4 +1,4 @@
-use crate::context::{CallFuture, InvocationHandle, RunFuture, RunRetryPolicy};
+use crate::context::{InvocationHandle, RunFuture, RunRetryPolicy};
 use crate::endpoint::{ContextInternal, Error};
 use crate::errors::TerminalError;
 use pin_project_lite::pin_project;
@@ -69,5 +69,3 @@ impl<F: InvocationHandle> InvocationHandle for InterceptErrorFuture<F> {
         self.fut.cancel()
     }
 }
-
-impl<F, R> CallFuture<R> for InterceptErrorFuture<F> where F: CallFuture<Result<R, Error>> {}

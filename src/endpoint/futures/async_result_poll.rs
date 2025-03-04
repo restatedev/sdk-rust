@@ -1,49 +1,38 @@
 use crate::endpoint::context::ContextInternalInner;
-use crate::endpoint::{BoxError, ErrorInner};
+use crate::endpoint::ErrorInner;
 use restate_sdk_shared_core::{
     DoProgressResponse, Error as CoreError, NotificationHandle, TakeOutputResult, Value, VM,
 };
-use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
 pub(crate) struct VmAsyncResultPollFuture {
-    ctx: Arc<Mutex<ContextInternalInner>>,
-    state: Option<PollState>,
+    state: Option<AsyncResultPollState>,
 }
 
 impl VmAsyncResultPollFuture {
-    pub fn maybe_new(
-        inner: Cow<'_, Arc<Mutex<ContextInternalInner>>>,
-        handle: Result<NotificationHandle, CoreError>,
-    ) -> Self {
+    pub fn new(ctx: Arc<Mutex<ContextInternalInner>>, handle: NotificationHandle) -> Self {
         VmAsyncResultPollFuture {
-            ctx: inner.into_owned(),
-            state: Some(match handle {
-                Ok(handle) => PollState::Init(handle),
-                Err(err) => PollState::Failed(ErrorInner::VM(err)),
-            }),
-        }
-    }
-
-    pub fn new(
-        inner: Cow<'_, Arc<Mutex<ContextInternalInner>>>,
-        handle: NotificationHandle,
-    ) -> Self {
-        VmAsyncResultPollFuture {
-            ctx: inner.into_owned(),
-            state: Some(PollState::Init(handle)),
+            state: Some(AsyncResultPollState::Init { ctx, handle }),
         }
     }
 }
 
-enum PollState {
-    Init(NotificationHandle),
-    PollProgress(NotificationHandle),
-    WaitingInput(NotificationHandle),
-    Failed(ErrorInner),
+enum AsyncResultPollState {
+    Init {
+        ctx: Arc<Mutex<ContextInternalInner>>,
+        handle: NotificationHandle,
+    },
+    PollProgress {
+        ctx: Arc<Mutex<ContextInternalInner>>,
+        handle: NotificationHandle,
+    },
+    WaitingInput {
+        ctx: Arc<Mutex<ContextInternalInner>>,
+        handle: NotificationHandle,
+    },
 }
 
 macro_rules! must_lock {
@@ -56,16 +45,15 @@ impl Future for VmAsyncResultPollFuture {
     type Output = Result<Value, ErrorInner>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let ctx = &self.ctx;
-        let mut inner_lock = must_lock!(ctx);
-        let state = &mut self.state;
-
         loop {
-            match state
+            match self
+                .state
                 .take()
                 .expect("Future should not be polled after Poll::Ready")
             {
-                PollState::Init(handle) => {
+                AsyncResultPollState::Init { ctx, handle } => {
+                    let mut inner_lock = must_lock!(ctx);
+
                     // Let's consume some output to begin with
                     let out = inner_lock.vm.take_output();
                     match out {
@@ -80,14 +68,18 @@ impl Future for VmAsyncResultPollFuture {
                     }
 
                     // We can now start polling
-                    *state = Some(PollState::PollProgress(handle));
+                    drop(inner_lock);
+                    self.state = Some(AsyncResultPollState::PollProgress { ctx, handle });
                 }
-                PollState::WaitingInput(handle) => {
+                AsyncResultPollState::WaitingInput { ctx, handle } => {
+                    let mut inner_lock = must_lock!(ctx);
+
                     let read_result = match inner_lock.read.poll_recv(cx) {
                         Poll::Ready(t) => t,
                         Poll::Pending => {
                             // Still need to wait for input
-                            *state = Some(PollState::WaitingInput(handle));
+                            drop(inner_lock);
+                            self.state = Some(AsyncResultPollState::WaitingInput { ctx, handle });
                             return Poll::Pending;
                         }
                     };
@@ -103,15 +95,19 @@ impl Future for VmAsyncResultPollFuture {
                     }
 
                     // It's time to poll progress again
-                    *state = Some(PollState::PollProgress(handle));
+                    drop(inner_lock);
+                    self.state = Some(AsyncResultPollState::PollProgress { ctx, handle });
                 }
-                PollState::PollProgress(handle) => {
+                AsyncResultPollState::PollProgress { ctx, handle } => {
+                    let mut inner_lock = must_lock!(ctx);
+
                     match inner_lock.vm.do_progress(vec![handle]) {
                         Ok(DoProgressResponse::AnyCompleted) => {
                             // We're good, we got the response
                         }
                         Ok(DoProgressResponse::ReadFromInput) => {
-                            *state = Some(PollState::WaitingInput(handle));
+                            drop(inner_lock);
+                            self.state = Some(AsyncResultPollState::WaitingInput { ctx, handle });
                             continue;
                         }
                         Ok(DoProgressResponse::ExecuteRun(_)) => {
@@ -139,7 +135,6 @@ impl Future for VmAsyncResultPollFuture {
                         Err(e) => return Poll::Ready(Err(e.into())),
                     }
                 }
-                PollState::Failed(err) => return Poll::Ready(Err(err)),
             }
         }
     }

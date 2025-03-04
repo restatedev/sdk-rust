@@ -370,20 +370,20 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///     // To a Service:
 ///     ctx.service_client::<MyServiceClient>()
 ///         .my_handler(String::from("Hi!"))
-///         .send_with_delay(Duration::from_millis(5000));
+///         .send_after(Duration::from_millis(5000));
 ///
 ///     // To a Virtual Object:
 ///     ctx.object_client::<MyVirtualObjectClient>("Mary")
 ///         .my_handler(String::from("Hi!"))
-///         .send_with_delay(Duration::from_millis(5000));
+///         .send_after(Duration::from_millis(5000));
 ///
 ///     // To a Workflow:
 ///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
 ///         .run(String::from("Hi!"))
-///         .send_with_delay(Duration::from_millis(5000));
+///         .send_after(Duration::from_millis(5000));
 ///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
 ///         .interact_with_workflow()
-///         .send_with_delay(Duration::from_millis(5000));
+///         .send_after(Duration::from_millis(5000));
 ///  #    Ok(())
 ///  # }
 /// ```
@@ -632,7 +632,7 @@ pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
         &self,
     ) -> (
         String,
-        impl Future<Output = Result<T, TerminalError>> + Send  + 'ctx,
+        impl Future<Output = Result<T, TerminalError>> + Send + 'ctx,
     ) {
         self.inner_context().awakeable()
     }

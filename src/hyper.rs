@@ -10,7 +10,7 @@ use http::{response, HeaderName, HeaderValue, Request, Response};
 use http_body_util::{BodyExt, Either, Full};
 use hyper::body::{Body, Frame, Incoming};
 use hyper::service::Service;
-use restate_sdk_shared_core::{Header, ResponseHead};
+use restate_sdk_shared_core::Header;
 use std::convert::Infallible;
 use std::future::{ready, Ready};
 use std::ops::Deref;
