@@ -1,14 +1,21 @@
 exclusions:
   "alwaysSuspending":
-    - "dev.restate.sdktesting.tests.AwaitTimeout"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwaitAny"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwakeableTimeoutCommand"
+  - "dev.restate.sdktesting.tests.Combinators.firstSuccessfulCompletedAwakeable"
   "default":
-    - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.RawHandler"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwaitAny"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwakeableTimeoutCommand"
+  - "dev.restate.sdktesting.tests.Combinators.firstSuccessfulCompletedAwakeable"
   "singleThreadSinglePartition":
-    - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.RawHandler"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwaitAny"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwakeableTimeoutCommand"
+  - "dev.restate.sdktesting.tests.Combinators.firstSuccessfulCompletedAwakeable"
   "threeNodes":
-    - "dev.restate.sdktesting.tests.AwaitTimeout"
-    - "dev.restate.sdktesting.tests.RawHandler"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwaitAny"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwakeableTimeoutCommand"
+  - "dev.restate.sdktesting.tests.Combinators.firstSuccessfulCompletedAwakeable"
   "threeNodesAlwaysSuspending":
-    - "dev.restate.sdktesting.tests.AwaitTimeout"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwaitAny"
+  - "dev.restate.sdktesting.tests.Combinators.awakeableOrTimeoutUsingAwakeableTimeoutCommand"
+  - "dev.restate.sdktesting.tests.Combinators.firstSuccessfulCompletedAwakeable"

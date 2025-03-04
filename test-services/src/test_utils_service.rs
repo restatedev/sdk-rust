@@ -1,47 +1,11 @@
-use crate::awakeable_holder;
-use crate::list_object::ListObjectClient;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use restate_sdk::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CreateAwakeableAndAwaitItRequest {
-    awakeable_key: String,
-    await_timeout: Option<u64>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[serde(rename_all_fields = "camelCase")]
-pub(crate) enum CreateAwakeableAndAwaitItResponse {
-    #[serde(rename = "timeout")]
-    Timeout,
-    #[serde(rename = "result")]
-    Result { value: String },
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InterpretRequest {
-    list_name: String,
-    commands: Vec<InterpretCommand>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[serde(rename_all_fields = "camelCase")]
-pub(crate) enum InterpretCommand {
-    #[serde(rename = "createAwakeableAndAwaitIt")]
-    CreateAwakeableAndAwaitIt { awakeable_key: String },
-    #[serde(rename = "getEnvVariable")]
-    GetEnvVariable { env_name: String },
-}
 
 #[restate_sdk::service]
 #[name = "TestUtilsService"]
@@ -50,22 +14,16 @@ pub(crate) trait TestUtilsService {
     async fn echo(input: String) -> HandlerResult<String>;
     #[name = "uppercaseEcho"]
     async fn uppercase_echo(input: String) -> HandlerResult<String>;
+    #[name = "rawEcho"]
+    async fn raw_echo(input: Vec<u8>) -> Result<Vec<u8>, Infallible>;
     #[name = "echoHeaders"]
     async fn echo_headers() -> HandlerResult<Json<HashMap<String, String>>>;
-    #[name = "createAwakeableAndAwaitIt"]
-    async fn create_awakeable_and_await_it(
-        req: Json<CreateAwakeableAndAwaitItRequest>,
-    ) -> HandlerResult<Json<CreateAwakeableAndAwaitItResponse>>;
     #[name = "sleepConcurrently"]
     async fn sleep_concurrently(millis_durations: Json<Vec<u64>>) -> HandlerResult<()>;
     #[name = "countExecutedSideEffects"]
     async fn count_executed_side_effects(increments: u32) -> HandlerResult<u32>;
-    #[name = "getEnvVariable"]
-    async fn get_env_variable(env: String) -> HandlerResult<String>;
     #[name = "cancelInvocation"]
     async fn cancel_invocation(invocation_id: String) -> Result<(), TerminalError>;
-    #[name = "interpretCommands"]
-    async fn interpret_commands(req: Json<InterpretRequest>) -> HandlerResult<()>;
 }
 
 pub(crate) struct TestUtilsServiceImpl;
@@ -77,6 +35,10 @@ impl TestUtilsService for TestUtilsServiceImpl {
 
     async fn uppercase_echo(&self, _: Context<'_>, input: String) -> HandlerResult<String> {
         Ok(input.to_ascii_uppercase())
+    }
+
+    async fn raw_echo(&self, _: Context<'_>, input: Vec<u8>) -> Result<Vec<u8>, Infallible> {
+        Ok(input)
     }
 
     async fn echo_headers(
@@ -92,27 +54,6 @@ impl TestUtilsService for TestUtilsServiceImpl {
         }
 
         Ok(headers.into())
-    }
-
-    async fn create_awakeable_and_await_it(
-        &self,
-        context: Context<'_>,
-        Json(req): Json<CreateAwakeableAndAwaitItRequest>,
-    ) -> HandlerResult<Json<CreateAwakeableAndAwaitItResponse>> {
-        if req.await_timeout.is_some() {
-            unimplemented!("await timeout is not yet implemented");
-        }
-
-        let (awk_id, awakeable) = context.awakeable::<String>();
-
-        context
-            .object_client::<awakeable_holder::AwakeableHolderClient>(req.awakeable_key)
-            .hold(awk_id)
-            .call()
-            .await?;
-        let value = awakeable.await?;
-
-        Ok(CreateAwakeableAndAwaitItResponse::Result { value }.into())
     }
 
     async fn sleep_concurrently(
@@ -153,46 +94,12 @@ impl TestUtilsService for TestUtilsServiceImpl {
         Ok(counter.load(Ordering::SeqCst) as u32)
     }
 
-    async fn get_env_variable(&self, _: Context<'_>, env: String) -> HandlerResult<String> {
-        Ok(std::env::var(env).ok().unwrap_or_default())
-    }
-
     async fn cancel_invocation(
         &self,
         ctx: Context<'_>,
         invocation_id: String,
     ) -> Result<(), TerminalError> {
         ctx.invocation_handle(invocation_id).cancel().await?;
-        Ok(())
-    }
-
-    async fn interpret_commands(
-        &self,
-        context: Context<'_>,
-        Json(req): Json<InterpretRequest>,
-    ) -> HandlerResult<()> {
-        let list_client = context.object_client::<ListObjectClient>(req.list_name);
-
-        for cmd in req.commands {
-            match cmd {
-                InterpretCommand::CreateAwakeableAndAwaitIt { awakeable_key } => {
-                    let (awk_id, awakeable) = context.awakeable::<String>();
-                    context
-                        .object_client::<awakeable_holder::AwakeableHolderClient>(awakeable_key)
-                        .hold(awk_id)
-                        .call()
-                        .await?;
-                    let value = awakeable.await?;
-                    list_client.append(value).send();
-                }
-                InterpretCommand::GetEnvVariable { env_name } => {
-                    list_client
-                        .append(std::env::var(env_name).ok().unwrap_or_default())
-                        .send();
-                }
-            }
-        }
-
         Ok(())
     }
 }
