@@ -3,15 +3,57 @@ use crate::serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::Duration;
 
-/// Run closure trait
-pub trait RunClosure {
+pub struct RunTask<RFN> {
+    pub(crate) run_fn: RFN,
+    pub(crate) name: Option<String>,
+    pub(crate) retry_policy: Option<RunRetryPolicy>,
+}
+
+impl<RFN> RunTask<RFN> {
+    pub fn new(run_fn: RFN) -> Self {
+        RunTask {
+            run_fn,
+            name: None,
+            retry_policy: None,
+        }
+    }
+
+    /// Provide a custom retry policy for this `run` operation.
+    ///
+    /// If unspecified, the `run` will be retried using the [Restate invoker retry policy](https://docs.restate.dev/operate/configuration/server),
+    /// which by default retries indefinitely.
+    pub fn retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
+        self.retry_policy = Some(retry_policy);
+        self
+    }
+
+    /// Define a name for this `run` operation.
+    ///
+    /// This is used mainly for observability.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+}
+
+impl<RFN> From<RFN> for RunTask<RFN>
+where
+    RFN: RunFn,
+{
+    fn from(value: RFN) -> Self {
+        RunTask::new(value)
+    }
+}
+
+/// Run fn trait
+pub trait RunFn {
     type Output: Deserialize + Serialize + 'static;
     type Fut: Future<Output = HandlerResult<Self::Output>>;
 
     fn run(self) -> Self::Fut;
 }
 
-impl<F, O, Fut> RunClosure for F
+impl<F, O, Fut> RunFn for F
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = HandlerResult<O>>,
@@ -23,20 +65,6 @@ where
     fn run(self) -> Self::Fut {
         self()
     }
-}
-
-/// Future created using [`ContextSideEffects::run`](super::ContextSideEffects::run).
-pub trait RunFuture<O>: Future<Output = O> {
-    /// Provide a custom retry policy for this `run` operation.
-    ///
-    /// If unspecified, the `run` will be retried using the [Restate invoker retry policy](https://docs.restate.dev/operate/configuration/server),
-    /// which by default retries indefinitely.
-    fn retry_policy(self, retry_policy: RunRetryPolicy) -> Self;
-
-    /// Define a name for this `run` operation.
-    ///
-    /// This is used mainly for observability.
-    fn name(self, name: impl Into<String>) -> Self;
 }
 
 /// This struct represents the policy to execute retries for run closures.

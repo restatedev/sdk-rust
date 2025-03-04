@@ -9,7 +9,7 @@ use std::time::Duration;
 mod request;
 mod run;
 pub use request::{CallFuture, InvocationHandle, Request, RequestTarget};
-pub use run::{RunClosure, RunFuture, RunRetryPolicy};
+pub use run::{RunFn, RunRetryPolicy, RunTask};
 
 pub type HeaderMap = http::HeaderMap<String>;
 
@@ -681,7 +681,8 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     ///
     /// For more info about serialization of the return values, see [crate::serde].
     ///
-    /// You can configure the retry policy for the `ctx.run` block:
+    /// You can tune several aspects of the run task to execute by manually building [`RunTask`].
+    /// For example, you can configure the retry policy for the `ctx.run` block:
     /// ```rust,no_run
     /// # use std::time::Duration;
     /// # use restate_sdk::prelude::*;
@@ -692,8 +693,11 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     ///     .max_delay(Duration::from_millis(1000))
     ///     .max_attempts(10)
     ///     .max_duration(Duration::from_secs(10));
-    /// ctx.run(|| write_to_other_system())
-    ///     .retry_policy(my_run_retry_policy)
+    /// ctx.run(
+    ///     RunTask::from(|| write_to_other_system())
+    ///         .retry_policy(my_run_retry_policy)
+    ///         .name("write to the other system")
+    ///     )
     ///     .await
     ///     .map_err(|e| {
     ///         // Handle the terminal error after retries exhausted
@@ -709,7 +713,7 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// ```
     ///
     /// This way you can override the default retry behavior of your Restate service for specific operations.
-    /// Have a look at [`RunFuture::retry_policy`] for more information.
+    /// Have a look at [`RunTask::retry_policy`] for more information.
     ///
     /// If you set a maximum number of attempts, then the `ctx.run` block will fail with a [TerminalError] once the retries are exhausted.
     /// Have a look at the [Sagas guide](https://docs.restate.dev/guides/sagas) to learn how to undo previous actions of the handler to keep the system in a consistent state.
@@ -720,13 +724,22 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// because the journaled result can get interleaved with the other context calls in the journal in a non-deterministic way.
     ///
     #[must_use]
-    fn run<R, F, T>(&self, run_closure: R) -> impl RunFuture<Result<T, TerminalError>> + 'ctx
+    fn run<R, RFN, F, T>(
+        &self,
+        run_closure: R,
+    ) -> impl Future<Output = Result<T, TerminalError>> + 'ctx
     where
-        R: RunClosure<Fut = F, Output = T> + Send + 'ctx,
+        R: Into<RunTask<RFN>>,
+        RFN: RunFn<Fut = F, Output = T> + Send + 'ctx,
         F: Future<Output = HandlerResult<T>> + Send + 'ctx,
-        T: Serialize + Deserialize + 'static,
+        T: Serialize + Deserialize + Send + 'static,
     {
-        self.inner_context().run(run_closure)
+        let RunTask {
+            run_fn,
+            name,
+            retry_policy,
+        } = run_closure.into();
+        self.inner_context().run(name, run_fn, retry_policy)
     }
 
     /// Return a random seed inherently predictable, based on the invocation id, which is not secret.

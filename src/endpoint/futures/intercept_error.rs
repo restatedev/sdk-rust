@@ -1,4 +1,4 @@
-use crate::context::{InvocationHandle, RunFuture, RunRetryPolicy};
+use crate::context::InvocationHandle;
 use crate::endpoint::{ContextInternal, Error};
 use crate::errors::TerminalError;
 use pin_project_lite::pin_project;
@@ -42,21 +42,6 @@ where
                 Poll::Pending
             }
         }
-    }
-}
-
-impl<F, R> RunFuture<R> for InterceptErrorFuture<F>
-where
-    F: RunFuture<Result<R, Error>>,
-{
-    fn retry_policy(mut self, retry_policy: RunRetryPolicy) -> Self {
-        self.fut = self.fut.retry_policy(retry_policy);
-        self
-    }
-
-    fn name(mut self, name: impl Into<String>) -> Self {
-        self.fut = self.fut.name(name);
-        self
     }
 }
 

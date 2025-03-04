@@ -72,7 +72,7 @@ impl Failing for FailingImpl {
         error_message: String,
     ) -> HandlerResult<()> {
         context
-            .run::<_, _, ()>(|| async move { Err(TerminalError::new(error_message))? })
+            .run::<_, _, _, ()>(|| async move { Err(TerminalError::new(error_message))? })
             .await?;
 
         unreachable!("This should be unreachable")
@@ -85,22 +85,24 @@ impl Failing for FailingImpl {
     ) -> HandlerResult<i32> {
         let cloned_counter = Arc::clone(&self.eventual_success_side_effects);
         let success_attempt = context
-            .run(|| async move {
-                let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
+            .run(
+                RunTask::from(|| async move {
+                    let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
 
-                if current_attempt >= minimum_attempts {
-                    cloned_counter.store(0, Ordering::SeqCst);
-                    Ok(current_attempt)
-                } else {
-                    Err(anyhow!("Failed at attempt {current_attempt}"))?
-                }
-            })
-            .retry_policy(
-                RunRetryPolicy::new()
-                    .initial_delay(Duration::from_millis(10))
-                    .exponentiation_factor(1.0),
+                    if current_attempt >= minimum_attempts {
+                        cloned_counter.store(0, Ordering::SeqCst);
+                        Ok(current_attempt)
+                    } else {
+                        Err(anyhow!("Failed at attempt {current_attempt}"))?
+                    }
+                })
+                .retry_policy(
+                    RunRetryPolicy::new()
+                        .initial_delay(Duration::from_millis(10))
+                        .exponentiation_factor(1.0),
+                )
+                .name("failing_side_effect"),
             )
-            .name("failing_side_effect")
             .await?;
 
         Ok(success_attempt)
@@ -113,15 +115,17 @@ impl Failing for FailingImpl {
     ) -> HandlerResult<i32> {
         let cloned_counter = Arc::clone(&self.eventual_failure_side_effects);
         if context
-            .run(|| async move {
-                let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
-                Err::<(), _>(anyhow!("Failed at attempt {current_attempt}").into())
-            })
-            .retry_policy(
-                RunRetryPolicy::new()
-                    .initial_delay(Duration::from_millis(10))
-                    .exponentiation_factor(1.0)
-                    .max_attempts(retry_policy_max_retry_count as u32),
+            .run(
+                RunTask::from(|| async move {
+                    let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    Err::<(), _>(anyhow!("Failed at attempt {current_attempt}").into())
+                })
+                .retry_policy(
+                    RunRetryPolicy::new()
+                        .initial_delay(Duration::from_millis(10))
+                        .exponentiation_factor(1.0)
+                        .max_attempts(retry_policy_max_retry_count as u32),
+                ),
             )
             .await
             .is_err()

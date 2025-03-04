@@ -14,19 +14,21 @@ impl RunExample for RunExampleImpl {
         context: Context<'_>,
     ) -> Result<Json<HashMap<String, String>>, HandlerError> {
         let res = context
-            .run(|| async move {
-                let req = self.0.get("https://httpbin.org/ip").build()?;
+            .run(
+                RunTask::from(|| async move {
+                    let req = self.0.get("https://httpbin.org/ip").build()?;
 
-                let res = self
-                    .0
-                    .execute(req)
-                    .await?
-                    .json::<HashMap<String, String>>()
-                    .await?;
+                    let res = self
+                        .0
+                        .execute(req)
+                        .await?
+                        .json::<HashMap<String, String>>()
+                        .await?;
 
-                Ok(Json::from(res))
-            })
-            .name("get_ip")
+                    Ok(Json::from(res))
+                })
+                .name("get_ip"),
+            )
             .await?
             .into_inner();
 
