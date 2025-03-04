@@ -1,7 +1,8 @@
 use crate::endpoint::context::ContextInternalInner;
 use crate::endpoint::ErrorInner;
 use restate_sdk_shared_core::{
-    DoProgressResponse, Error as CoreError, NotificationHandle, TakeOutputResult, Value, VM,
+    DoProgressResponse, Error as CoreError, NotificationHandle, TakeOutputResult, TerminalFailure,
+    Value, VM,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -117,7 +118,10 @@ impl Future for VmAsyncResultPollFuture {
                             unimplemented!()
                         }
                         Ok(DoProgressResponse::CancelSignalReceived) => {
-                            unimplemented!()
+                            return Poll::Ready(Ok(Value::Failure(TerminalFailure {
+                                code: 409,
+                                message: "cancelled".to_string(),
+                            })))
                         }
                         Err(e) => {
                             return Poll::Ready(Err(e.into()));
