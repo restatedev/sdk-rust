@@ -11,6 +11,7 @@ rust-version = "1.76.0"
 default = ["http_server", "rand", "uuid"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
+ingress_client = ["dep:reqwest", "restate-sdk-macros/ingress_client"]
 
 
 [dependencies]
@@ -23,6 +24,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful"
 pin-project-lite = "0.2"
 rand = { version = "0.8.5", optional = true }
 regress = "0.10"
+reqwest = { version = "0.12", optional = true, features = ["json"] }
 restate-sdk-macros = { version = "0.3.2", path = "macros" }
 restate-sdk-shared-core = { git = "https://github.com/restatedev/sdk-shared-core.git", branch = "main", features = ["request_identity", "sha2_random_seed", "http"] }
 serde = "1.0"

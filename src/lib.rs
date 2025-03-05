@@ -222,6 +222,8 @@ pub mod errors;
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
+#[cfg(feature = "ingress_client")]
+pub mod ingress_client;
 pub mod serde;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
