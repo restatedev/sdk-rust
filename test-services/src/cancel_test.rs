@@ -31,7 +31,7 @@ impl CancelTestRunner for CancelTestRunnerImpl {
         context: ObjectContext<'_>,
         op: Json<BlockingOperation>,
     ) -> HandlerResult<()> {
-        let this = context.object_client::<CancelTestBlockingServiceClient>("");
+        let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
 
         match this.block(op).call().await {
             Ok(_) => Err(anyhow!("Block succeeded, this is unexpected").into()),
@@ -65,9 +65,9 @@ impl CancelTestBlockingService for CancelTestBlockingServiceImpl {
         context: ObjectContext<'_>,
         op: Json<BlockingOperation>,
     ) -> HandlerResult<()> {
-        let this = context.object_client::<CancelTestBlockingServiceClient>("");
+        let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
         let awakeable_holder_client =
-            context.object_client::<awakeable_holder::AwakeableHolderClient>("cancel");
+            context.object_client::<awakeable_holder::AwakeableHolderClient>(context.key());
 
         let (awk_id, awakeable) = context.awakeable::<String>();
         awakeable_holder_client.hold(awk_id).call().await?;
