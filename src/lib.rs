@@ -207,7 +207,9 @@
 //! }
 //! ```
 //!
-//! For more information, have a look at the [tracing subscriber doc](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html#filtering-events-with-environment-variables).
+//! You can filter logs *when a handler is being replayed* configuring the [filter::ReplayAwareFilter].
+//!
+//! For more information about tracing and logging, have a look at the [tracing subscriber doc](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html#filtering-events-with-environment-variables).
 //!
 //! Next, have a look at the other [SDK features](#features).
 //!
@@ -218,12 +220,12 @@ pub mod service;
 pub mod context;
 pub mod discovery;
 pub mod errors;
+#[cfg(feature = "span-filter")]
+pub mod filter;
 #[cfg(feature = "http_server")]
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
-#[cfg(feature = "tracing-subscriber")]
-pub mod filter;
 pub mod serde;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).

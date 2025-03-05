@@ -10,14 +10,13 @@ rust-version = "1.76.0"
 [[example]]
 name = "tracing"
 path = "examples/tracing.rs"
-required-features = ["tracing-subscriber"]
+required-features = ["span-filter"]
 
 [features]
-default = ["http_server", "rand", "uuid"]
+default = ["http_server", "rand", "uuid", "span-filter"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
-tracing-subscriber = ["dep:tracing-subscriber"]
-
+span-filter = ["dep:tracing-subscriber"]
 
 [dependencies]
 bytes = "1.6.1"

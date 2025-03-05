@@ -1,15 +1,5 @@
-//! Replay aware tracing filter
-//!
-//! Use this filter to skip tracing events in the service/workflow while replaying.
-//!
-//! Example:
-//! ```rust,no_run
-//! use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
-//! let replay_filter = restate_sdk::filter::ReplayAwareFilter;
-//! tracing_subscriber::registry()
-//!   .with(tracing_subscriber::fmt::layer().with_filter(replay_filter))
-//!   .init();
-//! ```
+//! Replay aware tracing filter.
+
 use std::fmt::Debug;
 use tracing::{
     field::{Field, Visit},
@@ -29,7 +19,7 @@ struct ReplayFieldVisitor(bool);
 
 impl Visit for ReplayFieldVisitor {
     fn record_bool(&mut self, field: &Field, value: bool) {
-        if field.name().eq("replaying") {
+        if field.name().eq("restate.sdk.is_replaying") {
             self.0 = value;
         }
     }
@@ -37,6 +27,22 @@ impl Visit for ReplayFieldVisitor {
     fn record_debug(&mut self, _field: &Field, _value: &dyn Debug) {}
 }
 
+/// Replay aware tracing filter.
+///
+/// Use this filter to skip tracing events in the service while replaying:
+///
+/// ```rust,no_run
+/// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+/// tracing_subscriber::registry()
+///     .with(
+///         tracing_subscriber::fmt::layer()
+///             // Default Env filter to read RUST_LOG
+///             .with_filter(tracing_subscriber::EnvFilter::from_default_env())
+///             // Replay aware filter
+///             .with_filter(restate_sdk::filter::ReplayAwareFilter)
+///     )
+///     .init();
+/// ```
 pub struct ReplayAwareFilter;
 
 impl<S: Subscriber + for<'lookup> LookupSpan<'lookup>> Filter<S> for ReplayAwareFilter {
@@ -46,33 +52,37 @@ impl<S: Subscriber + for<'lookup> LookupSpan<'lookup>> Filter<S> for ReplayAware
 
     fn event_enabled(&self, event: &Event<'_>, cx: &Context<'_, S>) -> bool {
         if let Some(scope) = cx.event_scope(event) {
-            if let Some(span) = scope.from_root().next() {
-                let extensions = span.extensions();
-                if let Some(replay) = extensions.get::<ReplayField>() {
-                    return !replay.0;
+            let iterator = scope.from_root();
+            for span in iterator {
+                if span.name() == "restate_sdk_endpoint_handle" {
+                    if let Some(replay) = span.extensions().get::<ReplayField>() {
+                        return !replay.0;
+                    }
                 }
             }
-            true
-        } else {
-            true
         }
+        true
     }
 
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
-            let mut visitor = ReplayFieldVisitor(false);
-            attrs.record(&mut visitor);
-            let mut extensions = span.extensions_mut();
-            extensions.insert::<ReplayField>(ReplayField(visitor.0));
+            if span.name() == "restate_sdk_endpoint_handle" {
+                let mut visitor = ReplayFieldVisitor(false);
+                attrs.record(&mut visitor);
+                let mut extensions = span.extensions_mut();
+                extensions.replace::<ReplayField>(ReplayField(visitor.0));
+            }
         }
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
-            let mut visitor = ReplayFieldVisitor(false);
-            values.record(&mut visitor);
-            let mut extensions = span.extensions_mut();
-            extensions.replace::<ReplayField>(ReplayField(visitor.0));
+            if span.name() == "restate_sdk_endpoint_handle" {
+                let mut visitor = ReplayFieldVisitor(false);
+                values.record(&mut visitor);
+                let mut extensions = span.extensions_mut();
+                extensions.replace::<ReplayField>(ReplayField(visitor.0));
+            }
         }
     }
 }

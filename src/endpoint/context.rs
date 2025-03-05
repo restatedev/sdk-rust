@@ -30,10 +30,10 @@ pub struct ContextInternalInner {
     pub(crate) read: InputReceiver,
     pub(crate) write: OutputSender,
     pub(super) handler_state: HandlerStateNotifier,
-    // Flag to indicate whether span replay attribute should be set
-    // When replaying this is set on the sys call
-    // When not replaying this is reset on the sys call that transitioned the state
-    pub(super) tracing_replaying_flag: bool,
+
+    /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
+    /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
+    pub(super) span_replaying_field_state: bool,
 }
 
 impl ContextInternalInner {
@@ -48,11 +48,12 @@ impl ContextInternalInner {
             read,
             write,
             handler_state,
-            tracing_replaying_flag: true,
+            span_replaying_field_state: false,
         }
     }
 
     pub(super) fn fail(&mut self, e: Error) {
+        self.maybe_flip_span_replaying_field();
         self.vm.notify_error(
             CoreError::new(500u16, e.0.to_string())
                 .with_stacktrace(Cow::Owned(format!("{:#}", e.0))),
@@ -61,19 +62,13 @@ impl ContextInternalInner {
         self.handler_state.mark_error(e);
     }
 
-    pub(super) fn set_tracing_replaying_flag(&mut self) {
-        if !self.vm.is_processing() {
-            // Replay record is not yet set in the span
-            if self.tracing_replaying_flag {
-                tracing::Span::current().record("replaying", true);
-                self.tracing_replaying_flag = false;
-            }
-        } else {
-            // Replay record is not yet reset in the span
-            if !self.tracing_replaying_flag {
-                tracing::Span::current().record("replaying", false);
-                self.tracing_replaying_flag = true;
-            }
+    pub(super) fn maybe_flip_span_replaying_field(&mut self) {
+        if !self.span_replaying_field_state && self.vm.is_replaying() {
+            tracing::Span::current().record("restate.sdk.is_replaying", true);
+            self.span_replaying_field_state = true;
+        } else if self.span_replaying_field_state && !self.vm.is_replaying() {
+            tracing::Span::current().record("restate.sdk.is_replaying", false);
+            self.span_replaying_field_state = false;
         }
     }
 }
@@ -211,6 +206,7 @@ impl ContextInternal {
                         },
                     ))
                 });
+        inner_lock.maybe_flip_span_replaying_field();
 
         match input_result {
             Ok(Ok(i)) => {
@@ -244,6 +240,7 @@ impl ContextInternal {
     ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get(key.to_owned()));
+        inner_lock.maybe_flip_span_replaying_field();
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
@@ -267,6 +264,7 @@ impl ContextInternal {
     pub fn get_keys(&self) -> impl Future<Output = Result<Vec<String>, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get_keys());
+        inner_lock.maybe_flip_span_replaying_field();
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -287,6 +285,7 @@ impl ContextInternal {
         match t.serialize() {
             Ok(b) => {
                 let _ = inner_lock.vm.sys_state_set(key.to_owned(), b);
+                inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
                 inner_lock.fail(Error::serialization("set_state", e));
@@ -295,11 +294,15 @@ impl ContextInternal {
     }
 
     pub fn clear(&self, key: &str) {
-        let _ = must_lock!(self.inner).vm.sys_state_clear(key.to_string());
+        let mut inner_lock = must_lock!(self.inner);
+        let _ = inner_lock.vm.sys_state_clear(key.to_string());
+        inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn clear_all(&self) {
-        let _ = must_lock!(self.inner).vm.sys_state_clear_all();
+        let mut inner_lock = must_lock!(self.inner);
+        let _ = inner_lock.vm.sys_state_clear_all();
+        inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn sleep(
@@ -314,6 +317,7 @@ impl ContextInternal {
             inner_lock,
             inner_lock.vm.sys_sleep(now + sleep_duration, Some(now))
         );
+        inner_lock.maybe_flip_span_replaying_field();
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
             Ok(Value::Void) => Ok(Ok(())),
@@ -349,6 +353,7 @@ impl ContextInternal {
         );
 
         let call_handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_call(target, input));
+        inner_lock.maybe_flip_span_replaying_field();
         drop(inner_lock);
 
         // Let's prepare the two futures here
@@ -432,6 +437,7 @@ impl ContextInternal {
                 return Either::Right(TrapFuture::<()>::default());
             }
         };
+        inner_lock.maybe_flip_span_replaying_field();
         drop(inner_lock);
 
         let invocation_id_fut = InterceptErrorFuture::new(
@@ -473,6 +479,7 @@ impl ContextInternal {
     ) {
         let mut inner_lock = must_lock!(self.inner);
         let maybe_awakeable_id_and_handle = inner_lock.vm.sys_awakeable();
+        inner_lock.maybe_flip_span_replaying_field();
 
         let (awakeable_id, handle) = match maybe_awakeable_id_and_handle {
             Ok((s, handle)) => (s, handle),
@@ -533,6 +540,7 @@ impl ContextInternal {
     ) -> impl Future<Output = Result<T, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_get_promise(name.to_owned()));
+        inner_lock.maybe_flip_span_replaying_field();
         drop(inner_lock);
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
@@ -558,6 +566,7 @@ impl ContextInternal {
     ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_peek_promise(name.to_owned()));
+        inner_lock.maybe_flip_span_replaying_field();
         drop(inner_lock);
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
@@ -646,6 +655,7 @@ impl ContextInternal {
         };
 
         let _ = inner_lock.vm.sys_write_output(res_to_write);
+        inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn end(&self) {
@@ -880,6 +890,7 @@ impl<InvIdFut: Future<Output = Result<String, TerminalError>> + Send> Invocation
             let inv_id = cloned_invocation_id_fut.await?;
             let mut inner_lock = must_lock!(cloned_ctx);
             let _ = inner_lock.vm.sys_cancel_invocation(inv_id);
+            inner_lock.maybe_flip_span_replaying_field();
             drop(inner_lock);
             Ok(())
         }
@@ -924,6 +935,7 @@ where
             let inv_id = cloned_invocation_id_fut.await?;
             let mut inner_lock = must_lock!(cloned_ctx);
             let _ = inner_lock.vm.sys_cancel_invocation(inv_id);
+            inner_lock.maybe_flip_span_replaying_field();
             drop(inner_lock);
             Ok(())
         }
