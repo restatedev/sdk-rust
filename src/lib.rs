@@ -220,7 +220,7 @@ pub mod service;
 pub mod context;
 pub mod discovery;
 pub mod errors;
-#[cfg(feature = "span-filter")]
+#[cfg(feature = "tracing-span-filter")]
 pub mod filter;
 #[cfg(feature = "http_server")]
 pub mod http_server;
