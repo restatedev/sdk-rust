@@ -18,6 +18,7 @@ use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tracing::{info_span, Instrument};
 
 const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v1+json";
 
@@ -368,6 +369,13 @@ impl BidiStreamRunner {
             .get(&self.svc_name)
             .expect("service must exist at this point");
 
+        let span = info_span!(
+            "restate_sdk_endpoint_handle",
+            "rpc.system" = "restate",
+            "rpc.service" = self.svc_name,
+            "rpc.method" = self.handler_name,
+            "restate.sdk.is_replaying" = false
+        );
         handle(
             input_rx,
             output_tx,
@@ -376,6 +384,7 @@ impl BidiStreamRunner {
             self.handler_name,
             svc,
         )
+        .instrument(span)
         .await
     }
 }

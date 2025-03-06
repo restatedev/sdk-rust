@@ -128,6 +128,9 @@ impl Future for VmAsyncResultPollFuture {
                         }
                     };
 
+                    // DoProgress might cause a flip of the replaying state
+                    inner_lock.maybe_flip_span_replaying_field();
+
                     // At this point let's try to take the notification
                     match inner_lock.vm.take_notification(handle) {
                         Ok(Some(v)) => return Poll::Ready(Ok(v)),
