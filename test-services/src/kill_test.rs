@@ -1,7 +1,7 @@
 use crate::awakeable_holder;
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
+#[restate_sdk::object]
 #[name = "KillTestRunner"]
 pub(crate) trait KillTestRunner {
     #[name = "startCallTree"]
@@ -11,9 +11,9 @@ pub(crate) trait KillTestRunner {
 pub(crate) struct KillTestRunnerImpl;
 
 impl KillTestRunner for KillTestRunnerImpl {
-    async fn start_call_tree(&self, context: Context<'_>) -> HandlerResult<()> {
+    async fn start_call_tree(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
         context
-            .object_client::<KillTestSingletonClient>("")
+            .object_client::<KillTestSingletonClient>(context.key())
             .recursive_call()
             .call()
             .await?;
@@ -35,14 +35,14 @@ pub(crate) struct KillTestSingletonImpl;
 impl KillTestSingleton for KillTestSingletonImpl {
     async fn recursive_call(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
         let awakeable_holder_client =
-            context.object_client::<awakeable_holder::AwakeableHolderClient>("kill");
+            context.object_client::<awakeable_holder::AwakeableHolderClient>(context.key());
 
         let (awk_id, awakeable) = context.awakeable::<()>();
         awakeable_holder_client.hold(awk_id).send();
         awakeable.await?;
 
         context
-            .object_client::<KillTestSingletonClient>("")
+            .object_client::<KillTestSingletonClient>(context.key())
             .recursive_call()
             .call()
             .await?;
