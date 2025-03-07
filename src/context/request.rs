@@ -1,3 +1,5 @@
+use super::DurableFuture;
+
 use crate::endpoint::ContextInternal;
 use crate::errors::TerminalError;
 use crate::serde::{Deserialize, Serialize};
@@ -95,7 +97,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     }
 
     /// Call a service. This returns a future encapsulating the response.
-    pub fn call(self) -> impl CallFuture<Result<Res, TerminalError>> + Send
+    pub fn call(self) -> impl CallFuture<Response = Res> + Send
     where
         Req: Serialize + 'static,
         Res: Deserialize + 'static,
@@ -132,4 +134,8 @@ pub trait InvocationHandle {
     fn cancel(&self) -> impl Future<Output = Result<(), TerminalError>> + Send;
 }
 
-pub trait CallFuture<O>: Future<Output = O> + InvocationHandle {}
+pub trait CallFuture:
+    DurableFuture<Output = Result<Self::Response, TerminalError>> + InvocationHandle
+{
+    type Response;
+}

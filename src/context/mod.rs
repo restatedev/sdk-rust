@@ -6,8 +6,12 @@ use crate::serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::Duration;
 
+#[doc(hidden)]
+pub mod macro_support;
 mod request;
 mod run;
+mod select;
+
 pub use request::{CallFuture, InvocationHandle, Request, RequestTarget};
 pub use run::{RunClosure, RunFuture, RunRetryPolicy};
 
@@ -249,7 +253,10 @@ impl<'ctx> WorkflowContext<'ctx> {
 /// </details>
 pub trait ContextTimers<'ctx>: private::SealedContext<'ctx> {
     /// Sleep using Restate
-    fn sleep(&self, duration: Duration) -> impl Future<Output = Result<(), TerminalError>> + 'ctx {
+    fn sleep(
+        &self,
+        duration: Duration,
+    ) -> impl DurableFuture<Output = Result<(), TerminalError>> + 'ctx {
         private::SealedContext::inner_context(self).sleep(duration)
     }
 }
@@ -632,7 +639,7 @@ pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
         &self,
     ) -> (
         String,
-        impl Future<Output = Result<T, TerminalError>> + Send + 'ctx,
+        impl DurableFuture<Output = Result<T, TerminalError>> + Send + 'ctx,
     ) {
         self.inner_context().awakeable()
     }
@@ -918,7 +925,7 @@ pub trait ContextPromises<'ctx>: private::SealedContext<'ctx> {
     fn promise<T: Deserialize + 'static>(
         &'ctx self,
         key: &str,
-    ) -> impl Future<Output = Result<T, TerminalError>> + 'ctx {
+    ) -> impl DurableFuture<Output = Result<T, TerminalError>> + 'ctx {
         self.inner_context().promise(key)
     }
 
@@ -946,9 +953,10 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanUsePromises> Co
 {
 }
 
-mod private {
-    use super::*;
+pub trait DurableFuture: Future + macro_support::SealedDurableFuture {}
 
+pub(crate) mod private {
+    use super::*;
     pub trait SealedContext<'ctx> {
         fn inner_context(&self) -> &'ctx ContextInternal;
 

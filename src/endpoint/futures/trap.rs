@@ -1,4 +1,4 @@
-use crate::context::{CallFuture, InvocationHandle};
+use crate::context::InvocationHandle;
 use crate::errors::TerminalError;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -32,5 +32,3 @@ impl<T> InvocationHandle for TrapFuture<T> {
         TrapFuture::default()
     }
 }
-
-impl<T> CallFuture<T> for TrapFuture<T> {}
