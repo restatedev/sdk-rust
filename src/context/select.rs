@@ -1,3 +1,7 @@
+// Thanks tokio for the help!
+// https://github.com/tokio-rs/tokio/blob/a258bff7018940b438e5de3fb846588454df4e4d/tokio/src/macros/select.rs
+// MIT License
+
 /// Select macro, alike tokio::select:
 ///
 /// ```rust

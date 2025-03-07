@@ -106,7 +106,10 @@ impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
                 Command::AwaitAnySuccessful { .. } => Err(anyhow!(
                     "AwaitAnySuccessful is currently unsupported in the Rust SDK"
                 ))?,
-                Command::AwaitAwakeableOrTimeout { awakeable_key, timeout_millis } => {
+                Command::AwaitAwakeableOrTimeout {
+                    awakeable_key,
+                    timeout_millis,
+                } => {
                     let (awakeable_id, awk_fut) = context.awakeable::<String>();
                     context.set::<String>(&format!("awk-{awakeable_key}"), awakeable_id);
 
@@ -118,7 +121,7 @@ impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
                             Err(TerminalError::new("await-timeout"))
                         }
                     }?;
-                },
+                }
                 Command::AwaitOne { command } => {
                     last_result = match command {
                         AwaitableCommand::CreateAwakeable { awakeable_key } => {
