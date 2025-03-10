@@ -343,7 +343,9 @@ impl ContextInternal {
         let handle = unwrap_or_trap_durable_future!(
             self,
             inner_lock,
-            inner_lock.vm.sys_sleep(now + sleep_duration, Some(now))
+            inner_lock
+                .vm
+                .sys_sleep(String::default(), now + sleep_duration, Some(now))
         );
         inner_lock.maybe_flip_span_replaying_field();
 
