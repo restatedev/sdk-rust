@@ -12,7 +12,7 @@ impl AwakeableHolder {
         Ok(())
     }
 
-    #[handler(shared, name = "hold")]
+    #[handler(shared, name = "hasAwakeable")]
     async fn has_awakeable(&self, context: SharedObjectContext<'_>) -> HandlerResult<bool> {
         Ok(context.get::<String>(ID).await?.is_some())
     }
