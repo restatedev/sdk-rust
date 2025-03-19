@@ -4,42 +4,25 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-#[restate_sdk::object]
-#[name = "Failing"]
-pub(crate) trait Failing {
-    #[name = "terminallyFailingCall"]
-    async fn terminally_failing_call(error_message: String) -> HandlerResult<()>;
-    #[name = "callTerminallyFailingCall"]
-    async fn call_terminally_failing_call(error_message: String) -> HandlerResult<String>;
-    #[name = "failingCallWithEventualSuccess"]
-    async fn failing_call_with_eventual_success() -> HandlerResult<i32>;
-    #[name = "terminallyFailingSideEffect"]
-    async fn terminally_failing_side_effect(error_message: String) -> HandlerResult<()>;
-    #[name = "sideEffectSucceedsAfterGivenAttempts"]
-    async fn side_effect_succeeds_after_given_attempts(minimum_attempts: i32)
-        -> HandlerResult<i32>;
-    #[name = "sideEffectFailsAfterGivenAttempts"]
-    async fn side_effect_fails_after_given_attempts(
-        retry_policy_max_retry_count: i32,
-    ) -> HandlerResult<i32>;
-}
-
 #[derive(Clone, Default)]
-pub(crate) struct FailingImpl {
+pub(crate) struct Failing {
     eventual_success_calls: Arc<AtomicI32>,
     eventual_success_side_effects: Arc<AtomicI32>,
     eventual_failure_side_effects: Arc<AtomicI32>,
 }
 
-impl Failing for FailingImpl {
+#[restate_sdk::object(vis = "pub(crate)", name = "Failing")]
+impl Failing {
+    #[handler(name = "terminallyFailingCall")]
     async fn terminally_failing_call(
         &self,
-        _: ObjectContext<'_>,
+        _ctx: ObjectContext<'_>,
         error_message: String,
     ) -> HandlerResult<()> {
         Err(TerminalError::new(error_message).into())
     }
 
+    #[handler(name = "callTerminallyFailingCall")]
     async fn call_terminally_failing_call(
         &self,
         mut context: ObjectContext<'_>,
@@ -55,7 +38,8 @@ impl Failing for FailingImpl {
         unreachable!("This should be unreachable")
     }
 
-    async fn failing_call_with_eventual_success(&self, _: ObjectContext<'_>) -> HandlerResult<i32> {
+    #[handler(name = "failingCallWithEventualSuccess")]
+    async fn failing_call_with_eventual_success(&self, _ctx: ObjectContext<'_>) -> HandlerResult<i32> {
         let current_attempt = self.eventual_success_calls.fetch_add(1, Ordering::SeqCst) + 1;
 
         if current_attempt >= 4 {
@@ -66,6 +50,7 @@ impl Failing for FailingImpl {
         }
     }
 
+    #[handler(name = "terminallyFailingSideEffect")]
     async fn terminally_failing_side_effect(
         &self,
         context: ObjectContext<'_>,
@@ -78,6 +63,7 @@ impl Failing for FailingImpl {
         unreachable!("This should be unreachable")
     }
 
+    #[handler(name = "sideEffectSucceedsAfterGivenAttempts")]
     async fn side_effect_succeeds_after_given_attempts(
         &self,
         context: ObjectContext<'_>,
@@ -106,6 +92,7 @@ impl Failing for FailingImpl {
         Ok(success_attempt)
     }
 
+    #[handler(name = "sideEffectFailsAfterGivenAttempts")]
     async fn side_effect_fails_after_given_attempts(
         &self,
         context: ObjectContext<'_>,

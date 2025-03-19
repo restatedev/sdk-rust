@@ -1,15 +1,11 @@
 use restate_sdk::prelude::*;
 
+struct SharedHandlerInService;
+
 #[restate_sdk::service]
-trait SharedHandlerInService {
-    #[shared]
-    async fn my_handler() -> HandlerResult<()>;
-}
-
-struct SharedHandlerInServiceImpl;
-
-impl SharedHandlerInService for SharedHandlerInServiceImpl {
-    async fn my_handler(&self, _: Context<'_>) -> HandlerResult<()> {
+impl SharedHandlerInService {
+    #[handler(shared)]
+    async fn my_handler(&self, _ctx: Context<'_>) -> HandlerResult<()> {
         Ok(())
     }
 }
@@ -19,7 +15,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
     HttpServer::new(
         Endpoint::builder()
-            .with_service(SharedHandlerInServiceImpl.serve())
+            .with_service(SharedHandlerInService.serve())
             .build(),
     )
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())

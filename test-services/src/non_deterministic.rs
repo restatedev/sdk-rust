@@ -5,26 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-#[restate_sdk::object]
-#[name = "NonDeterministic"]
-pub(crate) trait NonDeterministic {
-    #[name = "eitherSleepOrCall"]
-    async fn either_sleep_or_call() -> HandlerResult<()>;
-    #[name = "callDifferentMethod"]
-    async fn call_different_method() -> HandlerResult<()>;
-    #[name = "backgroundInvokeWithDifferentTargets"]
-    async fn background_invoke_with_different_targets() -> HandlerResult<()>;
-    #[name = "setDifferentKey"]
-    async fn set_different_key() -> HandlerResult<()>;
-}
-
 #[derive(Clone, Default)]
-pub(crate) struct NonDeterministicImpl(Arc<Mutex<HashMap<String, i32>>>);
+pub(crate) struct NonDeterministic(Arc<Mutex<HashMap<String, i32>>>);
 
 const STATE_A: &str = "a";
 const STATE_B: &str = "b";
 
-impl NonDeterministic for NonDeterministicImpl {
+#[restate_sdk::object(vis = "pub(crate)", name = "NonDeterministic")]
+impl NonDeterministic {
+    #[handler(name = "eitherSleepOrCall")]
     async fn either_sleep_or_call(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
         if self.do_left_action(&context).await {
             context.sleep(Duration::from_millis(100)).await?;
@@ -38,6 +27,7 @@ impl NonDeterministic for NonDeterministicImpl {
         Self::sleep_then_increment_counter(&context).await
     }
 
+    #[handler(name = "callDifferentMethod")]
     async fn call_different_method(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
         if self.do_left_action(&context).await {
             context
@@ -55,6 +45,7 @@ impl NonDeterministic for NonDeterministicImpl {
         Self::sleep_then_increment_counter(&context).await
     }
 
+    #[handler(name = "backgroundInvokeWithDifferentTargets")]
     async fn background_invoke_with_different_targets(
         &self,
         context: ObjectContext<'_>,
@@ -67,6 +58,7 @@ impl NonDeterministic for NonDeterministicImpl {
         Self::sleep_then_increment_counter(&context).await
     }
 
+    #[handler(name = "setDifferentKey")]
     async fn set_different_key(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
         if self.do_left_action(&context).await {
             context.set(STATE_A, "my-state".to_owned());
@@ -77,7 +69,7 @@ impl NonDeterministic for NonDeterministicImpl {
     }
 }
 
-impl NonDeterministicImpl {
+impl NonDeterministic {
     async fn do_left_action(&self, ctx: &ObjectContext<'_>) -> bool {
         let mut counts = self.0.lock().await;
         *(counts

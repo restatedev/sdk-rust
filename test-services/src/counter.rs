@@ -9,29 +9,18 @@ pub(crate) struct CounterUpdateResponse {
     new_value: u64,
 }
 
-#[restate_sdk::object]
-#[name = "Counter"]
-pub(crate) trait Counter {
-    #[name = "add"]
-    async fn add(val: u64) -> HandlerResult<Json<CounterUpdateResponse>>;
-    #[name = "addThenFail"]
-    async fn add_then_fail(val: u64) -> HandlerResult<()>;
-    #[shared]
-    #[name = "get"]
-    async fn get() -> HandlerResult<u64>;
-    #[name = "reset"]
-    async fn reset() -> HandlerResult<()>;
-}
-
-pub(crate) struct CounterImpl;
+pub(crate) struct Counter;
 
 const COUNT: &str = "counter";
 
-impl Counter for CounterImpl {
+#[restate_sdk::object(vis = "pub(crate)", name = "Counter")]
+impl Counter {
+    #[handler(shared,name = "get")]
     async fn get(&self, ctx: SharedObjectContext<'_>) -> HandlerResult<u64> {
         Ok(ctx.get::<u64>(COUNT).await?.unwrap_or(0))
     }
 
+    #[handler(name = "add")]
     async fn add(
         &self,
         ctx: ObjectContext<'_>,
@@ -50,11 +39,13 @@ impl Counter for CounterImpl {
         .into())
     }
 
+    #[handler(name = "reset")]
     async fn reset(&self, ctx: ObjectContext<'_>) -> HandlerResult<()> {
         ctx.clear(COUNT);
         Ok(())
     }
 
+    #[handler(name = "addThenFail")]
     async fn add_then_fail(&self, ctx: ObjectContext<'_>, val: u64) -> HandlerResult<()> {
         let current = ctx.get::<u64>(COUNT).await?.unwrap_or(0);
         let new = current + val;

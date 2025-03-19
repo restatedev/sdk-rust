@@ -7,40 +7,26 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-#[restate_sdk::service]
-#[name = "TestUtilsService"]
-pub(crate) trait TestUtilsService {
-    #[name = "echo"]
-    async fn echo(input: String) -> HandlerResult<String>;
-    #[name = "uppercaseEcho"]
-    async fn uppercase_echo(input: String) -> HandlerResult<String>;
-    #[name = "rawEcho"]
-    async fn raw_echo(input: Vec<u8>) -> Result<Vec<u8>, Infallible>;
-    #[name = "echoHeaders"]
-    async fn echo_headers() -> HandlerResult<Json<HashMap<String, String>>>;
-    #[name = "sleepConcurrently"]
-    async fn sleep_concurrently(millis_durations: Json<Vec<u64>>) -> HandlerResult<()>;
-    #[name = "countExecutedSideEffects"]
-    async fn count_executed_side_effects(increments: u32) -> HandlerResult<u32>;
-    #[name = "cancelInvocation"]
-    async fn cancel_invocation(invocation_id: String) -> Result<(), TerminalError>;
-}
+pub(crate) struct TestUtilsService;
 
-pub(crate) struct TestUtilsServiceImpl;
-
-impl TestUtilsService for TestUtilsServiceImpl {
-    async fn echo(&self, _: Context<'_>, input: String) -> HandlerResult<String> {
+#[restate_sdk::service(vis = "pub(crate)", name = "TestUtilsService")]
+impl TestUtilsService {
+    #[handler(name = "echo")]
+    async fn echo(&self, _ctx: Context<'_>, input: String) -> HandlerResult<String> {
         Ok(input)
     }
 
-    async fn uppercase_echo(&self, _: Context<'_>, input: String) -> HandlerResult<String> {
+    #[handler(name = "uppercaseEcho")]
+    async fn uppercase_echo(&self, _ctx: Context<'_>, input: String) -> HandlerResult<String> {
         Ok(input.to_ascii_uppercase())
     }
 
-    async fn raw_echo(&self, _: Context<'_>, input: Vec<u8>) -> Result<Vec<u8>, Infallible> {
+    #[handler(name = "rawEcho")]
+    async fn raw_echo(&self, _ctx: Context<'_>, input: Vec<u8>) -> Result<Vec<u8>, Infallible> {
         Ok(input)
     }
 
+    #[handler(name = "echoHeaders")]
     async fn echo_headers(
         &self,
         context: Context<'_>,
@@ -56,6 +42,7 @@ impl TestUtilsService for TestUtilsServiceImpl {
         Ok(headers.into())
     }
 
+    #[handler(name = "sleepConcurrently")]
     async fn sleep_concurrently(
         &self,
         context: Context<'_>,
@@ -74,6 +61,7 @@ impl TestUtilsService for TestUtilsServiceImpl {
         Ok(())
     }
 
+    #[handler(name = "countExecutedSideEffects")]
     async fn count_executed_side_effects(
         &self,
         context: Context<'_>,
@@ -94,6 +82,7 @@ impl TestUtilsService for TestUtilsServiceImpl {
         Ok(counter.load(Ordering::SeqCst) as u32)
     }
 
+    #[handler(name = "cancelInvocation")]
     async fn cancel_invocation(
         &self,
         ctx: Context<'_>,

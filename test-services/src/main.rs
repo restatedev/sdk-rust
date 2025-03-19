@@ -23,64 +23,64 @@ async fn main() {
     let mut builder = Endpoint::builder();
 
     if services == "*" || services.contains("Counter") {
-        builder = builder.bind(counter::Counter::serve(counter::CounterImpl))
+        builder = builder.bind(counter::Counter::serve(counter::Counter))
     }
     if services == "*" || services.contains("Proxy") {
-        builder = builder.bind(proxy::Proxy::serve(proxy::ProxyImpl))
+        builder = builder.bind(proxy::Proxy::serve(proxy::Proxy))
     }
     if services == "*" || services.contains("MapObject") {
-        builder = builder.bind(map_object::MapObject::serve(map_object::MapObjectImpl))
+        builder = builder.bind(map_object::MapObject::serve(map_object::MapObject))
     }
     if services == "*" || services.contains("ListObject") {
-        builder = builder.bind(list_object::ListObject::serve(list_object::ListObjectImpl))
+        builder = builder.bind(list_object::ListObject::serve(list_object::ListObject))
     }
     if services == "*" || services.contains("AwakeableHolder") {
         builder = builder.bind(awakeable_holder::AwakeableHolder::serve(
-            awakeable_holder::AwakeableHolderImpl,
+            awakeable_holder::AwakeableHolder,
         ))
     }
     if services == "*" || services.contains("BlockAndWaitWorkflow") {
         builder = builder.bind(block_and_wait_workflow::BlockAndWaitWorkflow::serve(
-            block_and_wait_workflow::BlockAndWaitWorkflowImpl,
+            block_and_wait_workflow::BlockAndWaitWorkflow,
         ))
     }
     if services == "*" || services.contains("CancelTestRunner") {
         builder = builder.bind(cancel_test::CancelTestRunner::serve(
-            cancel_test::CancelTestRunnerImpl,
+            cancel_test::CancelTestRunner,
         ))
     }
     if services == "*" || services.contains("CancelTestBlockingService") {
         builder = builder.bind(cancel_test::CancelTestBlockingService::serve(
-            cancel_test::CancelTestBlockingServiceImpl,
+            cancel_test::CancelTestBlockingService,
         ))
     }
     if services == "*" || services.contains("Failing") {
-        builder = builder.bind(failing::Failing::serve(failing::FailingImpl::default()))
+        builder = builder.bind(failing::Failing::serve(failing::Failing::default()))
     }
     if services == "*" || services.contains("KillTestRunner") {
         builder = builder.bind(kill_test::KillTestRunner::serve(
-            kill_test::KillTestRunnerImpl,
+            kill_test::KillTestRunner,
         ))
     }
     if services == "*" || services.contains("KillTestSingleton") {
         builder = builder.bind(kill_test::KillTestSingleton::serve(
-            kill_test::KillTestSingletonImpl,
+            kill_test::KillTestSingleton,
         ))
     }
     if services == "*" || services.contains("NonDeterministic") {
         builder = builder.bind(non_deterministic::NonDeterministic::serve(
-            non_deterministic::NonDeterministicImpl::default(),
+            non_deterministic::NonDeterministic::default(),
         ))
     }
     if services == "*" || services.contains("TestUtilsService") {
         builder = builder.bind(test_utils_service::TestUtilsService::serve(
-            test_utils_service::TestUtilsServiceImpl,
+            test_utils_service::TestUtilsService,
         ))
     }
     if services == "*" || services.contains("VirtualObjectCommandInterpreter") {
         builder = builder.bind(
             virtual_object_command_interpreter::VirtualObjectCommandInterpreter::serve(
-                virtual_object_command_interpreter::VirtualObjectCommandInterpreterImpl,
+                virtual_object_command_interpreter::VirtualObjectCommandInterpreter,
             ),
         )
     }

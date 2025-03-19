@@ -4,29 +4,36 @@ use restate_sdk_test_env::TestContainer;
 use tracing::info;
 
 // Should compile
-#[restate_sdk::service]
-trait MyService {
-    async fn my_handler() -> HandlerResult<String>;
+pub(crate) struct MyObject;
+
+#[allow(dead_code)]
+#[restate_sdk::object(vis = "pub(crate)")]
+impl MyObject {
+    #[handler]
+    async fn my_handler(&self, _ctx: ObjectContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+
+    #[handler(shared)]
+    async fn my_shared_handler(&self, _ctx: SharedObjectContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
 }
 
-#[restate_sdk::object]
-trait MyObject {
-    async fn my_handler(input: String) -> HandlerResult<String>;
-    #[shared]
-    async fn my_shared_handler(input: String) -> HandlerResult<String>;
+pub(crate) struct MyWorkflow;
+
+#[allow(dead_code)]
+#[restate_sdk::workflow(vis = "pub(crate)")]
+impl MyWorkflow {
+    #[handler]
+    async fn my_handler(&self, _ctx: WorkflowContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+
+    #[handler(shared)]
+    async fn my_shared_handler(&self, _ctx: SharedWorkflowContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
 }
 
-#[restate_sdk::workflow]
-trait MyWorkflow {
-    async fn my_handler(input: String) -> HandlerResult<String>;
-    #[shared]
-    async fn my_shared_handler(input: String) -> HandlerResult<String>;
-}
+pub(crate) struct MyService;
 
-struct MyServiceImpl;
-
-impl MyService for MyServiceImpl {
-    async fn my_handler(&self, _: Context<'_>) -> HandlerResult<String> {
+#[restate_sdk::service(vis = "pub(crate)")]
+impl MyService {
+    #[handler]
+    async fn my_handler(&self, _ctx: Context<'_>) -> HandlerResult<String> {
         let result = "hello!";
         Ok(result.to_string())
     }
@@ -38,7 +45,7 @@ async fn test_container() {
         .with_max_level(tracing::Level::INFO) // Set the maximum log level
         .init();
 
-    let endpoint = Endpoint::builder().bind(MyServiceImpl.serve()).build();
+    let endpoint = Endpoint::builder().bind(MyService.serve()).build();
 
     // simple test container intialization with default configuration
     //let test_container = TestContainer::default().start(endpoint).await.unwrap();
