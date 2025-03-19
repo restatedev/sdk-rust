@@ -372,7 +372,7 @@ pub use restate_sdk_macros::object;
 /// **Note: Workflow retention time**:
 /// The retention time of a workflow execution is 24 hours after the finishing of the `run` handler.
 /// After this timeout any [K/V state][crate::context::ContextReadState] is cleared, the workflow's shared handlers cannot be called anymore, and the Durable Promises are discarded.
-/// The retention time can be configured via the [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
+/// The retention time can be configured via the UI or [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
 ///
 /// ## Implementing workflows
 /// Have a look at the code example to get a better understanding of how workflows are implemented:
@@ -495,10 +495,9 @@ pub use restate_sdk_macros::object;
 ///
 /// ## Inspecting workflows
 ///
-/// Have a look at the [introspection docs](https://docs.restate.dev/operate/introspection) on how to inspect workflows.
-/// You can use this to for example:
-/// - [Inspect the progress of a workflow by looking at the invocation journal](https://docs.restate.dev/operate/introspection#inspecting-the-invocation-journal)
-/// - [Inspect the K/V state of a workflow](https://docs.restate.dev/operate/introspection#inspecting-application-state)
+/// You can inspect your workflows via the [UI](/develop/local_dev#restate-ui) or CLI:
+/// - Inspect the progress of a workflow by looking at the invocation journal in the `Invocations` tab of the [UI](/develop/local_dev#restate-ui) or via the [CLI](/operate/introspection#inspecting-the-invocation-journal)
+/// - Inspect the K/V state of a workflow in the `State` tab of the [UI](/develop/local_dev#restate-ui) or via the [CLI](/operate/introspection#inspecting-application-state)
 ///
 ///
 /// For more details, check the [`service` macro](macro@crate::service) documentation.
