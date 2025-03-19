@@ -372,7 +372,7 @@ pub use restate_sdk_macros::object;
 /// **Note: Workflow retention time**:
 /// The retention time of a workflow execution is 24 hours after the finishing of the `run` handler.
 /// After this timeout any [K/V state][crate::context::ContextReadState] is cleared, the workflow's shared handlers cannot be called anymore, and the Durable Promises are discarded.
-/// The retention time can be configured via the UI or [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
+/// The retention time can be configured via the [UI](https://docs.restate.dev/develop/local_dev#restate-ui) or [Admin API](https://docs.restate.dev/references/admin-api/#tag/service/operation/modify_service) per Workflow definition by setting `workflow_completion_retention`.
 ///
 /// ## Implementing workflows
 /// Have a look at the code example to get a better understanding of how workflows are implemented:
