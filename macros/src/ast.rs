@@ -118,10 +118,6 @@ impl Parse for ValidArgs {
     }
 }
 
-// TODO: allow the user to have unused context like _:Context in the handler
-
-// TODO: what should happen if having that thing on multiple blocks?
-
 pub(crate) struct ServiceInner {
     pub(crate) attrs: Vec<Attribute>,
     pub(crate) restate_name: String,
@@ -329,6 +325,7 @@ fn validate_handler_arguments(
         (ServiceType::Workflow, false) => parse_quote! { WorkflowContext },
     };
 
+    // TODO: allow the user to have unused context like _:Context in the handler
     match args_iter.next() {
         Some(arg @ FnArg::Typed(typed_arg)) if matches!(&*typed_arg.pat, Pat::Ident(_)) => {
             if let Type::Path(type_path) = &*typed_arg.ty {
