@@ -2,7 +2,7 @@ use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
 use quote::{format_ident, quote, ToTokens};
-use syn::{Attribute, PatType, Visibility};
+use syn::{Attribute, PatType, ItemImpl, Visibility};
 
 pub(crate) struct ServiceGenerator<'a> {
     pub(crate) service_ty: ServiceType,
@@ -10,8 +10,9 @@ pub(crate) struct ServiceGenerator<'a> {
     pub(crate) service_ident: &'a Ident,
     pub(crate) client_ident: Ident,
     pub(crate) serve_ident: Ident,
-    pub(crate) vis: &'a Visibility,
     pub(crate) attrs: &'a [Attribute],
+    pub(crate) vis: &'a Visibility,
+    pub(crate) impl_block: &'a ItemImpl,
     pub(crate) handlers: &'a [Handler],
 }
 
@@ -23,8 +24,9 @@ impl<'a> ServiceGenerator<'a> {
             service_ident: &s.ident,
             client_ident: format_ident!("{}Client", s.ident),
             serve_ident: format_ident!("Serve{}", s.ident),
-            vis: &s.vis,
             attrs: &s.attrs,
+            vis: &s.vis,
+            impl_block: &s.impl_block,
             handlers: &s.handlers,
         }
     }
@@ -44,42 +46,20 @@ impl<'a> ServiceGenerator<'a> {
     fn trait_service(&self) -> TokenStream2 {
         let Self {
             attrs,
-            handlers,
-            vis,
-            service_ident,
-            service_ty,
             serve_ident,
+            service_ident,
+            impl_block,
+            vis,
             ..
         } = self;
 
-        let handler_fns = handlers
-            .iter()
-            .map(
-                |Handler { attrs, ident, arg, is_shared, output_ok, output_err, .. }| {
-                    let args = arg.iter();
-
-                    let ctx = match (&service_ty, is_shared) {
-                        (ServiceType::Service, _) => quote! { ::restate_sdk::prelude::Context },
-                        (ServiceType::Object, true) => quote! { ::restate_sdk::prelude::SharedObjectContext },
-                        (ServiceType::Object, false) => quote! { ::restate_sdk::prelude::ObjectContext },
-                        (ServiceType::Workflow, true) => quote! { ::restate_sdk::prelude::SharedWorkflowContext },
-                        (ServiceType::Workflow, false) => quote! { ::restate_sdk::prelude::WorkflowContext },
-                    };
-
-                    quote! {
-                        #( #attrs )*
-                        fn #ident(&self, context: #ctx, #( #args ),*) -> impl std::future::Future<Output=Result<#output_ok, #output_err>> + ::core::marker::Send;
-                    }
-                },
-            );
-
         quote! {
-            #( #attrs )*
-            #vis trait #service_ident: ::core::marker::Sized {
-                #( #handler_fns )*
+            #impl_block
 
+            #( #attrs )*
+            impl #service_ident {
                 /// Returns a serving function to use with [::restate_sdk::endpoint::Builder::with_service].
-                fn serve(self) -> #serve_ident<Self> {
+                #vis fn serve(self) -> #serve_ident<Self> {
                     #serve_ident { service: ::std::sync::Arc::new(self) }
                 }
             }
@@ -88,8 +68,8 @@ impl<'a> ServiceGenerator<'a> {
 
     fn struct_serve(&self) -> TokenStream2 {
         let &Self {
-            vis,
             ref serve_ident,
+            vis,
             ..
         } = self;
 
@@ -116,12 +96,12 @@ impl<'a> ServiceGenerator<'a> {
             let get_input_and_call = if handler.arg.is_some() {
                 quote! {
                     let (input, metadata) = ctx.input().await;
-                    let fut = S::#handler_ident(&service_clone, (&ctx, metadata).into(), input);
+                    let fut = #service_ident::#handler_ident(&service_clone, (&ctx, metadata).into(), input);
                 }
             } else {
                 quote! {
                     let (_, metadata) = ctx.input::<()>().await;
-                    let fut = S::#handler_ident(&service_clone, (&ctx, metadata).into());
+                    let fut = #service_ident::#handler_ident(&service_clone, (&ctx, metadata).into());
                 }
             };
 
@@ -139,8 +119,7 @@ impl<'a> ServiceGenerator<'a> {
         });
 
         quote! {
-            impl<S> ::restate_sdk::service::Service for #serve_ident<S>
-                where S: #service_ident + Send + Sync + 'static,
+            impl ::restate_sdk::service::Service for #serve_ident<#service_ident>
             {
                 type Future = ::restate_sdk::service::ServiceBoxFuture;
 
@@ -205,8 +184,7 @@ impl<'a> ServiceGenerator<'a> {
         });
 
         quote! {
-            impl<S> ::restate_sdk::service::Discoverable for #serve_ident<S>
-                where S: #service_ident,
+            impl::restate_sdk::service::Discoverable for #serve_ident<#service_ident>
             {
                 fn discover() -> ::restate_sdk::discovery::Service {
                     ::restate_sdk::discovery::Service {
