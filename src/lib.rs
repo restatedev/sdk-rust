@@ -46,26 +46,20 @@
 //! // The prelude contains all the imports you need to get started
 //! use restate_sdk::prelude::*;
 //!
-//! // Define the service using Rust traits
+//! struct MyService;
+//!
 //! #[restate_sdk::service]
-//! trait MyService {
-//!     async fn my_handler(greeting: String) -> Result<String, HandlerError>;
-//! }
-//!
-//! // Implement the service
-//! struct MyServiceImpl;
-//! impl MyService for MyServiceImpl {
-//!
+//! impl MyService {
+//!     #[handler]
 //!     async fn my_handler(&self, ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
 //!         Ok(format!("{greeting}!"))
 //!     }
-//!
 //! }
 //!
 //! // Start the HTTP server to expose services
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyServiceImpl.serve()).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyService.serve()).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
@@ -88,17 +82,12 @@
 //! ```rust,no_run
 //!use restate_sdk::prelude::*;
 //!
+//! pub struct MyVirtualObject;
+//!
 //! #[restate_sdk::object]
-//! pub trait MyVirtualObject {
-//!     async fn my_handler(name: String) -> Result<String, HandlerError>;
-//!     #[shared]
-//!     async fn my_concurrent_handler(name: String) -> Result<String, HandlerError>;
-//! }
+//! impl MyVirtualObject {
 //!
-//! pub struct MyVirtualObjectImpl;
-//!
-//! impl MyVirtualObject for MyVirtualObjectImpl {
-//!
+//!     #[handler]
 //!     async fn my_handler(
 //!         &self,
 //!         ctx: ObjectContext<'_>,
@@ -107,6 +96,7 @@
 //!         Ok(format!("{} {}", greeting, ctx.key()))
 //!     }
 //!
+//!     #[handler(shared)]
 //!     async fn my_concurrent_handler(
 //!         &self,
 //!         ctx: SharedObjectContext<'_>,
@@ -121,7 +111,7 @@
 //! async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(MyVirtualObjectImpl.serve())
+//!             .bind(MyVirtualObject.serve())
 //!             .build(),
 //!     )
 //!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
@@ -143,23 +133,19 @@
 //! ```rust,no_run
 //! use restate_sdk::prelude::*;
 //!
-//! #[restate_sdk::workflow]
-//! pub trait MyWorkflow {
-//!     async fn run(req: String) -> Result<String, HandlerError>;
-//!     #[shared]
-//!     async fn interact_with_workflow() -> Result<(), HandlerError>;
-//! }
+//! pub struct MyWorkflow;
 //!
-//! pub struct MyWorkflowImpl;
+//! #[restate_sdk::workflow(vis = "pub")]
+//! impl MyWorkflow {
 //!
-//! impl MyWorkflow for MyWorkflowImpl {
-//!
+//!     #[handler]
 //!     async fn run(&self, ctx: WorkflowContext<'_>, req: String) -> Result<String, HandlerError> {
 //!         //! implement workflow logic here
 //!
 //!         Ok(String::from("success"))
 //!     }
 //!
+//!     #[handler(shared)]
 //!     async fn interact_with_workflow(&self, ctx: SharedWorkflowContext<'_>) -> Result<(), HandlerError> {
 //!         //! implement interaction logic here
 //!         //! e.g. resolve a promise that the workflow is waiting on
@@ -171,7 +157,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyWorkflowImpl.serve()).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyWorkflow.serve()).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
@@ -233,9 +219,14 @@ pub mod serde;
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
+/// struct Greeter;
+///
 /// #[restate_sdk::service]
-/// trait Greeter {
-///     async fn greet(name: String) -> Result<String, HandlerError>;
+/// impl Greeter {
+/// #   #[handler]
+/// #   async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+/// #       unimplemented!()
+/// #   }
 /// }
 /// ```
 ///
@@ -245,13 +236,13 @@ pub mod serde;
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
-/// # #[restate_sdk::service]
-/// # trait Greeter {
-/// #    async fn greet(name: String) -> Result<String, HandlerError>;
-/// # }
-/// struct GreeterImpl;
-/// impl Greeter for GreeterImpl {
-///     async fn greet(&self, _: Context<'_>, name: String) -> Result<String, HandlerError> {
+///
+/// struct Greeter;
+///
+/// #[restate_sdk::service]
+/// impl Greeter {
+///     #[handler]
+///     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
 ///         Ok(format!("Greetings {name}"))
 ///     }
 /// }
@@ -263,20 +254,20 @@ pub mod serde;
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
+/// #
+/// # struct Greeter;
+/// #
 /// # #[restate_sdk::service]
-/// # trait Greeter {
-/// #    async fn greet(name: String) -> HandlerResult<String>;
-/// # }
-/// # struct GreeterImpl;
-/// # impl Greeter for GreeterImpl {
-/// #    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
-/// #        Ok(format!("Greetings {name}"))
-/// #    }
+/// # impl Greeter {
+/// #     #[handler]
+/// #     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+/// #         Ok(format!("Greetings {name}"))
+/// #     }
 /// # }
 /// let endpoint = Endpoint::builder()
 ///     // .serve() returns the implementation of Service used by the SDK
 ///     //  to bind your struct to the endpoint
-///     .bind(GreeterImpl.serve())
+///     .bind(Greeter.serve())
 ///     .build();
 /// ```
 ///
@@ -284,9 +275,15 @@ pub mod serde;
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
+/// #
+/// # struct Greeter;
+/// #
 /// # #[restate_sdk::service]
-/// # trait Greeter {
-/// #    async fn greet(name: String) -> HandlerResult<String>;
+/// # impl Greeter {
+/// #     #[handler]
+/// #     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+/// #         Ok(format!("Greetings {name}"))
+/// #     }
 /// # }
 /// # async fn example(ctx: Context<'_>) -> Result<(), TerminalError> {
 /// let result = ctx
@@ -305,10 +302,15 @@ pub mod serde;
 ///
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
-///
+/// 
+/// struct Greeter;
+/// 
 /// #[restate_sdk::service]
-/// trait Greeter {
-///     async fn my_greet(name: String) -> Result<String, HandlerError>;
+/// impl Greeter {
+///     #[handler]
+///     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+///         Ok(format!("Greetings {name}"))
+///     }
 /// }
 /// ```
 ///
@@ -318,12 +320,15 @@ pub mod serde;
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
-/// #[restate_sdk::service]
-/// #[name = "greeter"]
-/// trait Greeter {
-///     // You can invoke this handler with `http://<RESTATE_ENDPOINT>/greeter/myGreet`
-///     #[name = "myGreet"]
-///     async fn my_greet(name: String) -> Result<String, HandlerError>;
+/// 
+/// struct Greeter;
+/// 
+/// #[restate_sdk::service(name = "greeter")]
+/// impl Greeter {
+///     #[handler(name = "myGreet")]
+///     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+///         Ok(format!("Greetings {name}"))
+///     }
 /// }
 /// ```
 pub use restate_sdk_macros::service;
@@ -339,11 +344,18 @@ pub use restate_sdk_macros::service;
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
-/// #[restate_sdk::object]
-/// trait Counter {
-///     async fn add(val: u64) -> Result<u64, TerminalError>;
-///     #[shared]
-///     async fn get() -> Result<u64, TerminalError>;
+/// pub struct Counter;
+///
+/// #[restate_sdk::object(vis = "pub")]
+/// impl Counter {
+///     #[handler]
+///     async fn add(&self, _ctx: ObjectContext<'_>, val: u64) -> Result<u64, TerminalError> {
+///         unimplemented!()
+///     }
+///     #[handler(shared)]
+///     async fn get(&self, _ctx: SharedObjectContext<'_>,) -> Result<u64, TerminalError> {
+///         unimplemented!()
+///     }
 /// }
 /// ```
 pub use restate_sdk_macros::object;
@@ -380,19 +392,12 @@ pub use restate_sdk_macros::object;
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
+/// pub struct SignupWorkflow;
+///
 /// #[restate_sdk::workflow]
-/// pub trait SignupWorkflow {
-///     async fn run(req: String) -> Result<bool, HandlerError>;
-///     #[shared]
-///     async fn click(click_secret: String) -> Result<(), HandlerError>;
-///     #[shared]
-///     async fn get_status() -> Result<String, HandlerError>;
-/// }
+/// impl SignupWorkflow {
 ///
-/// pub struct SignupWorkflowImpl;
-///
-/// impl SignupWorkflow for SignupWorkflowImpl {
-///
+///     #[handler]
 ///     async fn run(&self, mut ctx: WorkflowContext<'_>, email: String) -> Result<bool, HandlerError> {
 ///         let secret = ctx.rand_uuid().to_string();
 ///         ctx.run(|| send_email_with_link(email.clone(), secret.clone())).await?;
@@ -404,11 +409,13 @@ pub use restate_sdk_macros::object;
 ///         Ok(click_secret == secret)
 ///     }
 ///
+///     #[handler(shared)]
 ///     async fn click(&self, ctx: SharedWorkflowContext<'_>, click_secret: String) -> Result<(), HandlerError> {
 ///         ctx.resolve_promise::<String>("email.clicked", click_secret);
 ///         Ok(())
 ///     }
 ///
+///     #[handler(shared)]
 ///     async fn get_status(&self, ctx: SharedWorkflowContext<'_>) -> Result<String, HandlerError> {
 ///         Ok(ctx.get("status").await?.unwrap_or("unknown".to_string()))
 ///     }
@@ -420,7 +427,7 @@ pub use restate_sdk_macros::object;
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     HttpServer::new(Endpoint::builder().bind(SignupWorkflowImpl.serve()).build())
+///     HttpServer::new(Endpoint::builder().bind(SignupWorkflow.serve()).build())
 ///         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 ///         .await;
 /// }

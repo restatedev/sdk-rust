@@ -9,9 +9,9 @@
 //! ```rust,no_run
 //! # #[path = "../examples/services/mod.rs"]
 //! # mod services;
-//! # use services::my_service::{MyService, MyServiceImpl};
-//! # use services::my_virtual_object::{MyVirtualObject, MyVirtualObjectImpl};
-//! # use services::my_workflow::{MyWorkflow, MyWorkflowImpl};
+//! # use services::my_service::MyService;
+//! # use services::my_virtual_object::MyVirtualObject;
+//! # use services::my_workflow::MyWorkflow;
 //! use restate_sdk::endpoint::Endpoint;
 //! use restate_sdk::http_server::HttpServer;
 //!
@@ -19,9 +19,9 @@
 //! async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(MyServiceImpl.serve())
-//!             .bind(MyVirtualObjectImpl.serve())
-//!             .bind(MyWorkflowImpl.serve())
+//!             .bind(MyService.serve())
+//!             .bind(MyVirtualObject.serve())
+//!             .bind(MyWorkflow.serve())
 //!             .build(),
 //!     )
 //!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
@@ -39,7 +39,7 @@
 //! ```rust,no_run
 //! # #[path = "../examples/services/mod.rs"]
 //! # mod services;
-//! # use services::my_service::{MyService, MyServiceImpl};
+//! # use services::my_service::MyService;
 //! # use restate_sdk::endpoint::Endpoint;
 //! # use restate_sdk::http_server::HttpServer;
 //! #
@@ -47,7 +47,7 @@
 //! # async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(MyServiceImpl.serve())
+//!             .bind(MyService.serve())
 //!             .identity_key("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
 //!             .unwrap()
 //!             .build(),

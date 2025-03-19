@@ -450,10 +450,15 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// ```rust,no_run
     /// # use std::time::Duration;
     /// # use restate_sdk::prelude::*;
+    /// 
+    /// struct MyService;
     ///
     /// #[restate_sdk::service]
-    /// trait MyService {
-    ///   async fn handle() -> HandlerResult<()>;
+    /// impl MyService {
+    ///   #[handler]
+    ///   async fn handle(&self, _ctx: Context<'_>,) -> HandlerResult<()> {
+    ///     Ok(())
+    ///   }
     /// }
     ///
     /// # async fn handler(ctx: Context<'_>) {
@@ -482,9 +487,14 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// # use std::time::Duration;
     /// # use restate_sdk::prelude::*;
     ///
+    /// struct MyObject;
+    ///
     /// #[restate_sdk::object]
-    /// trait MyObject {
-    ///   async fn handle() -> HandlerResult<()>;
+    /// impl MyObject {
+    ///   #[handler]
+    ///   async fn handle(&self, _ctx: ObjectContext<'_>,) -> HandlerResult<()> {
+    ///     Ok(())
+    ///   }
     /// }
     ///
     /// # async fn handler(ctx: Context<'_>) {
@@ -512,10 +522,15 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// ```rust,no_run
     /// # use std::time::Duration;
     /// # use restate_sdk::prelude::*;
+    /// 
+    /// struct MyWorkflow;
     ///
     /// #[restate_sdk::workflow]
-    /// trait MyWorkflow {
-    ///   async fn handle() -> HandlerResult<()>;
+    /// impl MyWorkflow {
+    ///   #[handler]
+    ///   async fn handle(&self, _ctx: WorkflowContext<'_>,) -> HandlerResult<()> {
+    ///     Ok(())
+    ///   }
     /// }
     ///
     /// # async fn handler(ctx: Context<'_>) {
