@@ -2,7 +2,7 @@ use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
 use quote::{format_ident, quote, ToTokens};
-use syn::{Attribute, PatType, ItemImpl, Visibility};
+use syn::{Attribute, ItemImpl, PatType, Visibility};
 
 pub(crate) struct ServiceGenerator<'a> {
     pub(crate) service_ty: ServiceType,

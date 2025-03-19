@@ -58,9 +58,7 @@ async fn main() {
         builder = builder.bind(failing::Failing::serve(failing::Failing::default()))
     }
     if services == "*" || services.contains("KillTestRunner") {
-        builder = builder.bind(kill_test::KillTestRunner::serve(
-            kill_test::KillTestRunner,
-        ))
+        builder = builder.bind(kill_test::KillTestRunner::serve(kill_test::KillTestRunner))
     }
     if services == "*" || services.contains("KillTestSingleton") {
         builder = builder.bind(kill_test::KillTestSingleton::serve(

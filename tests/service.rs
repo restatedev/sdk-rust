@@ -8,26 +8,39 @@ pub(crate) struct MyService;
 #[restate_sdk::service(vis = "pub(crate)")]
 impl MyService {
     #[handler]
-    async fn my_handler(&self, _ctx: Context<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_handler(&self, _ctx: Context<'_>, _input: String) -> HandlerResult<String> {
+        unimplemented!()
+    }
 
     #[handler]
-    async fn no_input(&self, _ctx: Context<'_>,) -> HandlerResult<String> { unimplemented!() }
+    async fn no_input(&self, _ctx: Context<'_>) -> HandlerResult<String> {
+        unimplemented!()
+    }
 
     #[handler]
-    async fn no_output(&self, _ctx: Context<'_>,) -> HandlerResult<()> { unimplemented!() }
+    async fn no_output(&self, _ctx: Context<'_>) -> HandlerResult<()> {
+        unimplemented!()
+    }
 
     #[handler]
-    async fn no_input_no_output(&self, _ctx: Context<'_>,) -> HandlerResult<()> { unimplemented!() }
+    async fn no_input_no_output(&self, _ctx: Context<'_>) -> HandlerResult<()> {
+        unimplemented!()
+    }
 
     #[handler]
-    async fn std_result(&self, _ctx: Context<'_>,) -> Result<(), std::io::Error> { unimplemented!() }
+    async fn std_result(&self, _ctx: Context<'_>) -> Result<(), std::io::Error> {
+        unimplemented!()
+    }
 
     #[handler]
-    async fn std_result_with_terminal_error(&self, _ctx: Context<'_>,) -> Result<(), TerminalError> { unimplemented!() }
+    async fn std_result_with_terminal_error(&self, _ctx: Context<'_>) -> Result<(), TerminalError> {
+        unimplemented!()
+    }
 
     #[handler]
-    async fn std_result_with_handler_error(&self, _ctx: Context<'_>,) -> Result<(), HandlerError> { unimplemented!() }
-
+    async fn std_result_with_handler_error(&self, _ctx: Context<'_>) -> Result<(), HandlerError> {
+        unimplemented!()
+    }
 }
 
 pub(crate) struct MyObject;
@@ -36,10 +49,18 @@ pub(crate) struct MyObject;
 #[restate_sdk::object(vis = "pub(crate)")]
 impl MyObject {
     #[handler]
-    async fn my_handler(&self, _ctx: ObjectContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_handler(&self, _ctx: ObjectContext<'_>, _input: String) -> HandlerResult<String> {
+        unimplemented!()
+    }
 
     #[handler(shared)]
-    async fn my_shared_handler(&self, _ctx: SharedObjectContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_shared_handler(
+        &self,
+        _ctx: SharedObjectContext<'_>,
+        _input: String,
+    ) -> HandlerResult<String> {
+        unimplemented!()
+    }
 }
 
 pub(crate) struct MyWorkflow;
@@ -48,10 +69,18 @@ pub(crate) struct MyWorkflow;
 #[restate_sdk::workflow(vis = "pub(crate)")]
 impl MyWorkflow {
     #[handler]
-    async fn my_handler(&self, _ctx: WorkflowContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_handler(&self, _ctx: WorkflowContext<'_>, _input: String) -> HandlerResult<String> {
+        unimplemented!()
+    }
 
     #[handler(shared)]
-    async fn my_shared_handler(&self, _ctx: SharedWorkflowContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_shared_handler(
+        &self,
+        _ctx: SharedWorkflowContext<'_>,
+        _input: String,
+    ) -> HandlerResult<String> {
+        unimplemented!()
+    }
 }
 
 pub(crate) struct MyRenamedService;

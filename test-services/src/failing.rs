@@ -39,7 +39,10 @@ impl Failing {
     }
 
     #[handler(name = "failingCallWithEventualSuccess")]
-    async fn failing_call_with_eventual_success(&self, _ctx: ObjectContext<'_>) -> HandlerResult<i32> {
+    async fn failing_call_with_eventual_success(
+        &self,
+        _ctx: ObjectContext<'_>,
+    ) -> HandlerResult<i32> {
         let current_attempt = self.eventual_success_calls.fetch_add(1, Ordering::SeqCst) + 1;
 
         if current_attempt >= 4 {

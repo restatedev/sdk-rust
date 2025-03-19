@@ -450,7 +450,7 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// ```rust,no_run
     /// # use std::time::Duration;
     /// # use restate_sdk::prelude::*;
-    /// 
+    ///
     /// struct MyService;
     ///
     /// #[restate_sdk::service]
@@ -522,7 +522,7 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     /// ```rust,no_run
     /// # use std::time::Duration;
     /// # use restate_sdk::prelude::*;
-    /// 
+    ///
     /// struct MyWorkflow;
     ///
     /// #[restate_sdk::workflow]

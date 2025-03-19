@@ -10,10 +10,18 @@ pub(crate) struct MyObject;
 #[restate_sdk::object(vis = "pub(crate)")]
 impl MyObject {
     #[handler]
-    async fn my_handler(&self, _ctx: ObjectContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_handler(&self, _ctx: ObjectContext<'_>, _input: String) -> HandlerResult<String> {
+        unimplemented!()
+    }
 
     #[handler(shared)]
-    async fn my_shared_handler(&self, _ctx: SharedObjectContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_shared_handler(
+        &self,
+        _ctx: SharedObjectContext<'_>,
+        _input: String,
+    ) -> HandlerResult<String> {
+        unimplemented!()
+    }
 }
 
 pub(crate) struct MyWorkflow;
@@ -22,10 +30,18 @@ pub(crate) struct MyWorkflow;
 #[restate_sdk::workflow(vis = "pub(crate)")]
 impl MyWorkflow {
     #[handler]
-    async fn my_handler(&self, _ctx: WorkflowContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_handler(&self, _ctx: WorkflowContext<'_>, _input: String) -> HandlerResult<String> {
+        unimplemented!()
+    }
 
     #[handler(shared)]
-    async fn my_shared_handler(&self, _ctx: SharedWorkflowContext<'_>, _input: String) -> HandlerResult<String> { unimplemented!() }
+    async fn my_shared_handler(
+        &self,
+        _ctx: SharedWorkflowContext<'_>,
+        _input: String,
+    ) -> HandlerResult<String> {
+        unimplemented!()
+    }
 }
 
 pub(crate) struct MyService;

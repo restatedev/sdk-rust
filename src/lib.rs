@@ -68,13 +68,13 @@
 //! - Create a Concreate type (e.g. a struct) that you want to be a service
 //! - Specify that you want to create a service by using the [`#[restate_sdk::service]` macro](restate_sdk_macros::service).
 //!     - This macro has other attributes like `vis = "pub"` and `name = "my_service"` to control the
-//!     visibility of the generated `Serve` and `Client` code and to override the service name
-//!     respectively.
+//!       visibility of the generated `Serve` and `Client` code and to override the service name
+//!       respectively.
 //! - Mark struct methods as handlers, you should use `#[handler]` macro which also has the
-//! `name = "my_handler"` attribute to override the handler name.
+//!   `name = "my_handler"` attribute to override the handler name.
 //!     - Handlers are `async` methods
 //!     - The first parameter of a handler after `&self` is always a [`Context`](crate::context::Context) to interact with Restate.
-//!     The SDK stores the actions you do on the context in the Restate journal to make them durable. Then it can accept zero or one parameter and return a [`Result`].
+//!       The SDK stores the actions you do on the context in the Restate journal to make them durable. Then it can accept zero or one parameter and return a [`Result`].
 //!     - The type of the input parameter of the handler needs to implement [`Serialize`](crate::serde::Deserialize) and [`Deserialize`](crate::serde::Deserialize). See [`crate::serde`].
 //!     - The Result contains the return value or a [`HandlerError`][crate::errors::HandlerError], which can be a [`TerminalError`](crate::errors::TerminalError) or any other Rust's [`std::error::Error`].
 //!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/myHandler`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
@@ -124,9 +124,9 @@
 //! ```
 //!
 //! - Specify that you want to create a Virtual Object by using the [`#[restate_sdk::object]` macro](restate_sdk_macros::object).
-//! You can use also the `vis` and the `name` attributes as with the [`#[restate_sdk::service]` macro](restate_sdk_macros::service).
+//!   You can use also the `vis` and the `name` attributes as with the [`#[restate_sdk::service]` macro](restate_sdk_macros::service).
 //! - Object Handlers has additional attribute beside the `name`, it's the `shared` attribute.<br> An
-//! example would be `#[handler(shared, name = "my_handler")]`
+//!   example would be `#[handler(shared, name = "my_handler")]`
 //! - The first argument of each handler after `&self`, must be the [`ObjectContext`](crate::context::ObjectContext) parameter. Handlers with the `ObjectContext` parameter can write to the K/V state store. Only one handler can be active at a time per object, to ensure consistency.
 //! - You can retrieve the key of the object you are in via [`ObjectContext.key`].
 //! - If you want to have a handler that executes concurrently to the others and doesn't have write access to the K/V state, use the `shared` attribute like `#[handler(shared)]`.
@@ -171,7 +171,7 @@
 //! ```
 //!
 //! - Specify that you want to create a Workflow by using the [`#[restate_sdk::workflow]` macro](workflow).<br>
-//! It also supports the `name` and the `vis` attributes
+//!   It also supports the `name` and the `vis` attributes
 //! - Workflow Handlers supports the `name` and the `shared` attributes.
 //! - The workflow needs to have a `run` handler.
 //! - The first argument of the `run` handler after the `&self`, must be the

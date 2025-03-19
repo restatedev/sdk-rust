@@ -143,7 +143,7 @@ impl ServiceInner {
         let ident = match impl_block.self_ty.as_ref() {
             Type::Path(path) => path.path.segments[0].ident.clone(),
             bad_path => {
-                return Err(Error::new(bad_path.span(), format!("Only on impl blocks")));
+                return Err(Error::new(bad_path.span(), "Only on impl blocks"));
             }
         };
 
@@ -217,10 +217,7 @@ impl ServiceInner {
                     }
                 }
                 bad_impl_item => {
-                    return Err(Error::new(
-                        bad_impl_item.span(),
-                        format!("Only on consts and fns"),
-                    ));
+                    return Err(Error::new(bad_impl_item.span(), "Only on consts and fns"));
                 }
             }
         }
@@ -374,19 +371,13 @@ fn validate_handler_arguments(
     };
 
     match args_iter.next() {
-        Some(FnArg::Typed(type_arg)) => {
-            return Ok(Some(type_arg.clone()));
-        }
-        Some(FnArg::Receiver(arg)) => {
-            return Err(Error::new(
-                arg.span(),
-                "Invalid handler arguments. It should be like (`self`, `ctx`, arg)",
-            ));
-        }
-        None => {
-            return Ok(None);
-        }
-    };
+        Some(FnArg::Typed(type_arg)) => Ok(Some(type_arg.clone())),
+        Some(FnArg::Receiver(arg)) => Err(Error::new(
+            arg.span(),
+            "Invalid handler arguments. It should be like (`self`, `ctx`, arg)",
+        )),
+        None => Ok(None),
+    }
 }
 
 fn extract_handler_result_parameter(ty: &Type) -> Option<(Type, Type)> {
