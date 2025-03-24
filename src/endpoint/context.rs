@@ -16,7 +16,7 @@ use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
     CoreVM, DoProgressResponse, Error as CoreError, NonEmptyValue, NotificationHandle, RetryPolicy,
-    RunExitResult, TakeOutputResult, Target, Value, VM,
+    RunExitResult, TakeOutputResult, Target, TerminalFailure, Value, VM,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -858,6 +858,19 @@ where
                                 start_time: Instant::now(),
                                 closure_fut: closure.run(),
                             });
+                        }
+                        Ok(DoProgressResponse::CancelSignalReceived) => {
+                            drop(inner_ctx);
+                            // Got cancellation!
+                            this.state.set(RunState::WaitingResultFut {
+                                result_fut: async {
+                                    Ok(Err(TerminalError::from(TerminalFailure {
+                                        code: 409,
+                                        message: "cancelled".to_string(),
+                                    })))
+                                }
+                                .boxed(),
+                            })
                         }
                         _ => {
                             drop(inner_ctx);
