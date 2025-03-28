@@ -41,20 +41,11 @@ pub(crate) struct ManyCallRequest {
     await_at_the_end: bool,
 }
 
-#[restate_sdk::service]
-#[name = "Proxy"]
-pub(crate) trait Proxy {
-    #[name = "call"]
-    async fn call(req: Json<ProxyRequest>) -> HandlerResult<Json<Vec<u8>>>;
-    #[name = "oneWayCall"]
-    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<String>;
-    #[name = "manyCalls"]
-    async fn many_calls(req: Json<Vec<ManyCallRequest>>) -> HandlerResult<()>;
-}
+pub(crate) struct Proxy;
 
-pub(crate) struct ProxyImpl;
-
-impl Proxy for ProxyImpl {
+#[restate_sdk::service(vis = "pub(crate)", name = "Proxy")]
+impl Proxy {
+    #[handler(name = "call")]
     async fn call(
         &self,
         ctx: Context<'_>,
@@ -67,6 +58,7 @@ impl Proxy for ProxyImpl {
         Ok(request.call().await?.into())
     }
 
+    #[handler(name = "oneWayCall")]
     async fn one_way_call(
         &self,
         ctx: Context<'_>,
@@ -89,6 +81,7 @@ impl Proxy for ProxyImpl {
         Ok(invocation_id)
     }
 
+    #[handler(name = "manyCalls")]
     async fn many_calls(
         &self,
         ctx: Context<'_>,
