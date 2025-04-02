@@ -1,21 +1,12 @@
 use restate_sdk::prelude::*;
 
-#[restate_sdk::object]
-#[name = "ListObject"]
-pub(crate) trait ListObject {
-    #[name = "append"]
-    async fn append(value: String) -> HandlerResult<()>;
-    #[name = "get"]
-    async fn get() -> HandlerResult<Json<Vec<String>>>;
-    #[name = "clear"]
-    async fn clear() -> HandlerResult<Json<Vec<String>>>;
-}
-
-pub(crate) struct ListObjectImpl;
+pub(crate) struct ListObject;
 
 const LIST: &str = "list";
 
-impl ListObject for ListObjectImpl {
+#[restate_sdk::object(vis = "pub(crate)", name = "ListObject")]
+impl ListObject {
+    #[handler(name = "append")]
     async fn append(&self, ctx: ObjectContext<'_>, value: String) -> HandlerResult<()> {
         let mut list = ctx
             .get::<Json<Vec<String>>>(LIST)
@@ -27,6 +18,7 @@ impl ListObject for ListObjectImpl {
         Ok(())
     }
 
+    #[handler(name = "get")]
     async fn get(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<String>>> {
         Ok(ctx
             .get::<Json<Vec<String>>>(LIST)
@@ -34,6 +26,7 @@ impl ListObject for ListObjectImpl {
             .unwrap_or_default())
     }
 
+    #[handler(name = "clear")]
     async fn clear(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<String>>> {
         let get = ctx
             .get::<Json<Vec<String>>>(LIST)
