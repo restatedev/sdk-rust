@@ -12,5 +12,3 @@ futures = "0.3"
 restate-sdk = { path = ".." }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1.40"
-rand = "0.8.5"
-uuid = "1.10.0"

@@ -17,7 +17,7 @@ impl FailureExample for FailureExampleImpl {
     async fn do_run(&self, context: Context<'_>) -> Result<(), TerminalError> {
         context
             .run::<_, _, ()>(|| async move {
-                if rand::thread_rng().next_u32() % 4 == 0 {
+                if rand::rng().next_u32() % 4 == 0 {
                     Err(TerminalError::new("Failed!!!"))?
                 }
 
