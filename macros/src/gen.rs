@@ -194,11 +194,39 @@ impl<'a> ServiceGenerator<'a> {
                 quote! { None }
             };
 
+            let input_schema = match &handler.arg {
+                Some(PatType { ty, .. }) => {
+                    quote! {
+                        Some(::restate_sdk::discovery::InputPayload {
+                            content_type: Some(<#ty as ::restate_sdk::serde::WithContentType>::content_type().to_string()),
+                            json_schema: Some(<#ty as ::restate_sdk::serde::WithSchema>::generate_schema()),
+                            required: Some(true),
+                        })
+                    }
+                }
+                None => quote! {
+                    Some(::restate_sdk::discovery::InputPayload {
+                        content_type: Some(<() as ::restate_sdk::serde::WithContentType>::content_type().to_string()),
+                        json_schema: Some(<() as ::restate_sdk::serde::WithSchema>::generate_schema()),
+                        required: Some(false),
+                    })
+                }
+            };
+
+            let output_ok = &handler.output_ok;
+            let output_schema = quote! {
+                Some(::restate_sdk::discovery::OutputPayload {
+                    content_type: Some(<#output_ok as ::restate_sdk::serde::WithContentType>::content_type().to_string()),
+                    json_schema: Some(<#output_ok as ::restate_sdk::serde::WithSchema>::generate_schema()),
+                    set_content_type_if_empty: Some(false),
+                })
+            };
+
             quote! {
                 ::restate_sdk::discovery::Handler {
                     name: ::restate_sdk::discovery::HandlerName::try_from(#handler_literal).expect("Handler name valid"),
-                    input: None,
-                    output: None,
+                    input: #input_schema,
+                    output: #output_schema,
                     ty: #handler_ty,
                 }
             }
