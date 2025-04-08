@@ -204,3 +204,189 @@ impl<T: Default> Default for Json<T> {
         Self(T::default())
     }
 }
+
+impl<T> WithContentType for Json<T> {
+    fn content_type() -> &'static str {
+        APPLICATION_JSON
+    }
+}
+
+// -- Schema Generation
+
+/// Trait encapsulating JSON Schema information for the given serializer/deserializer.
+///
+/// This trait allows types to provide JSON Schema information that can be used for
+/// documentation, validation, and client generation.
+///
+/// ## Behavior with `schemars` Feature Flag
+///
+/// When the `schemars` feature is enabled, implementations for complex types use
+/// the `schemars` crate to automatically generate rich, JSON Schema 2020-12 conforming schemas.
+/// When the feature is disabled, primitive types still provide basic schemas,
+/// but complex types return empty schemas, unless manually implemented.
+///
+/// ## Example Implementation:
+///
+/// ```rust
+/// use serde_json::json;
+/// use restate_sdk::serde::WithSchema;
+///
+/// struct MyType { /* ... */ }
+///
+/// impl WithSchema for MyType {
+///     fn generate_schema() -> serde_json::Value {
+///         // Generate and return a JSON Schema
+///         json!({
+///             "type": "object",
+///             "properties": {
+///                 "field1": { "type": "string" },
+///                 "field2": { "type": "number" }
+///             },
+///             "required": ["field1"]
+///         })
+///     }
+/// }
+/// ```
+pub trait WithSchema {
+    /// Generate a JSON Schema for this type.
+    ///
+    /// Returns a JSON value representing the schema for this type. When the `schemars`
+    /// feature is enabled, this returns an auto-generated JSON Schema 2020-12 conforming schema. When the feature is disabled,
+    /// this returns an empty schema for complex types, but basic schemas for primitives.
+    fn generate_schema() -> serde_json::Value;
+}
+
+// Helper function to create an empty schema
+fn empty_schema() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+// Basic implementations for primitive types (always available)
+
+impl WithSchema for () {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "null" })
+    }
+}
+
+impl WithSchema for String {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "string" })
+    }
+}
+
+impl WithSchema for bool {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "boolean" })
+    }
+}
+
+impl WithSchema for u8 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": 0, "maximum": 255 })
+    }
+}
+
+impl WithSchema for u16 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": 0, "maximum": 65535 })
+    }
+}
+
+impl WithSchema for u32 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": 0, "maximum": 4_294_967_295u64 })
+    }
+}
+
+impl WithSchema for u64 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": 0 })
+    }
+}
+
+impl WithSchema for u128 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": 0 })
+    }
+}
+
+impl WithSchema for i8 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": -128, "maximum": 127 })
+    }
+}
+
+impl WithSchema for i16 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": -32768, "maximum": 32767 })
+    }
+}
+
+impl WithSchema for i32 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer", "minimum": -2147483648, "maximum": 2147483647 })
+    }
+}
+
+impl WithSchema for i64 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer" })
+    }
+}
+
+impl WithSchema for i128 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer" })
+    }
+}
+
+impl WithSchema for f32 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "number" })
+    }
+}
+
+impl WithSchema for f64 {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "number" })
+    }
+}
+
+impl WithSchema for Vec<u8> {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "string", "format": "byte" })
+    }
+}
+
+impl WithSchema for Bytes {
+    fn generate_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "string", "format": "byte" })
+    }
+}
+
+impl<T: WithSchema> WithSchema for Option<T> {
+    fn generate_schema() -> serde_json::Value {
+        T::generate_schema()
+    }
+}
+
+// When schemars is disabled - works with any T
+#[cfg(not(feature = "schemars"))]
+impl<T> WithSchema for Json<T> {
+    fn generate_schema() -> serde_json::Value {
+        empty_schema() // Empty schema returns "accept all */*"
+    }
+}
+
+// When schemars is enabled - requires T: JsonSchema
+#[cfg(feature = "schemars")]
+impl<T: schemars::JsonSchema> WithSchema for Json<T> {
+    fn generate_schema() -> serde_json::Value {
+        let schema = schemars::schema_for!(T);
+        serde_json::to_value(schema).unwrap_or_else(|e| {
+            tracing::debug!("Failed to convert schema to JSON: {}", e);
+            empty_schema()
+        })
+    }
+}
