@@ -66,7 +66,7 @@ Just configure it as usual through [`tracing_subscriber`](https://docs.rs/tracin
 ### Testing
 
 The SDK uses [Testcontainers](https://rust.testcontainers.org/) to support integration testing using a Docker-deployed restate server.
-The `restate-sdk-test-env` crate provides a framework for initializing the test environment, and an integration test example in `test-env/tests/test_container.rs`.
+The `restate-sdk-testcontainers` crate provides a framework for initializing the test environment, and an integration test example in `testcontainers/tests/test_container.rs`.
 
 ```rust
 #[tokio::test]

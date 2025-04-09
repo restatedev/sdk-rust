@@ -1,8 +1,8 @@
 [package]
-name = "restate-sdk-test-env"
+name = "restate-sdk-testcontainers"
 version = "0.4.0"
 edition = "2021"
-description = "Test Utilities for Restate SDK for Rust"
+description = "Restate SDK Testcontainers utilities"
 license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
 rust-version = "1.76.0"
