@@ -27,9 +27,8 @@
 //! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
 //! - [Awakeables][crate::context::ContextAwakeables]: Durable Futures to wait for events and the completion of external tasks.
 //! - [Error Handling][crate::errors]: Restate retries failures infinitely. Use `TerminalError` to stop retries.
-//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server.
+//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server. Includes [Schema Generation][crate::serde::WithSchema] for API documentation & discovery.
 //! - [Serving][crate::http_server]: Start an HTTP server to expose services.
-//! - [JSON Schema Generation][crate::serde::WithSchema]: Automatically generate JSON Schemas for better discovery.
 //!
 //! # SDK Overview
 //!
@@ -505,82 +504,6 @@ pub use restate_sdk_macros::object;
 /// For more details, check the [`service` macro](macro@crate::service) documentation.
 pub use restate_sdk_macros::workflow;
 
-/// ### JSON Schema Generation
-///
-/// The SDK provides three approaches for generating JSON Schemas for handler inputs and outputs:
-///
-/// #### 1. Primitive Types
-///
-/// Primitive types (like `String`, `u32`, `bool`) have built-in schema implementations
-/// that work automatically without additional code:
-///
-/// ```rust
-/// use restate_sdk::prelude::*;
-///
-/// #[restate_sdk::service]
-/// trait SimpleService {
-///     async fn greet(name: String) -> HandlerResult<u32>;
-/// }
-/// ```
-///
-/// #### 2. Using Json<T> with schemars
-///
-/// For complex types wrapped in `Json<T>`, you need to add the `schemars` feature and derive `JsonSchema`:
-///
-/// ```rust
-/// use restate_sdk::prelude::*;
-///
-/// #[derive(serde::Serialize, serde::Deserialize)]
-/// #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-/// struct User {
-///     name: String,
-///     age: u32,
-/// }
-///
-/// #[restate_sdk::service]
-/// trait UserService {
-///     async fn register(user: Json<User>) -> HandlerResult<Json<User>>;
-/// }
-/// ```
-///
-/// To enable rich schema generation with `Json<T>`, add the `schemars` feature to your dependency:
-///
-/// ```toml
-/// [dependencies]
-/// restate-sdk = { version = "0.3", features = ["schemars"] }
-/// schemars = "1.0.0-alpha.17"
-/// ```
-///
-/// #### 3. Custom Implementation
-///
-/// You can also implement the `WithSchema` trait directly for your types to provide
-/// custom schemas without relying on the `schemars` feature:
-///
-/// ```rust
-/// use restate_sdk::serde::{WithSchema, WithContentType, Serialize, Deserialize};
-///
-/// #[derive(serde::Serialize, serde::Deserialize)]
-/// struct User {
-///     name: String,
-///     age: u32,
-/// }
-///
-/// // Implement WithSchema directly
-/// impl WithSchema for User {
-///     fn generate_schema() -> serde_json::Value {
-///         serde_json::json!({
-///             "type": "object",
-///             "properties": {
-///                 "name": {"type": "string"},
-///                 "age": {"type": "integer", "minimum": 0}
-///             },
-///             "required": ["name", "age"]
-///         })
-///     }
-/// }
-/// ```
-///
-///
 /// Prelude contains all the useful imports you need to get started with Restate.
 pub mod prelude {
     #[cfg(feature = "http_server")]

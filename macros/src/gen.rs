@@ -206,20 +206,29 @@ impl<'a> ServiceGenerator<'a> {
                 }
                 None => quote! {
                     Some(::restate_sdk::discovery::InputPayload {
-                        content_type: Some(<() as ::restate_sdk::serde::WithContentType>::content_type().to_string()),
-                        json_schema: Some(<() as ::restate_sdk::serde::WithSchema>::generate_schema()),
-                        required: Some(false),
+                        content_type: None,
+                        json_schema: None,
+                        required: None,
                     })
                 }
             };
 
             let output_ok = &handler.output_ok;
-            let output_schema = quote! {
-                Some(::restate_sdk::discovery::OutputPayload {
-                    content_type: Some(<#output_ok as ::restate_sdk::serde::WithContentType>::content_type().to_string()),
-                    json_schema: Some(<#output_ok as ::restate_sdk::serde::WithSchema>::generate_schema()),
-                    set_content_type_if_empty: Some(false),
-                })
+            let output_schema = match output_ok {
+                syn::Type::Tuple(tuple) if tuple.elems.is_empty() => quote! {
+                    Some(::restate_sdk::discovery::OutputPayload {
+                        content_type: None,
+                        json_schema: None,
+                        set_content_type_if_empty: Some(false),
+                    })
+                },
+                _ => quote! {
+                    Some(::restate_sdk::discovery::OutputPayload {
+                        content_type: Some(<#output_ok as ::restate_sdk::serde::WithContentType>::content_type().to_string()),
+                        json_schema: Some(<#output_ok as ::restate_sdk::serde::WithSchema>::generate_schema()),
+                        set_content_type_if_empty: Some(false),
+                    })
+                }
             };
 
             quote! {
