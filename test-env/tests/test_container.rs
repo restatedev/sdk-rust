@@ -3,7 +3,6 @@ use restate_sdk::prelude::*;
 use restate_sdk_test_env::TestContainer;
 use tracing::info;
 
-// Should compile
 #[restate_sdk::service]
 trait MyService {
     async fn my_handler() -> HandlerResult<String>;
@@ -40,12 +39,12 @@ async fn test_container() {
 
     let endpoint = Endpoint::builder().bind(MyServiceImpl.serve()).build();
 
-    // simple test container intialization with default configuration
+    // simple test container initialization with default configuration
     //let test_container = TestContainer::default().start(endpoint).await.unwrap();
 
     // custom test container initialization with builder
     let test_container = TestContainer::builder()
-        // optional passthrough logging from the resstate server testcontainer
+        // optional passthrough logging from the restate server testcontainers
         // prints container logs to tracing::info level
         .with_container_logging()
         .with_container(
@@ -68,6 +67,8 @@ async fn test_container() {
         .send()
         .await
         .unwrap();
+
+    dbg!(format!("{}/MyService/my_handler", ingress_url));
 
     assert_eq!(response.status(), StatusCode::OK);
 

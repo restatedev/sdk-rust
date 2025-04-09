@@ -1,7 +1,4 @@
-use restate_sdk::{
-    errors::HandlerError,
-    prelude::{Endpoint, HttpServer},
-};
+use restate_sdk::prelude::{Endpoint, HttpServer};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use testcontainers::{
@@ -16,7 +13,7 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-// addapted from from restate-admin-rest-model crate version 1.1.6
+// From restate-admin-rest-model
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegisterDeploymentRequestHttp {
     uri: String,
@@ -115,9 +112,8 @@ impl TestContainer {
     pub async fn start(mut self, endpoint: Endpoint) -> Result<TestContainer, anyhow::Error> {
         self.serve_endpoint(endpoint).await?;
         self.start_container().await?;
-        let registered = self.register_endpoint().await;
-        if registered.is_err() {
-            return Err(anyhow::anyhow!("Failed to register endpoint"));
+        if let Err(e) = self.register_endpoint().await {
+            return Err(anyhow::anyhow!("Failed to register endpoint: {e}"));
         }
 
         Ok(self)
@@ -254,7 +250,7 @@ impl TestContainer {
         Ok(())
     }
 
-    async fn register_endpoint(&mut self) -> Result<(), HandlerError> {
+    async fn register_endpoint(&mut self) -> Result<(), anyhow::Error> {
         info!(
             "registering endpoint server: {}",
             self.endpoint_server_url.as_ref().unwrap()
@@ -277,7 +273,7 @@ impl TestContainer {
             use_http_11: false,
             force: false,
             dry_run: false,
-        }; //, additional_headers: (), use_http_11: (), force: (), dry_run: () }
+        };
 
         let register_admin_url = format!("http://{}:{}/deployments", host, admin_port);
 

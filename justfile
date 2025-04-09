@@ -64,7 +64,7 @@ print-target:
     @echo {{ _resolved_target }}
 
 test: (_target-installed target)
-    cargo nextest run {{ _target-option }} --all-features
+    cargo nextest run {{ _target-option }} --all-features --workspace
 
 doctest:
     cargo test --doc
