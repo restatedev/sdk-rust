@@ -1,6 +1,6 @@
 [package]
 name = "restate-sdk-test-env"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 description = "Test Utilities for Restate SDK for Rust"
 license = "MIT"
@@ -12,7 +12,7 @@ rust-version = "1.76.0"
 anyhow = "1.0.95"
 nu-ansi-term = "0.50.1"
 reqwest = { version= "0.12.12", features = ["json"] }
-restate-sdk = { version = "0.3.2", path = "../" }
+restate-sdk = { version = "0.4.0", path = "../" }
 serde = "1.0.217"
 serde_json = "1.0.138"
 testcontainers = "0.23.1"
