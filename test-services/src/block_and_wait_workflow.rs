@@ -1,24 +1,13 @@
 use restate_sdk::prelude::*;
 
-#[restate_sdk::workflow]
-#[name = "BlockAndWaitWorkflow"]
-pub(crate) trait BlockAndWaitWorkflow {
-    #[name = "run"]
-    async fn run(input: String) -> HandlerResult<String>;
-    #[name = "unblock"]
-    #[shared]
-    async fn unblock(output: String) -> HandlerResult<()>;
-    #[name = "getState"]
-    #[shared]
-    async fn get_state() -> HandlerResult<Json<Option<String>>>;
-}
-
-pub(crate) struct BlockAndWaitWorkflowImpl;
+pub(crate) struct BlockAndWaitWorkflow;
 
 const MY_PROMISE: &str = "my-promise";
 const MY_STATE: &str = "my-state";
 
-impl BlockAndWaitWorkflow for BlockAndWaitWorkflowImpl {
+#[restate_sdk::workflow(vis = "pub(crate)", name = "BlockAndWaitWorkflow")]
+impl BlockAndWaitWorkflow {
+    #[handler(name = "run")]
     async fn run(&self, context: WorkflowContext<'_>, input: String) -> HandlerResult<String> {
         context.set(MY_STATE, input);
 
@@ -31,6 +20,7 @@ impl BlockAndWaitWorkflow for BlockAndWaitWorkflowImpl {
         Ok(promise)
     }
 
+    #[handler(shared, name = "unblock")]
     async fn unblock(
         &self,
         context: SharedWorkflowContext<'_>,
@@ -40,6 +30,7 @@ impl BlockAndWaitWorkflow for BlockAndWaitWorkflowImpl {
         Ok(())
     }
 
+    #[handler(shared, name = "getState")]
     async fn get_state(
         &self,
         context: SharedWorkflowContext<'_>,

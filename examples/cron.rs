@@ -13,21 +13,13 @@ use std::time::Duration;
 /// ```shell
 /// $ curl -v http://localhost:8080/PeriodicTask/my-periodic-task/start
 /// ```
-#[restate_sdk::object]
-trait PeriodicTask {
-    /// Schedules the periodic task to start
-    async fn start() -> Result<(), TerminalError>;
-    /// Stops the periodic task
-    async fn stop() -> Result<(), TerminalError>;
-    /// Business logic of the periodic task
-    async fn run() -> Result<(), TerminalError>;
-}
-
-struct PeriodicTaskImpl;
+struct PeriodicTask;
 
 const ACTIVE: &str = "active";
 
-impl PeriodicTask for PeriodicTaskImpl {
+#[restate_sdk::object]
+impl PeriodicTask {
+    #[handler]
     async fn start(&self, context: ObjectContext<'_>) -> Result<(), TerminalError> {
         if context
             .get::<bool>(ACTIVE)
@@ -39,7 +31,7 @@ impl PeriodicTask for PeriodicTaskImpl {
         }
 
         // Schedule the periodic task
-        PeriodicTaskImpl::schedule_next(&context);
+        PeriodicTask::schedule_next(&context);
 
         // Mark the periodic task as active
         context.set(ACTIVE, true);
@@ -47,6 +39,7 @@ impl PeriodicTask for PeriodicTaskImpl {
         Ok(())
     }
 
+    #[handler]
     async fn stop(&self, context: ObjectContext<'_>) -> Result<(), TerminalError> {
         // Remove the active flag
         context.clear(ACTIVE);
@@ -54,6 +47,7 @@ impl PeriodicTask for PeriodicTaskImpl {
         Ok(())
     }
 
+    #[handler]
     async fn run(&self, context: ObjectContext<'_>) -> Result<(), TerminalError> {
         if context.get::<bool>(ACTIVE).await?.is_none() {
             // Task is inactive, do nothing
@@ -64,13 +58,13 @@ impl PeriodicTask for PeriodicTaskImpl {
         println!("Triggered the periodic task!");
 
         // Schedule the periodic task
-        PeriodicTaskImpl::schedule_next(&context);
+        PeriodicTask::schedule_next(&context);
 
         Ok(())
     }
 }
 
-impl PeriodicTaskImpl {
+impl PeriodicTask {
     fn schedule_next(context: &ObjectContext<'_>) {
         // To schedule, create a client to the callee handler (in this case, we're calling ourselves)
         context
@@ -84,7 +78,7 @@ impl PeriodicTaskImpl {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(PeriodicTaskImpl.serve()).build())
+    HttpServer::new(Endpoint::builder().bind(PeriodicTask.serve()).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

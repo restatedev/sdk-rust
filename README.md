@@ -31,14 +31,11 @@ Then you're ready to develop your Restate service using Rust:
 ```rust
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
-trait Greeter {
-    async fn greet(name: String) -> HandlerResult<String>;
-}
+pub(crate) struct Greeter;
 
-struct GreeterImpl;
-
-impl Greeter for GreeterImpl {
+#[restate_sdk::service(vis = "pub(crate)", name = "Greetings")]
+impl Greeter {
+    #[handler]
     async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
         Ok(format!("Greetings {name}"))
     }
@@ -50,7 +47,7 @@ async fn main() {
     // tracing_subscriber::fmt::init();
     HttpServer::new(
         Endpoint::builder()
-            .with_service(GreeterImpl.serve())
+            .with_service(Greeter.serve())
             .build(),
     )
     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
@@ -75,7 +72,7 @@ async fn test_container() {
         .with_max_level(tracing::Level::INFO) // Set the maximum log level
         .init();
 
-    let endpoint = Endpoint::builder().bind(MyServiceImpl.serve()).build();
+    let endpoint = Endpoint::builder().bind(MyService.serve()).build();
 
     // simple test container intialization with default configuration
     //let test_container = TestContainer::default().start(endpoint).await.unwrap();
