@@ -213,6 +213,81 @@ impl<T> WithContentType for Json<T> {
 
 // -- Schema Generation
 
+/// ## JSON Schema Generation
+///
+/// The SDK provides three approaches for generating JSON Schemas for handler inputs and outputs:
+///
+/// ### 1. Primitive Types
+///
+/// Primitive types (like `String`, `u32`, `bool`) have built-in schema implementations
+/// that work automatically without additional code:
+///
+/// ```rust
+/// use restate_sdk::prelude::*;
+///
+/// #[restate_sdk::service]
+/// trait SimpleService {
+///     async fn greet(name: String) -> HandlerResult<u32>;
+/// }
+/// ```
+///
+/// ### 2. Using Json<T> with schemars
+///
+/// For complex types wrapped in `Json<T>`, you need to add the `schemars` feature and derive `JsonSchema`:
+///
+/// ```rust
+/// use restate_sdk::prelude::*;
+///
+/// #[derive(serde::Serialize, serde::Deserialize)]
+/// #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// struct User {
+///     name: String,
+///     age: u32,
+/// }
+///
+/// #[restate_sdk::service]
+/// trait UserService {
+///     async fn register(user: Json<User>) -> HandlerResult<Json<User>>;
+/// }
+/// ```
+///
+/// To enable rich schema generation with `Json<T>`, add the `schemars` feature to your dependency:
+///
+/// ```toml
+/// [dependencies]
+/// restate-sdk = { version = "0.3", features = ["schemars"] }
+/// schemars = "1.0.0-alpha.17"
+/// ```
+///
+/// ### 3. Custom Implementation
+///
+/// You can also implement the `WithSchema` trait directly for your types to provide
+/// custom schemas without relying on the `schemars` feature:
+///
+/// ```rust
+/// use restate_sdk::serde::{WithSchema, WithContentType, Serialize, Deserialize};
+///
+/// #[derive(serde::Serialize, serde::Deserialize)]
+/// struct User {
+///     name: String,
+///     age: u32,
+/// }
+///
+/// // Implement WithSchema directly
+/// impl WithSchema for User {
+///     fn generate_schema() -> serde_json::Value {
+///         serde_json::json!({
+///             "type": "object",
+///             "properties": {
+///                 "name": {"type": "string"},
+///                 "age": {"type": "integer", "minimum": 0}
+///             },
+///             "required": ["name", "age"]
+///         })
+///     }
+/// }
+/// ```
+///
 /// Trait encapsulating JSON Schema information for the given serializer/deserializer.
 ///
 /// This trait allows types to provide JSON Schema information that can be used for
@@ -224,29 +299,6 @@ impl<T> WithContentType for Json<T> {
 /// the `schemars` crate to automatically generate rich, JSON Schema 2020-12 conforming schemas.
 /// When the feature is disabled, primitive types still provide basic schemas,
 /// but complex types return empty schemas, unless manually implemented.
-///
-/// ## Example Implementation:
-///
-/// ```rust
-/// use serde_json::json;
-/// use restate_sdk::serde::WithSchema;
-///
-/// struct MyType { /* ... */ }
-///
-/// impl WithSchema for MyType {
-///     fn generate_schema() -> serde_json::Value {
-///         // Generate and return a JSON Schema
-///         json!({
-///             "type": "object",
-///             "properties": {
-///                 "field1": { "type": "string" },
-///                 "field2": { "type": "number" }
-///             },
-///             "required": ["field1"]
-///         })
-///     }
-/// }
-/// ```
 pub trait WithSchema {
     /// Generate a JSON Schema for this type.
     ///
