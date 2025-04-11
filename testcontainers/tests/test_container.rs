@@ -1,6 +1,6 @@
 use reqwest::StatusCode;
 use restate_sdk::prelude::*;
-use restate_sdk_testcontainers::TestContainer;
+use restate_sdk_testcontainers::TestEnvironment;
 use tracing::info;
 
 #[restate_sdk::service]
@@ -43,7 +43,7 @@ async fn test_container() {
     //let test_container = TestContainer::default().start(endpoint).await.unwrap();
 
     // custom test container initialization with builder
-    let test_container = TestContainer::builder()
+    let test_environment = TestEnvironment::new()
         // optional passthrough logging from the restate server testcontainers
         // prints container logs to tracing::info level
         .with_container_logging()
@@ -51,24 +51,19 @@ async fn test_container() {
             "docker.io/restatedev/restate".to_string(),
             "latest".to_string(),
         )
-        .build()
         .start(endpoint)
         .await
         .unwrap();
 
-    let ingress_url = test_container.ingress_url();
+    let ingress_url = test_environment.ingress_url();
 
     // call container ingress url for /MyService/my_handler
     let response = reqwest::Client::new()
         .post(format!("{}/MyService/my_handler", ingress_url))
-        .header("Accept", "application/json")
-        .header("Content-Type", "*/*")
         .header("idempotency-key", "abc")
         .send()
         .await
         .unwrap();
-
-    dbg!(format!("{}/MyService/my_handler", ingress_url));
 
     assert_eq!(response.status(), StatusCode::OK);
 
