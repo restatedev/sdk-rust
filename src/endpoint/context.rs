@@ -15,8 +15,8 @@ use futures::future::{BoxFuture, Either, Shared};
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, DoProgressResponse, Error as CoreError, NonEmptyValue, NotificationHandle, RetryPolicy,
-    RunExitResult, TakeOutputResult, Target, TerminalFailure, Value, VM,
+    CoreVM, DoProgressResponse, Error as CoreError, Header, NonEmptyValue, NotificationHandle,
+    RetryPolicy, RunExitResult, TakeOutputResult, Target, TerminalFailure, Value, VM,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -371,12 +371,20 @@ impl ContextInternal {
         &self,
         request_target: RequestTarget,
         idempotency_key: Option<String>,
+        headers: Vec<(String, String)>,
         req: Req,
     ) -> impl CallFuture<Response = Res> + Send {
         let mut inner_lock = must_lock!(self.inner);
 
         let mut target: Target = request_target.into();
         target.idempotency_key = idempotency_key;
+        target.headers = headers
+            .into_iter()
+            .map(|(k, v)| Header {
+                key: k.into(),
+                value: v.into(),
+            })
+            .collect();
         let call_result = Req::serialize(&req)
             .map_err(|e| Error::serialization("call", e))
             .and_then(|input| inner_lock.vm.sys_call(target, input).map_err(Into::into));
@@ -443,6 +451,7 @@ impl ContextInternal {
         &self,
         request_target: RequestTarget,
         idempotency_key: Option<String>,
+        headers: Vec<(String, String)>,
         req: Req,
         delay: Option<Duration>,
     ) -> impl InvocationHandle {
@@ -450,7 +459,13 @@ impl ContextInternal {
 
         let mut target: Target = request_target.into();
         target.idempotency_key = idempotency_key;
-
+        target.headers = headers
+            .into_iter()
+            .map(|(k, v)| Header {
+                key: k.into(),
+                value: v.into(),
+            })
+            .collect();
         let input = match Req::serialize(&req) {
             Ok(b) => b,
             Err(e) => {
