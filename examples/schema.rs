@@ -1,14 +1,15 @@
+//! Run with auto-generated schemas for `Json<Product>` using `schemars`:
+//!   cargo run --example schema --features schemars
+//!
+//! Run with primitive schemas only:
+//!   cargo run --example schema
+
 use restate_sdk::prelude::*;
-/// Run with auto-generated schemas for `Json<Product>` using `schemars`:
-///   cargo run --example schema --features schemars
-///
-/// Run with primitive schemas only:
-///   cargo run --example schema
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, JsonSchema)]
 struct Product {
     id: String,
     name: String,

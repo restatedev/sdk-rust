@@ -12,6 +12,11 @@ name = "tracing"
 path = "examples/tracing.rs"
 required-features = ["tracing-span-filter"]
 
+[[example]]
+name = "schema"
+path = "examples/schema.rs"
+required-features = ["schemars"]
+
 [features]
 default = ["http_server", "rand", "uuid", "tracing-span-filter"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
