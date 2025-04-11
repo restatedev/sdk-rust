@@ -75,6 +75,7 @@ pub struct Request<'a, Req, Res = ()> {
     ctx: &'a ContextInternal,
     request_target: RequestTarget,
     idempotency_key: Option<String>,
+    headers: Vec<(String, String)>,
     req: Req,
     res: PhantomData<Res>,
 }
@@ -85,9 +86,15 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
             ctx,
             request_target,
             idempotency_key: None,
+            headers: vec![],
             req,
             res: PhantomData,
         }
+    }
+
+    pub fn header(mut self, key: String, value: String) -> Self {
+        self.headers.push((key, value));
+        self
     }
 
     /// Add idempotency key to the request
@@ -102,8 +109,12 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         Req: Serialize + 'static,
         Res: Deserialize + 'static,
     {
-        self.ctx
-            .call(self.request_target, self.idempotency_key, self.req)
+        self.ctx.call(
+            self.request_target,
+            self.idempotency_key,
+            self.headers,
+            self.req,
+        )
     }
 
     /// Send the request to the service, without waiting for the response.
@@ -111,8 +122,13 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
     where
         Req: Serialize + 'static,
     {
-        self.ctx
-            .send(self.request_target, self.idempotency_key, self.req, None)
+        self.ctx.send(
+            self.request_target,
+            self.idempotency_key,
+            self.headers,
+            self.req,
+            None,
+        )
     }
 
     /// Schedule the request to the service, without waiting for the response.
@@ -123,6 +139,7 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self.ctx.send(
             self.request_target,
             self.idempotency_key,
+            self.headers,
             self.req,
             Some(delay),
         )
