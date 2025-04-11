@@ -1,5 +1,5 @@
 use restate_sdk::prelude::*;
-use restate_sdk::serde::{Json, WithSchema};
+use restate_sdk::serde::{Json, PayloadMetadata};
 use restate_sdk::service::Discoverable;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -171,10 +171,10 @@ fn schema_discovery_and_validation() {
 
 #[test]
 fn schema_generation() {
-    let string_schema = <String as WithSchema>::generate_schema();
+    let string_schema = <String as PayloadMetadata>::json_schema().unwrap();
     assert_eq!(string_schema["type"], "string");
 
-    let json_schema = <Json<TestUser> as WithSchema>::generate_schema();
+    let json_schema = <Json<TestUser> as PayloadMetadata>::json_schema().unwrap();
     #[cfg(feature = "schemars")]
     assert!(json_schema["properties"]["name"]["type"] == "string");
     #[cfg(not(feature = "schemars"))]
