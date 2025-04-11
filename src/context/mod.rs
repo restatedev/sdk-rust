@@ -219,8 +219,7 @@ impl<'ctx> WorkflowContext<'ctx> {
 ///
 /// ## Scheduling Async Tasks
 ///
-/// To schedule a handler to be called at a later time, have a look at the documentation on [delayed calls][crate::context::ContextClient#delayed-calls].
-///
+/// To schedule a handler to be called at a later time, have a look at the documentation on [delayed calls](Request::send_after).
 ///
 /// ## Durable sleep
 /// To sleep in a Restate application for ten seconds, do the following:
