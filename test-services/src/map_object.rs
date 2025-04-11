@@ -1,8 +1,9 @@
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Entry {
     key: String,

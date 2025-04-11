@@ -194,11 +194,32 @@ impl<'a> ServiceGenerator<'a> {
                 quote! { None }
             };
 
+            let input_schema = match &handler.arg {
+                Some(PatType { ty, .. }) => {
+                    quote! {
+                        Some(::restate_sdk::discovery::InputPayload::from_metadata::<#ty>())
+                    }
+                }
+                None => quote! {
+                    Some(::restate_sdk::discovery::InputPayload::empty())
+                }
+            };
+
+            let output_ty = &handler.output_ok;
+            let output_schema = match output_ty {
+                syn::Type::Tuple(tuple) if tuple.elems.is_empty() => quote! {
+                    Some(::restate_sdk::discovery::OutputPayload::empty())
+                },
+                _ => quote! {
+                    Some(::restate_sdk::discovery::OutputPayload::from_metadata::<#output_ty>())
+                }
+            };
+
             quote! {
                 ::restate_sdk::discovery::Handler {
                     name: ::restate_sdk::discovery::HandlerName::try_from(#handler_literal).expect("Handler name valid"),
-                    input: None,
-                    output: None,
+                    input: #input_schema,
+                    output: #output_schema,
                     ty: #handler_ty,
                 }
             }

@@ -27,7 +27,7 @@
 //! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
 //! - [Awakeables][crate::context::ContextAwakeables]: Durable Futures to wait for events and the completion of external tasks.
 //! - [Error Handling][crate::errors]: Restate retries failures infinitely. Use `TerminalError` to stop retries.
-//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server.
+//! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server. Includes [Schema Generation and payload metadata](crate::serde::PayloadMetadata) for documentation & discovery.
 //! - [Serving][crate::http_server]: Start an HTTP server to expose services.
 //!
 //! # SDK Overview

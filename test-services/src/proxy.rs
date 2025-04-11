@@ -2,10 +2,11 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use restate_sdk::context::RequestTarget;
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProxyRequest {
     service_name: String,
@@ -33,7 +34,7 @@ impl ProxyRequest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ManyCallRequest {
     proxy_request: ProxyRequest,

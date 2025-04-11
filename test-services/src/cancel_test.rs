@@ -1,10 +1,11 @@
 use crate::awakeable_holder;
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum BlockingOperation {
     Call,
