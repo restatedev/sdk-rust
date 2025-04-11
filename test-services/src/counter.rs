@@ -1,8 +1,9 @@
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CounterUpdateResponse {
     old_value: u64,

@@ -15,7 +15,7 @@ pub(crate) trait TestUtilsService {
     #[name = "uppercaseEcho"]
     async fn uppercase_echo(input: String) -> HandlerResult<String>;
     #[name = "rawEcho"]
-    async fn raw_echo(input: Vec<u8>) -> Result<Vec<u8>, Infallible>;
+    async fn raw_echo(input: bytes::Bytes) -> Result<Vec<u8>, Infallible>;
     #[name = "echoHeaders"]
     async fn echo_headers() -> HandlerResult<Json<HashMap<String, String>>>;
     #[name = "sleepConcurrently"]
@@ -37,8 +37,8 @@ impl TestUtilsService for TestUtilsServiceImpl {
         Ok(input.to_ascii_uppercase())
     }
 
-    async fn raw_echo(&self, _: Context<'_>, input: Vec<u8>) -> Result<Vec<u8>, Infallible> {
-        Ok(input)
+    async fn raw_echo(&self, _: Context<'_>, input: bytes::Bytes) -> Result<Vec<u8>, Infallible> {
+        Ok(input.to_vec())
     }
 
     async fn echo_headers(

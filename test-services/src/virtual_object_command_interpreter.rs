@@ -1,16 +1,17 @@
 use anyhow::anyhow;
 use futures::TryFutureExt;
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InterpretRequest {
     commands: Vec<Command>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 #[serde(rename_all_fields = "camelCase")]
 pub(crate) enum Command {
@@ -39,7 +40,7 @@ pub(crate) enum Command {
     GetEnvVariable { env_name: String },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 #[serde(rename_all_fields = "camelCase")]
 pub(crate) enum AwaitableCommand {
@@ -51,14 +52,14 @@ pub(crate) enum AwaitableCommand {
     RunThrowTerminalException { reason: String },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ResolveAwakeable {
     awakeable_key: String,
     value: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RejectAwakeable {
     awakeable_key: String,
