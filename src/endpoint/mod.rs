@@ -284,6 +284,14 @@ impl Endpoint {
 
         let parts: Vec<&str> = path.split('/').collect();
 
+        if parts.last() == Some(&"health") {
+            return Ok(Response::ReplyNow {
+                status_code: 200,
+                headers: vec![],
+                body: Bytes::new(),
+            });
+        }
+
         if parts.last() == Some(&"discover") {
             let accept_header = headers
                 .extract("accept")

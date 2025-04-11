@@ -1,8 +1,8 @@
 [package]
-name = "restate-sdk-test-env"
+name = "restate-sdk-testcontainers"
 version = "0.4.0"
 edition = "2021"
-description = "Test Utilities for Restate SDK for Rust"
+description = "Restate SDK Testcontainers utilities"
 license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
 rust-version = "1.76.0"
@@ -10,12 +10,11 @@ rust-version = "1.76.0"
 
 [dependencies]
 anyhow = "1.0.95"
-nu-ansi-term = "0.50.1"
+futures = "0.3.31"
 reqwest = { version= "0.12.12", features = ["json"] }
 restate-sdk = { version = "0.4.0", path = "../" }
 serde = "1.0.217"
-serde_json = "1.0.138"
-testcontainers = "0.23.1"
+testcontainers = { version = "0.23.3", features = ["http_wait"] }
 tokio = "1.43.0"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
