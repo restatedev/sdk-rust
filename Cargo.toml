@@ -17,7 +17,6 @@ default = ["http_server", "rand", "uuid", "tracing-span-filter"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
 tracing-span-filter = ["dep:tracing-subscriber"]
-schemars = ["dep:schemars"]
 
 [dependencies]
 bytes = "1.10"
