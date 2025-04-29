@@ -1,6 +1,6 @@
 [package]
 name = "restate-sdk-testcontainers"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Restate SDK Testcontainers utilities"
 license = "MIT"
@@ -12,7 +12,7 @@ rust-version = "1.76.0"
 anyhow = "1.0.95"
 futures = "0.3.31"
 reqwest = { version= "0.12.12", features = ["json"] }
-restate-sdk = { version = "0.4.0", path = "../" }
+restate-sdk = { version = "0.5.0", path = "../" }
 serde = "1.0.217"
 testcontainers = { version = "0.23.3", features = ["http_wait"] }
 tokio = "1.43.0"
