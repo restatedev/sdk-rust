@@ -7,9 +7,9 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/endpoint_manifest.rs"));
 }
 
-pub use generated::*;
-
+use crate::endpoint::{HandlerOptions, ServiceOptions};
 use crate::serde::PayloadMetadata;
+pub use generated::*;
 
 impl InputPayload {
     pub fn empty() -> Self {
@@ -46,5 +46,29 @@ impl OutputPayload {
             json_schema: T::json_schema(),
             set_content_type_if_empty: Some(output_metadata.set_content_type_if_empty),
         }
+    }
+}
+
+impl Service {
+    pub(crate) fn apply_options(&mut self, options: ServiceOptions) {
+        // Apply service options
+        self.metadata.extend(options.metadata);
+
+        // Apply handler specific options
+        for (handler_name, handler_options) in options.handler_options {
+            let handler = self
+                .handlers
+                .iter_mut()
+                .find(|h| handler_name == h.name.as_str())
+                .expect("Invalid handler name provided in the options");
+            handler.apply_options(handler_options);
+        }
+    }
+}
+
+impl Handler {
+    pub(crate) fn apply_options(&mut self, options: HandlerOptions) {
+        // Apply handler options
+        self.metadata.extend(options.metadata);
     }
 }

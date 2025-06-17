@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{info_span, Instrument};
 
-const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v1+json";
+const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v3+json";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -186,6 +186,19 @@ impl Service for BoxedService {
     }
 }
 
+/// Various configuration options that can be provided when binding a service
+#[derive(Default, Debug, Clone)]
+pub struct ServiceOptions {
+    pub metadata: HashMap<String, String>,
+    pub handler_options: HashMap<String, HandlerOptions>,
+}
+
+/// Various configuration options that can be provided when binding a service handler
+#[derive(Default, Debug, Clone)]
+pub struct HandlerOptions {
+    pub metadata: HashMap<String, String>,
+}
+
 /// Builder for [`Endpoint`]
 pub struct Builder {
     svcs: HashMap<String, BoxedService>,
@@ -225,10 +238,28 @@ impl Builder {
             + Sync
             + 'static,
     >(
-        mut self,
+        self,
         s: S,
     ) -> Self {
-        let service_metadata = S::discover();
+        self.bind_with_options(s, ServiceOptions::default())
+    }
+
+    /// Like [`bind`], but providing options
+    pub fn bind_with_options<
+        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
+            + Discoverable
+            + Send
+            + Sync
+            + 'static,
+    >(
+        mut self,
+        s: S,
+        service_options: ServiceOptions,
+    ) -> Self {
+        // Discover and apply options
+        let mut service_metadata = S::discover();
+        service_metadata.apply_options(service_options);
+
         let boxed_service = BoxedService::new(s);
         self.svcs
             .insert(service_metadata.name.to_string(), boxed_service);
@@ -298,7 +329,7 @@ impl Endpoint {
                 .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))?;
             if accept_header.is_some() {
                 let accept = accept_header.unwrap();
-                if !accept.contains("application/vnd.restate.endpointmanifest.v1+json") {
+                if !accept.contains("application/vnd.restate.endpointmanifest.v3+json") {
                     return Err(Error(ErrorInner::BadDiscovery(accept.to_owned())));
                 }
             }
