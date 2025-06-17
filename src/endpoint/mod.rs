@@ -21,7 +21,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tracing::{info_span, Instrument};
 
-const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v3+json";
+const DISCOVERY_CONTENT_TYPE_V2: &str = "application/vnd.restate.endpointmanifest.v2+json";
+const DISCOVERY_CONTENT_TYPE_V3: &str = "application/vnd.restate.endpointmanifest.v3+json";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -93,7 +94,8 @@ impl Error {
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
             | ErrorInner::HandlerResult { .. } => 500,
-            ErrorInner::BadDiscovery(_) => 415,
+            ErrorInner::FieldRequiresMinimumVersion { .. } => 500,
+            ErrorInner::BadDiscoveryVersion(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
             ErrorInner::IdentityVerification(_) => 401,
         }
@@ -112,8 +114,10 @@ pub(crate) enum ErrorInner {
     IdentityVerification(#[from] VerifyError),
     #[error("Cannot convert header '{0}', reason: {1}")]
     Header(String, #[source] BoxError),
-    #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery is {DISCOVERY_CONTENT_TYPE}")]
-    BadDiscovery(String),
+    #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2 and v3")]
+    BadDiscoveryVersion(String),
+    #[error("The field '{0}' was set in the service/handler options, but it requires minimum discovery protocol version {1}")]
+    FieldRequiresMinimumVersion(&'static str, u32),
     #[error("Bad path '{0}', expected either '/discover' or '/invoke/service/handler'")]
     BadPath(String),
     #[error("Suspended")]
@@ -395,13 +399,105 @@ impl Endpoint {
         }
 
         if parts.last() == Some(&"discover") {
+            // Extract Accept header from request
             let accept_header = headers
                 .extract("accept")
                 .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))?;
-            if accept_header.is_some() {
-                let accept = accept_header.unwrap();
-                if !accept.contains("application/vnd.restate.endpointmanifest.v3+json") {
-                    return Err(Error(ErrorInner::BadDiscovery(accept.to_owned())));
+
+            // Negotiate discovery protocol version
+            let mut version = 2;
+            let mut content_type = DISCOVERY_CONTENT_TYPE_V2;
+            if let Some(accept) = accept_header {
+                if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
+                    version = 3;
+                    content_type = DISCOVERY_CONTENT_TYPE_V3;
+                } else if accept.contains(DISCOVERY_CONTENT_TYPE_V2) {
+                    version = 2;
+                    content_type = DISCOVERY_CONTENT_TYPE_V2;
+                } else {
+                    Err(ErrorInner::BadDiscoveryVersion(accept.to_owned()))?
+                }
+            }
+
+            // Validate that new discovery fields aren't used with older protocol versions
+            if version <= 2 {
+                // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
+                for service in &self.0.discovery.services {
+                    if service.inactivity_timeout.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "inactivity_timeout",
+                            3,
+                        ))?;
+                    }
+                    if service.abort_timeout.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
+                    }
+                    if service.idempotency_retention.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "idempotency_retention",
+                            3,
+                        ))?;
+                    }
+                    if service.journal_retention.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "journal_retention",
+                            3,
+                        ))?;
+                    }
+                    if service.enable_lazy_state.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "enable_lazy_state",
+                            3,
+                        ))?;
+                    }
+                    if service.ingress_private.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "ingress_private",
+                            3,
+                        ))?;
+                    }
+
+                    for handler in &service.handlers {
+                        if handler.inactivity_timeout.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "inactivity_timeout",
+                                3,
+                            ))?;
+                        }
+                        if handler.abort_timeout.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
+                        }
+                        if handler.idempotency_retention.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "idempotency_retention",
+                                3,
+                            ))?;
+                        }
+                        if handler.journal_retention.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "journal_retention",
+                                3,
+                            ))?;
+                        }
+                        if handler.workflow_completion_retention.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "workflow_retention",
+                                3,
+                            ))?;
+                        }
+                        if handler.enable_lazy_state.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "enable_lazy_state",
+                                3,
+                            ))?;
+                        }
+                        if handler.ingress_private.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "ingress_private",
+                                3,
+                            ))?;
+                        }
+                    }
                 }
             }
 
@@ -409,7 +505,7 @@ impl Endpoint {
                 status_code: 200,
                 headers: vec![Header {
                     key: "content-type".into(),
-                    value: DISCOVERY_CONTENT_TYPE.into(),
+                    value: content_type.into(),
                 }],
                 body: Bytes::from(
                     serde_json::to_string(&self.0.discovery)
