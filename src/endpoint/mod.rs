@@ -194,8 +194,23 @@ impl Service for BoxedService {
 /// Various configuration options that can be provided when binding a service
 #[derive(Default, Debug, Clone)]
 pub struct ServiceOptions {
-    /// Custom metadata of this service definition. This metadata is shown on the Admin API when querying the service definition.
-    pub metadata: HashMap<String, String>,
+    pub(crate) metadata: HashMap<String, String>,
+    pub(crate) inactivity_timeout: Option<Duration>,
+    pub(crate) abort_timeout: Option<Duration>,
+    pub(crate) idempotency_retention: Option<Duration>,
+    pub(crate) journal_retention: Option<Duration>,
+    pub(crate) enable_lazy_state: Option<bool>,
+    pub(crate) ingress_private: Option<bool>,
+    pub(crate) handler_options: HashMap<String, HandlerOptions>,
+
+    _priv: (),
+}
+
+impl ServiceOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
     /// termination by asking the invocation to suspend (which preserves intermediate progress).
     ///
@@ -204,7 +219,11 @@ pub struct ServiceOptions {
     ///
     /// This overrides the default inactivity timeout configured in the restate-server for all
     /// invocations to this service.
-    pub inactivity_timeout: Option<Duration>,
+    pub fn inactivity_timeout(mut self, timeout: Duration) -> Self {
+        self.inactivity_timeout = Some(timeout);
+        self
+    }
+
     /// This timer guards against stalled service/handler invocations that are supposed to terminate. The
     /// abort timeout is started after the inactivity_timeout has expired and the service/handler
     /// invocation has been asked to gracefully terminate. Once the timer expires, it will abort the
@@ -215,31 +234,81 @@ pub struct ServiceOptions {
     ///
     /// This overrides the default abort timeout configured in the restate-server for all invocations to
     /// this service.
-    pub abort_timeout: Option<Duration>,
+    pub fn abort_timeout(mut self, timeout: Duration) -> Self {
+        self.abort_timeout = Some(timeout);
+        self
+    }
+
     /// The retention duration of idempotent requests to this service.
-    pub idempotency_retention: Option<Duration>,
+    pub fn idempotency_retention(mut self, retention: Duration) -> Self {
+        self.idempotency_retention = Some(retention);
+        self
+    }
+
     /// The journal retention. When set, this applies to all requests to all handlers of this service.
     ///
     /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
     /// time.
-    pub journal_retention: Option<Duration>,
+    pub fn journal_retention(mut self, retention: Duration) -> Self {
+        self.journal_retention = Some(retention);
+        self
+    }
+
     /// When set to `true`, lazy state will be enabled for all invocations to this service. This is
     /// relevant only for workflows and virtual objects.
-    pub enable_lazy_state: Option<bool>,
+    pub fn enable_lazy_state(mut self, enable: bool) -> Self {
+        self.enable_lazy_state = Some(enable);
+        self
+    }
+
     /// When set to `true` this service, with all its handlers, cannot be invoked from the restate-server
     /// HTTP and Kafka ingress, but only from other services.
-    pub ingress_private: Option<bool>,
+    pub fn ingress_private(mut self, private: bool) -> Self {
+        self.ingress_private = Some(private);
+        self
+    }
+
+    /// Custom metadata of this service definition. This metadata is shown on the Admin API when querying the service definition.
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
     /// Handler-specific options.
     ///
     /// *Note*: If you provide a handler name for a non-existing handler, binding the service will *panic!*.
-    pub handler_options: HashMap<String, HandlerOptions>,
+    pub fn handler(mut self, handler_name: impl Into<String>, options: HandlerOptions) -> Self {
+        self.handler_options.insert(handler_name.into(), options);
+        self
+    }
 }
 
 /// Various configuration options that can be provided when binding a service handler
 #[derive(Default, Debug, Clone)]
 pub struct HandlerOptions {
+    pub(crate) metadata: HashMap<String, String>,
+    pub(crate) inactivity_timeout: Option<Duration>,
+    pub(crate) abort_timeout: Option<Duration>,
+    pub(crate) idempotency_retention: Option<Duration>,
+    pub(crate) workflow_retention: Option<Duration>,
+    pub(crate) journal_retention: Option<Duration>,
+    pub(crate) ingress_private: Option<bool>,
+    pub(crate) enable_lazy_state: Option<bool>,
+
+    _priv: (),
+}
+
+impl HandlerOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Custom metadata of this handler definition. This metadata is shown on the Admin API when querying the service/handler definition.
-    pub metadata: HashMap<String, String>,
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
     /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
     /// termination by asking the invocation to suspend (which preserves intermediate progress).
     ///
@@ -247,7 +316,11 @@ pub struct HandlerOptions {
     /// suspend.
     ///
     /// This overrides the inactivity timeout set for the service and the default set in restate-server.
-    pub inactivity_timeout: Option<Duration>,
+    pub fn inactivity_timeout(mut self, timeout: Duration) -> Self {
+        self.inactivity_timeout = Some(timeout);
+        self
+    }
+
     /// This timer guards against stalled invocations that are supposed to terminate. The abort timeout
     /// is started after the inactivity_timeout has expired and the invocation has been asked to
     /// gracefully terminate. Once the timer expires, it will abort the invocation.
@@ -256,22 +329,45 @@ pub struct HandlerOptions {
     /// terminate, then this value needs to be set accordingly.
     ///
     /// This overrides the abort timeout set for the service and the default set in restate-server.
-    pub abort_timeout: Option<Duration>,
+    pub fn abort_timeout(mut self, timeout: Duration) -> Self {
+        self.abort_timeout = Some(timeout);
+        self
+    }
+
     /// The retention duration of idempotent requests to this service.
-    pub idempotency_retention: Option<Duration>,
+    pub fn idempotency_retention(mut self, retention: Duration) -> Self {
+        self.idempotency_retention = Some(retention);
+        self
+    }
+
     /// The retention duration for this workflow handler.
-    pub workflow_retention: Option<Duration>,
+    pub fn workflow_retention(mut self, retention: Duration) -> Self {
+        self.workflow_retention = Some(retention);
+        self
+    }
+
     /// The journal retention for invocations to this handler.
     ///
     /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
     /// time.
-    pub journal_retention: Option<Duration>,
+    pub fn journal_retention(mut self, retention: Duration) -> Self {
+        self.journal_retention = Some(retention);
+        self
+    }
+
     /// When set to `true` this handler cannot be invoked from the restate-server HTTP and Kafka ingress,
     /// but only from other services.
-    pub ingress_private: Option<bool>,
+    pub fn ingress_private(mut self, private: bool) -> Self {
+        self.ingress_private = Some(private);
+        self
+    }
+
     /// When set to `true`, lazy state will be enabled for all invocations to this handler. This is
     /// relevant only for workflows and virtual objects.
-    pub enable_lazy_state: Option<bool>,
+    pub fn enable_lazy_state(mut self, enable: bool) -> Self {
+        self.enable_lazy_state = Some(enable);
+        self
+    }
 }
 
 /// Builder for [`Endpoint`]
