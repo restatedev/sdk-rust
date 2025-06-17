@@ -18,9 +18,11 @@ use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use tracing::{info_span, Instrument};
 
-const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v1+json";
+const DISCOVERY_CONTENT_TYPE_V2: &str = "application/vnd.restate.endpointmanifest.v2+json";
+const DISCOVERY_CONTENT_TYPE_V3: &str = "application/vnd.restate.endpointmanifest.v3+json";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -92,7 +94,8 @@ impl Error {
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
             | ErrorInner::HandlerResult { .. } => 500,
-            ErrorInner::BadDiscovery(_) => 415,
+            ErrorInner::FieldRequiresMinimumVersion { .. } => 500,
+            ErrorInner::BadDiscoveryVersion(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
             ErrorInner::IdentityVerification(_) => 401,
         }
@@ -111,8 +114,10 @@ pub(crate) enum ErrorInner {
     IdentityVerification(#[from] VerifyError),
     #[error("Cannot convert header '{0}', reason: {1}")]
     Header(String, #[source] BoxError),
-    #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery is {DISCOVERY_CONTENT_TYPE}")]
-    BadDiscovery(String),
+    #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2 and v3")]
+    BadDiscoveryVersion(String),
+    #[error("The field '{0}' was set in the service/handler options, but it requires minimum discovery protocol version {1}")]
+    FieldRequiresMinimumVersion(&'static str, u32),
     #[error("Bad path '{0}', expected either '/discover' or '/invoke/service/handler'")]
     BadPath(String),
     #[error("Suspended")]
@@ -186,6 +191,185 @@ impl Service for BoxedService {
     }
 }
 
+/// Various configuration options that can be provided when binding a service
+#[derive(Default, Debug, Clone)]
+pub struct ServiceOptions {
+    pub(crate) metadata: HashMap<String, String>,
+    pub(crate) inactivity_timeout: Option<Duration>,
+    pub(crate) abort_timeout: Option<Duration>,
+    pub(crate) idempotency_retention: Option<Duration>,
+    pub(crate) journal_retention: Option<Duration>,
+    pub(crate) enable_lazy_state: Option<bool>,
+    pub(crate) ingress_private: Option<bool>,
+    pub(crate) handler_options: HashMap<String, HandlerOptions>,
+
+    _priv: (),
+}
+
+impl ServiceOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
+    /// termination by asking the invocation to suspend (which preserves intermediate progress).
+    ///
+    /// The abort_timeout is used to abort the invocation, in case it doesn't react to the request to
+    /// suspend.
+    ///
+    /// This overrides the default inactivity timeout configured in the restate-server for all
+    /// invocations to this service.
+    pub fn inactivity_timeout(mut self, timeout: Duration) -> Self {
+        self.inactivity_timeout = Some(timeout);
+        self
+    }
+
+    /// This timer guards against stalled service/handler invocations that are supposed to terminate. The
+    /// abort timeout is started after the inactivity_timeout has expired and the service/handler
+    /// invocation has been asked to gracefully terminate. Once the timer expires, it will abort the
+    /// service/handler invocation.
+    ///
+    /// This timer potentially *interrupts* user code. If the user code needs longer to gracefully
+    /// terminate, then this value needs to be set accordingly.
+    ///
+    /// This overrides the default abort timeout configured in the restate-server for all invocations to
+    /// this service.
+    pub fn abort_timeout(mut self, timeout: Duration) -> Self {
+        self.abort_timeout = Some(timeout);
+        self
+    }
+
+    /// The retention duration of idempotent requests to this service.
+    pub fn idempotency_retention(mut self, retention: Duration) -> Self {
+        self.idempotency_retention = Some(retention);
+        self
+    }
+
+    /// The journal retention. When set, this applies to all requests to all handlers of this service.
+    ///
+    /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
+    /// time.
+    pub fn journal_retention(mut self, retention: Duration) -> Self {
+        self.journal_retention = Some(retention);
+        self
+    }
+
+    /// When set to `true`, lazy state will be enabled for all invocations to this service. This is
+    /// relevant only for workflows and virtual objects.
+    pub fn enable_lazy_state(mut self, enable: bool) -> Self {
+        self.enable_lazy_state = Some(enable);
+        self
+    }
+
+    /// When set to `true` this service, with all its handlers, cannot be invoked from the restate-server
+    /// HTTP and Kafka ingress, but only from other services.
+    pub fn ingress_private(mut self, private: bool) -> Self {
+        self.ingress_private = Some(private);
+        self
+    }
+
+    /// Custom metadata of this service definition. This metadata is shown on the Admin API when querying the service definition.
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Handler-specific options.
+    ///
+    /// *Note*: If you provide a handler name for a non-existing handler, binding the service will *panic!*.
+    pub fn handler(mut self, handler_name: impl Into<String>, options: HandlerOptions) -> Self {
+        self.handler_options.insert(handler_name.into(), options);
+        self
+    }
+}
+
+/// Various configuration options that can be provided when binding a service handler
+#[derive(Default, Debug, Clone)]
+pub struct HandlerOptions {
+    pub(crate) metadata: HashMap<String, String>,
+    pub(crate) inactivity_timeout: Option<Duration>,
+    pub(crate) abort_timeout: Option<Duration>,
+    pub(crate) idempotency_retention: Option<Duration>,
+    pub(crate) workflow_retention: Option<Duration>,
+    pub(crate) journal_retention: Option<Duration>,
+    pub(crate) ingress_private: Option<bool>,
+    pub(crate) enable_lazy_state: Option<bool>,
+
+    _priv: (),
+}
+
+impl HandlerOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Custom metadata of this handler definition. This metadata is shown on the Admin API when querying the service/handler definition.
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
+    /// termination by asking the invocation to suspend (which preserves intermediate progress).
+    ///
+    /// The abort_timeout is used to abort the invocation, in case it doesn't react to the request to
+    /// suspend.
+    ///
+    /// This overrides the inactivity timeout set for the service and the default set in restate-server.
+    pub fn inactivity_timeout(mut self, timeout: Duration) -> Self {
+        self.inactivity_timeout = Some(timeout);
+        self
+    }
+
+    /// This timer guards against stalled invocations that are supposed to terminate. The abort timeout
+    /// is started after the inactivity_timeout has expired and the invocation has been asked to
+    /// gracefully terminate. Once the timer expires, it will abort the invocation.
+    ///
+    /// This timer potentially *interrupts* user code. If the user code needs longer to gracefully
+    /// terminate, then this value needs to be set accordingly.
+    ///
+    /// This overrides the abort timeout set for the service and the default set in restate-server.
+    pub fn abort_timeout(mut self, timeout: Duration) -> Self {
+        self.abort_timeout = Some(timeout);
+        self
+    }
+
+    /// The retention duration of idempotent requests to this service.
+    pub fn idempotency_retention(mut self, retention: Duration) -> Self {
+        self.idempotency_retention = Some(retention);
+        self
+    }
+
+    /// The retention duration for this workflow handler.
+    pub fn workflow_retention(mut self, retention: Duration) -> Self {
+        self.workflow_retention = Some(retention);
+        self
+    }
+
+    /// The journal retention for invocations to this handler.
+    ///
+    /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
+    /// time.
+    pub fn journal_retention(mut self, retention: Duration) -> Self {
+        self.journal_retention = Some(retention);
+        self
+    }
+
+    /// When set to `true` this handler cannot be invoked from the restate-server HTTP and Kafka ingress,
+    /// but only from other services.
+    pub fn ingress_private(mut self, private: bool) -> Self {
+        self.ingress_private = Some(private);
+        self
+    }
+
+    /// When set to `true`, lazy state will be enabled for all invocations to this handler. This is
+    /// relevant only for workflows and virtual objects.
+    pub fn enable_lazy_state(mut self, enable: bool) -> Self {
+        self.enable_lazy_state = Some(enable);
+        self
+    }
+}
+
 /// Builder for [`Endpoint`]
 pub struct Builder {
     svcs: HashMap<String, BoxedService>,
@@ -225,10 +409,28 @@ impl Builder {
             + Sync
             + 'static,
     >(
-        mut self,
+        self,
         s: S,
     ) -> Self {
-        let service_metadata = S::discover();
+        self.bind_with_options(s, ServiceOptions::default())
+    }
+
+    /// Like [`bind`], but providing options
+    pub fn bind_with_options<
+        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
+            + Discoverable
+            + Send
+            + Sync
+            + 'static,
+    >(
+        mut self,
+        s: S,
+        service_options: ServiceOptions,
+    ) -> Self {
+        // Discover and apply options
+        let mut service_metadata = S::discover();
+        service_metadata.apply_options(service_options);
+
         let boxed_service = BoxedService::new(s);
         self.svcs
             .insert(service_metadata.name.to_string(), boxed_service);
@@ -293,13 +495,105 @@ impl Endpoint {
         }
 
         if parts.last() == Some(&"discover") {
+            // Extract Accept header from request
             let accept_header = headers
                 .extract("accept")
                 .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))?;
-            if accept_header.is_some() {
-                let accept = accept_header.unwrap();
-                if !accept.contains("application/vnd.restate.endpointmanifest.v1+json") {
-                    return Err(Error(ErrorInner::BadDiscovery(accept.to_owned())));
+
+            // Negotiate discovery protocol version
+            let mut version = 2;
+            let mut content_type = DISCOVERY_CONTENT_TYPE_V2;
+            if let Some(accept) = accept_header {
+                if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
+                    version = 3;
+                    content_type = DISCOVERY_CONTENT_TYPE_V3;
+                } else if accept.contains(DISCOVERY_CONTENT_TYPE_V2) {
+                    version = 2;
+                    content_type = DISCOVERY_CONTENT_TYPE_V2;
+                } else {
+                    Err(ErrorInner::BadDiscoveryVersion(accept.to_owned()))?
+                }
+            }
+
+            // Validate that new discovery fields aren't used with older protocol versions
+            if version <= 2 {
+                // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
+                for service in &self.0.discovery.services {
+                    if service.inactivity_timeout.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "inactivity_timeout",
+                            3,
+                        ))?;
+                    }
+                    if service.abort_timeout.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
+                    }
+                    if service.idempotency_retention.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "idempotency_retention",
+                            3,
+                        ))?;
+                    }
+                    if service.journal_retention.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "journal_retention",
+                            3,
+                        ))?;
+                    }
+                    if service.enable_lazy_state.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "enable_lazy_state",
+                            3,
+                        ))?;
+                    }
+                    if service.ingress_private.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "ingress_private",
+                            3,
+                        ))?;
+                    }
+
+                    for handler in &service.handlers {
+                        if handler.inactivity_timeout.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "inactivity_timeout",
+                                3,
+                            ))?;
+                        }
+                        if handler.abort_timeout.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
+                        }
+                        if handler.idempotency_retention.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "idempotency_retention",
+                                3,
+                            ))?;
+                        }
+                        if handler.journal_retention.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "journal_retention",
+                                3,
+                            ))?;
+                        }
+                        if handler.workflow_completion_retention.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "workflow_retention",
+                                3,
+                            ))?;
+                        }
+                        if handler.enable_lazy_state.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "enable_lazy_state",
+                                3,
+                            ))?;
+                        }
+                        if handler.ingress_private.is_some() {
+                            Err(ErrorInner::FieldRequiresMinimumVersion(
+                                "ingress_private",
+                                3,
+                            ))?;
+                        }
+                    }
                 }
             }
 
@@ -307,7 +601,7 @@ impl Endpoint {
                 status_code: 200,
                 headers: vec![Header {
                     key: "content-type".into(),
-                    value: DISCOVERY_CONTENT_TYPE.into(),
+                    value: content_type.into(),
                 }],
                 body: Bytes::from(
                     serde_json::to_string(&self.0.discovery)

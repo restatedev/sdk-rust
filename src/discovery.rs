@@ -7,9 +7,9 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/endpoint_manifest.rs"));
 }
 
-pub use generated::*;
-
+use crate::endpoint::{HandlerOptions, ServiceOptions};
 use crate::serde::PayloadMetadata;
+pub use generated::*;
 
 impl InputPayload {
     pub fn empty() -> Self {
@@ -46,5 +46,45 @@ impl OutputPayload {
             json_schema: T::json_schema(),
             set_content_type_if_empty: Some(output_metadata.set_content_type_if_empty),
         }
+    }
+}
+
+impl Service {
+    pub(crate) fn apply_options(&mut self, options: ServiceOptions) {
+        // Apply service options
+        self.metadata.extend(options.metadata);
+        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
+        self.abort_timeout = options.abort_timeout.map(|d| d.as_millis() as u64);
+        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
+        self.idempotency_retention = options.idempotency_retention.map(|d| d.as_millis() as u64);
+        self.journal_retention = options.journal_retention.map(|d| d.as_millis() as u64);
+        self.enable_lazy_state = options.enable_lazy_state;
+        self.ingress_private = options.ingress_private;
+
+        // Apply handler specific options
+        for (handler_name, handler_options) in options.handler_options {
+            let handler = self
+                .handlers
+                .iter_mut()
+                .find(|h| handler_name == h.name.as_str())
+                .expect("Invalid handler name provided in the options");
+            handler.apply_options(handler_options);
+        }
+    }
+}
+
+impl Handler {
+    pub(crate) fn apply_options(&mut self, options: HandlerOptions) {
+        // Apply handler options
+        self.metadata.extend(options.metadata);
+        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
+        self.abort_timeout = options.abort_timeout.map(|d| d.as_millis() as u64);
+        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
+        self.idempotency_retention = options.idempotency_retention.map(|d| d.as_millis() as u64);
+        self.journal_retention = options.journal_retention.map(|d| d.as_millis() as u64);
+        self.workflow_completion_retention =
+            options.workflow_retention.map(|d| d.as_millis() as u64);
+        self.enable_lazy_state = options.enable_lazy_state;
+        self.ingress_private = options.ingress_private;
     }
 }
