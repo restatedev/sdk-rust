@@ -18,6 +18,7 @@ use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use tracing::{info_span, Instrument};
 
 const DISCOVERY_CONTENT_TYPE: &str = "application/vnd.restate.endpointmanifest.v3+json";
@@ -189,14 +190,84 @@ impl Service for BoxedService {
 /// Various configuration options that can be provided when binding a service
 #[derive(Default, Debug, Clone)]
 pub struct ServiceOptions {
+    /// Custom metadata of this service definition. This metadata is shown on the Admin API when querying the service definition.
     pub metadata: HashMap<String, String>,
+    /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
+    /// termination by asking the invocation to suspend (which preserves intermediate progress).
+    ///
+    /// The abort_timeout is used to abort the invocation, in case it doesn't react to the request to
+    /// suspend.
+    ///
+    /// This overrides the default inactivity timeout configured in the restate-server for all
+    /// invocations to this service.
+    pub inactivity_timeout: Option<Duration>,
+    /// This timer guards against stalled service/handler invocations that are supposed to terminate. The
+    /// abort timeout is started after the inactivity_timeout has expired and the service/handler
+    /// invocation has been asked to gracefully terminate. Once the timer expires, it will abort the
+    /// service/handler invocation.
+    ///
+    /// This timer potentially *interrupts* user code. If the user code needs longer to gracefully
+    /// terminate, then this value needs to be set accordingly.
+    ///
+    /// This overrides the default abort timeout configured in the restate-server for all invocations to
+    /// this service.
+    pub abort_timeout: Option<Duration>,
+    /// The retention duration of idempotent requests to this service.
+    pub idempotency_retention: Option<Duration>,
+    /// The journal retention. When set, this applies to all requests to all handlers of this service.
+    ///
+    /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
+    /// time.
+    pub journal_retention: Option<Duration>,
+    /// When set to `true`, lazy state will be enabled for all invocations to this service. This is
+    /// relevant only for workflows and virtual objects.
+    pub enable_lazy_state: Option<bool>,
+    /// When set to `true` this service, with all its handlers, cannot be invoked from the restate-server
+    /// HTTP and Kafka ingress, but only from other services.
+    pub ingress_private: Option<bool>,
+    /// Handler-specific options.
+    ///
+    /// *Note*: If you provide a handler name for a non-existing handler, binding the service will *panic!*.
     pub handler_options: HashMap<String, HandlerOptions>,
 }
 
 /// Various configuration options that can be provided when binding a service handler
 #[derive(Default, Debug, Clone)]
 pub struct HandlerOptions {
+    /// Custom metadata of this handler definition. This metadata is shown on the Admin API when querying the service/handler definition.
     pub metadata: HashMap<String, String>,
+    /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
+    /// termination by asking the invocation to suspend (which preserves intermediate progress).
+    ///
+    /// The abort_timeout is used to abort the invocation, in case it doesn't react to the request to
+    /// suspend.
+    ///
+    /// This overrides the inactivity timeout set for the service and the default set in restate-server.
+    pub inactivity_timeout: Option<Duration>,
+    /// This timer guards against stalled invocations that are supposed to terminate. The abort timeout
+    /// is started after the inactivity_timeout has expired and the invocation has been asked to
+    /// gracefully terminate. Once the timer expires, it will abort the invocation.
+    ///
+    /// This timer potentially *interrupts* user code. If the user code needs longer to gracefully
+    /// terminate, then this value needs to be set accordingly.
+    ///
+    /// This overrides the abort timeout set for the service and the default set in restate-server.
+    pub abort_timeout: Option<Duration>,
+    /// The retention duration of idempotent requests to this service.
+    pub idempotency_retention: Option<Duration>,
+    /// The retention duration for this workflow handler.
+    pub workflow_retention: Option<Duration>,
+    /// The journal retention for invocations to this handler.
+    ///
+    /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
+    /// time.
+    pub journal_retention: Option<Duration>,
+    /// When set to `true` this handler cannot be invoked from the restate-server HTTP and Kafka ingress,
+    /// but only from other services.
+    pub ingress_private: Option<bool>,
+    /// When set to `true`, lazy state will be enabled for all invocations to this handler. This is
+    /// relevant only for workflows and virtual objects.
+    pub enable_lazy_state: Option<bool>,
 }
 
 /// Builder for [`Endpoint`]
