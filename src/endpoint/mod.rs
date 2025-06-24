@@ -148,23 +148,11 @@ pub(crate) enum ErrorInner {
     },
 }
 
-impl From<restate_sdk_shared_core::SuspendedError> for ErrorInner {
-    fn from(_: restate_sdk_shared_core::SuspendedError) -> Self {
-        Self::Suspended
-    }
-}
-
-impl From<restate_sdk_shared_core::SuspendedOrVMError> for ErrorInner {
-    fn from(value: restate_sdk_shared_core::SuspendedOrVMError) -> Self {
-        match value {
-            restate_sdk_shared_core::SuspendedOrVMError::Suspended(e) => e.into(),
-            restate_sdk_shared_core::SuspendedOrVMError::VM(e) => e.into(),
-        }
-    }
-}
-
 impl From<CoreError> for Error {
     fn from(e: CoreError) -> Self {
+        if e.is_suspended_error() {
+            return ErrorInner::Suspended.into();
+        }
         ErrorInner::from(e).into()
     }
 }
