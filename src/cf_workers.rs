@@ -1,9 +1,17 @@
 
-use std::str::FromStr;
-use http::{HeaderName, HeaderValue, StatusCode};
-use web_sys::{js_sys::Uint8Array, wasm_bindgen::{prelude::Closure, JsCast, JsValue}, ReadableStream, ReadableStreamDefaultController};
+use std::{ops::Deref, str::FromStr};
+use http::{response, HeaderName, HeaderValue, StatusCode};
+use restate_sdk_shared_core::Header;
+use tokio::sync::mpsc;
+use web_sys::{js_sys::Uint8Array, wasm_bindgen::{prelude::Closure, JsCast, JsValue}, ReadableStream, ReadableStreamDefaultController, ReadableStreamDefaultReader};
+use wasm_bindgen_futures;
 use worker::*;
-use crate::prelude::Endpoint;
+use crate::{endpoint::{InputReceiver, OutputSender}, prelude::Endpoint};
+
+#[allow(clippy::declare_interior_mutable_const)]
+const X_RESTATE_SERVER: HeaderName = HeaderName::from_static("x-restate-server");
+const X_RESTATE_SERVER_VALUE: HeaderValue =
+    HeaderValue::from_static(concat!("restate-sdk-rust/", env!("CARGO_PKG_VERSION")));
 
 // Convert Bytes to ReadableStream using Web API bindings
 fn bytes_to_readable_stream(data: bytes::Bytes) ->  core::result::Result<ReadableStream, JsValue> {
@@ -31,6 +39,21 @@ fn bytes_to_readable_stream(data: bytes::Bytes) ->  core::result::Result<Readabl
     ReadableStream::new_with_underlying_source(&underlying_source)
 }
 
+fn response_builder_from_response_head(
+    status_code: u16,
+    headers: Vec<Header>,
+) -> response::Builder {
+    let mut response_builder = http::Response::builder()
+        .status(status_code)
+        .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE);
+
+    for header in headers {
+        response_builder = response_builder.header(header.key.deref(), header.value.deref());
+    }
+
+    response_builder
+}
+
 /// Http server to expose your Restate services.
 pub struct CfWorkerServer {
     endpoint: Endpoint,
@@ -48,9 +71,10 @@ impl CfWorkerServer {
         Self { endpoint }
     }
 
-    pub fn call(&self, req: HttpRequest) -> worker::Result<http::Response<Body>> {
+    pub async fn call(&self, req: HttpRequest) -> worker::Result<http::Response<worker::Body>> {
         let headers = req.headers().to_owned();
-        let result = self.endpoint.resolve(req.uri().path(), headers);
+        let (parts, body) = req.into_parts();
+        let result = self.endpoint.resolve(parts.uri.path(), headers);
 
         if let Ok(response) = result {
             match response {
@@ -69,11 +93,73 @@ impl CfWorkerServer {
 
                     Ok(http_response)
                 }
-                crate::endpoint::Response::BidiStream { status_code:_, headers:_, handler:_ } => {
-                    // Cloudflare Workers don't support HTTP 1.1/HTTP 2 bididirectional streams
-                    let http_response = http::Response::builder().status(StatusCode::NOT_IMPLEMENTED).body(worker::Body::empty())?;
-                    // have to use worker::Result not http::Result
+                crate::endpoint::Response::BidiStream { status_code, headers, handler} => {
+
+                    // let body_stream = ReadableStream::from_raw(body.into_inner().unwrap());
+
+                    // let stream = body_stream.into_stream();
+                    //
+
+                    // Read entire request body first to avoid Send issues with WebAssembly pointers
+                    let js_stream: ReadableStream = body.into_inner().unwrap().unchecked_into();
+                    let reader: ReadableStreamDefaultReader = js_stream.get_reader().unchecked_into();
+
+                    let mut request_body = Vec::new();
+                    loop {
+                        let read_result = wasm_bindgen_futures::JsFuture::from(reader.read()).await;
+                        match read_result {
+                            Ok(js_value) => {
+                                let done = js_sys::Reflect::get(&js_value, &JsValue::from_str("done")).unwrap();
+                                if done.as_bool().unwrap_or(false) {
+                                    break;
+                                }
+                                let value = js_sys::Reflect::get(&js_value, &JsValue::from_str("value")).unwrap();
+                                let uint8_array: Uint8Array = value.unchecked_into();
+                                let mut bytes = vec![0u8; uint8_array.length() as usize];
+                                uint8_array.copy_to(&mut bytes);
+                                request_body.extend_from_slice(&bytes);
+                            }
+                            Err(_) => break,
+                        }
+                    }
+
+                    // Create a simple stream from the collected bytes
+                    let request_bytes = bytes::Bytes::from(request_body);
+                    let stream = futures_util::stream::once(async move {
+                        Ok::<bytes::Bytes, Box<dyn std::error::Error + Send + Sync>>(request_bytes)
+                    });
+
+                    let input_receiver = InputReceiver::from_stream(stream);
+
+                    let (output_tx, output_rx) = mpsc::unbounded_channel();
+                    let output_sender = OutputSender::from_channel(output_tx);
+
+                    // Execute handler and collect output
+                    let _ = handler.handle(input_receiver, output_sender).await;
+
+                    // Collect all output chunks
+                    let mut response_body = Vec::new();
+                    let mut rx = output_rx;
+                    while let Some(chunk) = rx.recv().await {
+                        response_body.extend_from_slice(&chunk);
+                    }
+
+                    let readable_stream = bytes_to_readable_stream(bytes::Bytes::from(response_body))?;
+                    let mut http_response = http::Response::builder()
+                        .status(status_code)
+                        .body(Body::new(readable_stream))?;
+
+                    for header in headers {
+                        let key = HeaderName::from_str(header.key.as_ref())?;
+                        let value = HeaderValue::from_str(header.value.as_ref())?;
+                        http_response.headers_mut().insert(key, value);
+                    }
+
                     Ok(http_response)
+                    // // Cloudflare Workers don't support HTTP 1.1/HTTP 2 bididirectional streams
+                    // let http_response = http::Response::builder().status(StatusCode::IM_A_TEAPOT).body(worker::Body::empty())?;
+                    // // have to use worker::Result not http::Result
+                    // Ok(http_response)
                 },
             }
         }

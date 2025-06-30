@@ -50,6 +50,10 @@ worker = {version = "0.6.0", features=["http"], optional = true }
 hyper = { version = "1.6", optional = true}
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http2"], optional = true }
 getrandom = { version = "0.3.3", features = ["wasm_js"], optional = true}
+futures-util = "0.3.31"
+wasm-streams = "0.4.2"
+async-stream = "0.3.6"
+wasm-bindgen-futures = "0.4"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
