@@ -59,7 +59,7 @@ impl CfWorkerServer {
 
     pub async fn call(&self, req: HttpRequest) -> worker::Result<http::Response<worker::Body>> {
         let headers = req.headers().to_owned();
-        let (parts, body) = req.into_parts();
+        let (parts, request_body) = req.into_parts();
         let result = self.endpoint.resolve(parts.uri.path(), headers);
 
         if let Ok(response) = result {
@@ -85,7 +85,7 @@ impl CfWorkerServer {
                     // Implenting this as a workaround using existing handler api, expecting a hyper request stream
                     // Reads entire request/reponse body to proxy data across WASM boundary
 
-                    let js_stream: ReadableStream = body.into_inner().unwrap().unchecked_into();
+                    let js_stream: ReadableStream = request_body.into_inner().unwrap().unchecked_into();
                     let reader: ReadableStreamDefaultReader = js_stream.get_reader().unchecked_into();
 
                     let mut request_body = Vec::new();
