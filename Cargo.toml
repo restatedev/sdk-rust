@@ -17,6 +17,11 @@ name = "schema"
 path = "examples/schema.rs"
 required-features = ["schemars"]
 
+[[example]]
+name = "cf_workers"
+path = "examples/cf_workers.rs"
+required-features = ["cf_workers"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
