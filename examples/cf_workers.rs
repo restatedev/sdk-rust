@@ -1,5 +1,17 @@
 #![cfg(target_family = "wasm")]
 
+// this is an example of a Rust file that uses the restate-sdk crate to create a Cloudflare Worker service.
+// this code needs to be compiled to WebAssembly using the wrangler dev tools with extra rust flags to enable wasm support
+//
+// for local development use this command:
+// RUSTFLAGS='--cfg getrandom_backend="wasm_js"' npx wrangler dev
+//
+// or push to production using this command:
+// RUSTFLAGS='--cfg getrandom_backend="wasm_js"' npx wrangler deploy
+//
+// The Cloudflare Worker automated build pipeline doesn't currently support this code due to missing clang binaries
+//
+
 use restate_sdk::prelude::*;
 
 #[restate_sdk::service]
