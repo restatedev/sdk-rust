@@ -1,18 +1,12 @@
 
-use std::{ops::Deref, str::FromStr};
-use http::{response, HeaderName, HeaderValue, StatusCode};
-use restate_sdk_shared_core::Header;
+use std::str::FromStr;
+use http::{HeaderName, HeaderValue, StatusCode};
 use tokio::sync::mpsc;
 use web_sys::{js_sys::Uint8Array, wasm_bindgen::{prelude::Closure, JsCast, JsValue},
     ReadableStream, ReadableStreamDefaultController, ReadableStreamDefaultReader};
 use wasm_bindgen_futures;
 use worker::*;
 use crate::{endpoint::{InputReceiver, OutputSender}, prelude::Endpoint};
-
-#[allow(clippy::declare_interior_mutable_const)]
-const X_RESTATE_SERVER: HeaderName = HeaderName::from_static("x-restate-server");
-const X_RESTATE_SERVER_VALUE: HeaderValue =
-    HeaderValue::from_static(concat!("restate-sdk-rust/", env!("CARGO_PKG_VERSION")));
 
 // Convert Bytes to ReadableStream using Web API bindings
 fn bytes_to_readable_stream(data: bytes::Bytes) ->  core::result::Result<ReadableStream, JsValue> {
