@@ -3,7 +3,8 @@ use std::{ops::Deref, str::FromStr};
 use http::{response, HeaderName, HeaderValue, StatusCode};
 use restate_sdk_shared_core::Header;
 use tokio::sync::mpsc;
-use web_sys::{js_sys::Uint8Array, wasm_bindgen::{prelude::Closure, JsCast, JsValue}, ReadableStream, ReadableStreamDefaultController, ReadableStreamDefaultReader};
+use web_sys::{js_sys::Uint8Array, wasm_bindgen::{prelude::Closure, JsCast, JsValue},
+    ReadableStream, ReadableStreamDefaultController, ReadableStreamDefaultReader};
 use wasm_bindgen_futures;
 use worker::*;
 use crate::{endpoint::{InputReceiver, OutputSender}, prelude::Endpoint};
@@ -39,22 +40,7 @@ fn bytes_to_readable_stream(data: bytes::Bytes) ->  core::result::Result<Readabl
     ReadableStream::new_with_underlying_source(&underlying_source)
 }
 
-fn response_builder_from_response_head(
-    status_code: u16,
-    headers: Vec<Header>,
-) -> response::Builder {
-    let mut response_builder = http::Response::builder()
-        .status(status_code)
-        .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE);
-
-    for header in headers {
-        response_builder = response_builder.header(header.key.deref(), header.value.deref());
-    }
-
-    response_builder
-}
-
-/// Http server to expose your Restate services.
+/// Cloudflare Worker server to expose Restate services.
 pub struct CfWorkerServer {
     endpoint: Endpoint,
 }
@@ -66,7 +52,7 @@ impl From<Endpoint> for CfWorkerServer {
 }
 
 impl CfWorkerServer {
-    /// Create new [`HttpServer`] from an [`Endpoint`].
+
     pub fn new(endpoint: Endpoint) -> Self {
         Self { endpoint }
     }
