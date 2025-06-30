@@ -95,12 +95,10 @@ impl CfWorkerServer {
                 }
                 crate::endpoint::Response::BidiStream { status_code, headers, handler} => {
 
-                    // let body_stream = ReadableStream::from_raw(body.into_inner().unwrap());
+                    // Cloudflare Workers don't support HTTP 1.1/HTTP 2 bididirectional streams
+                    // Implenting this as a workaround using existing handler api, expecting a hyper request stream
+                    // Reads entire request/reponse body to proxy data across WASM boundary
 
-                    // let stream = body_stream.into_stream();
-                    //
-
-                    // Read entire request body first to avoid Send issues with WebAssembly pointers
                     let js_stream: ReadableStream = body.into_inner().unwrap().unchecked_into();
                     let reader: ReadableStreamDefaultReader = js_stream.get_reader().unchecked_into();
 
@@ -123,7 +121,7 @@ impl CfWorkerServer {
                         }
                     }
 
-                    // Create a simple stream from the collected bytes
+                    // Create a simple stream from the collected bytes -- this maps to existing restate sdk stream implementation for hanlders
                     let request_bytes = bytes::Bytes::from(request_body);
                     let stream = futures_util::stream::once(async move {
                         Ok::<bytes::Bytes, Box<dyn std::error::Error + Send + Sync>>(request_bytes)
@@ -137,13 +135,14 @@ impl CfWorkerServer {
                     // Execute handler and collect output
                     let _ = handler.handle(input_receiver, output_sender).await;
 
-                    // Collect all output chunks
+                    // Collect all output chunks to proxy body response across WASM boundary
                     let mut response_body = Vec::new();
                     let mut rx = output_rx;
                     while let Some(chunk) = rx.recv().await {
                         response_body.extend_from_slice(&chunk);
                     }
 
+                    // Build HTTP Response from bytes
                     let readable_stream = bytes_to_readable_stream(bytes::Bytes::from(response_body))?;
                     let mut http_response = http::Response::builder()
                         .status(status_code)
@@ -156,10 +155,6 @@ impl CfWorkerServer {
                     }
 
                     Ok(http_response)
-                    // // Cloudflare Workers don't support HTTP 1.1/HTTP 2 bididirectional streams
-                    // let http_response = http::Response::builder().status(StatusCode::IM_A_TEAPOT).body(worker::Body::empty())?;
-                    // // have to use worker::Result not http::Result
-                    // Ok(http_response)
                 },
             }
         }
