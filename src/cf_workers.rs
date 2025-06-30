@@ -2,7 +2,7 @@
 use std::str::FromStr;
 use http::{HeaderName, HeaderValue, StatusCode};
 use tokio::sync::mpsc;
-use web_sys::{js_sys::Uint8Array, wasm_bindgen::{prelude::Closure, JsCast, JsValue},
+use web_sys::{js_sys::Uint8Array, Reflect, Object, wasm_bindgen::{prelude::Closure, JsCast, JsValue},
     ReadableStream, ReadableStreamDefaultController, ReadableStreamDefaultReader};
 use wasm_bindgen_futures;
 use worker::*;
@@ -10,7 +10,7 @@ use crate::{endpoint::{InputReceiver, OutputSender}, prelude::Endpoint};
 
 // Convert Bytes to ReadableStream using Web API bindings
 fn bytes_to_readable_stream(data: bytes::Bytes) ->  core::result::Result<ReadableStream, JsValue> {
-    let underlying_source = js_sys::Object::new();
+    let underlying_source = Object::new();
 
     let start_closure = Closure::wrap(Box::new(move |controller: ReadableStreamDefaultController| {
         // Convert bytes to Uint8Array
@@ -23,7 +23,7 @@ fn bytes_to_readable_stream(data: bytes::Bytes) ->  core::result::Result<Readabl
 
     }) as Box<dyn FnMut(ReadableStreamDefaultController)>);
 
-    js_sys::Reflect::set(
+    Reflect::set(
         &underlying_source,
         &JsValue::from_str("start"),
         start_closure.as_ref().unchecked_ref(),
@@ -60,6 +60,7 @@ impl CfWorkerServer {
             match response {
                 crate::endpoint::Response::ReplyNow { status_code, headers, body } => {
 
+                    // convert outbound body data from a buffer into a readable stream
                     let readable_stream = bytes_to_readable_stream(body)?;
                     let mut http_response = http::Response::builder()
                         .status(status_code)
@@ -82,6 +83,8 @@ impl CfWorkerServer {
                     let js_stream: ReadableStream = request_body.into_inner().unwrap().unchecked_into();
                     let reader: ReadableStreamDefaultReader = js_stream.get_reader().unchecked_into();
 
+
+                    // Drain the inbound Request API body data from a Stream API ReadableStream into a buffer
                     let mut request_body = Vec::new();
                     loop {
                         let read_result = wasm_bindgen_futures::JsFuture::from(reader.read()).await;
@@ -101,7 +104,7 @@ impl CfWorkerServer {
                         }
                     }
 
-                    // Create a simple stream from the collected bytes -- this maps to existing restate sdk stream implementation for hanlders
+                    // Create a Rust stream from the collected bytes -- this maps to existing restate sdk stream implementation for hanlders
                     let request_bytes = bytes::Bytes::from(request_body);
                     let stream = futures_util::stream::once(async move {
                         Ok::<bytes::Bytes, Box<dyn std::error::Error + Send + Sync>>(request_bytes)
@@ -122,7 +125,7 @@ impl CfWorkerServer {
                         response_body.extend_from_slice(&chunk);
                     }
 
-                    // Build HTTP Response from bytes
+                    // Build HTTP Response-- converting outbound buffer into readable stream
                     let readable_stream = bytes_to_readable_stream(bytes::Bytes::from(response_body))?;
                     let mut http_response = http::Response::builder()
                         .status(status_code)

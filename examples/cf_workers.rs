@@ -30,7 +30,7 @@ impl MyService for MyServiceImpl {
 #[worker::event(fetch)]
 pub async fn main( req:worker::HttpRequest, _env: worker::Env, _ctx: worker::Context) -> worker::Result<http::Response<worker::Body>> {
     let endpoint = Endpoint::builder()
-        .with_protocol_mode(restate_sdk::discovery::ProtocolMode::RequestResponse) // Cloud
+        .with_protocol_mode(restate_sdk::discovery::ProtocolMode::RequestResponse) // Cloudflare Workers don't support bidi streams
         .bind(MyServiceImpl.serve())
         .build();
 
