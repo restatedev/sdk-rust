@@ -121,12 +121,15 @@ The Rust SDK is currently in active development, and might break across releases
 
 The compatibility with Restate is described in the following table:
 
-| Restate Server\sdk-rust | 0.0 - 0.2 | 0.3 | 0.4 - 0.5 |
-|-------------------------|-----------|-----|-----------|
-| 1.0                     | ✅         | ❌   | ❌         |
-| 1.1                     | ✅         | ✅   | ❌         |
-| 1.2                     | ✅         | ✅   | ❌         |
-| 1.3                     | ✅         | ✅   | ✅         |
+| Restate Server\sdk-rust | 0.0 - 0.2 | 0.3 | 0.4 - 0.5 | 0.6              |
+|-------------------------|-----------|-----|-----------|------------------|
+| 1.0                     | ✅         | ❌   | ❌         | ❌                |
+| 1.1                     | ✅         | ✅   | ❌         | ❌                |
+| 1.2                     | ✅         | ✅   | ❌         | ❌                |
+| 1.3                     | ✅         | ✅   | ✅         | ✅ <sup>(1)</sup> |
+| 1.4                     | ✅         | ✅   | ✅         | ✅                |
+
+<sup>(1)</sup> **Note** `bind_with_options` works only from Restate 1.4 onward. 
 
 ## Contributing
 
