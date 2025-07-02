@@ -34,7 +34,7 @@ pin-project-lite = "0.2"
 rand = { version = "0.9", optional = true }
 regress = "0.10"
 restate-sdk-macros = { version = "0.5", path = "macros" }
-restate-sdk-shared-core = { git = "https://github.com/restatedev/sdk-shared-core.git", rev = "96b78a6160880cc4b34c56750dd96652e11cd81c", features = ["request_identity", "sha2_random_seed", "http"] }
+restate-sdk-shared-core = { version = "=0.4.0", features = ["request_identity", "sha2_random_seed", "http"] }
 schemars = { version = "1.0.0-alpha.17", optional = true }
 serde = "1.0"
 serde_json = "1.0"
