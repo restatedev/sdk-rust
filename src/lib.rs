@@ -226,6 +226,8 @@ pub mod filter;
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
+#[cfg(feature = "cf_workers")]
+pub mod cf_workers;
 pub mod serde;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
@@ -508,6 +510,9 @@ pub use restate_sdk_macros::workflow;
 pub mod prelude {
     #[cfg(feature = "http_server")]
     pub use crate::http_server::HttpServer;
+
+    #[cfg(feature = "cf_workers")]
+    pub use crate::cf_workers::CfWorkerServer;
 
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,

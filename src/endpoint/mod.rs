@@ -386,6 +386,11 @@ impl Builder {
         Self::default()
     }
 
+    pub fn with_protocol_mode(mut self, mode: crate::discovery::ProtocolMode) -> Self {
+        self.discovery.protocol_mode = Some(mode);
+        self
+    }
+
     /// Add a [`Service`] to this endpoint.
     ///
     /// When using the [`service`](macro@crate::service), [`object`](macro@crate::object) or [`workflow`](macro@crate::workflow) macros,
