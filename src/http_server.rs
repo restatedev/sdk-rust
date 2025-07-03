@@ -7,7 +7,7 @@
 //! 3. Listen on the specified port (default `9080`) for connections and requests.
 //!
 //! ```rust,no_run
-//! # #[path = "../examples/services/mod.rs"]
+//! # #[path = "../examples/trait_block/services/mod.rs"]
 //! # mod services;
 //! # use services::my_service::{MyService, MyServiceImpl};
 //! # use services::my_virtual_object::{MyVirtualObject, MyVirtualObjectImpl};
@@ -37,7 +37,7 @@
 //! Add the identity key to your endpoint as follows:
 //!
 //! ```rust,no_run
-//! # #[path = "../examples/services/mod.rs"]
+//! # #[path = "../examples/trait_block/services/mod.rs"]
 //! # mod services;
 //! # use services::my_service::{MyService, MyServiceImpl};
 //! # use restate_sdk::endpoint::Endpoint;

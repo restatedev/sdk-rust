@@ -273,7 +273,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// You can do request-response calls to Services, Virtual Objects, and Workflows, in the following way:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services/mod.rs"]
+/// # #[path = "../../examples/trait_block/services/mod.rs"]
 /// # mod services;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
 /// # use services::my_service::MyServiceClient;
@@ -324,7 +324,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// Handlers can send messages (a.k.a. one-way calls, or fire-and-forget calls), as follows:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services/mod.rs"]
+/// # #[path = "../../examples/trait_block/services/mod.rs"]
 /// # mod services;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
 /// # use services::my_service::MyServiceClient;
@@ -364,7 +364,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// To schedule a delayed call, send a message with a delay parameter, as follows:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services/mod.rs"]
+/// # #[path = "../../examples/trait_block/services/mod.rs"]
 /// # mod services;
 /// # use services::my_virtual_object::MyVirtualObjectClient;
 /// # use services::my_service::MyServiceClient;
@@ -403,7 +403,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// For example, assume a handler calls the same Virtual Object twice:
 ///
 /// ```rust,no_run
-/// # #[path = "../../examples/services/my_virtual_object.rs"]
+/// # #[path = "../../examples/trait_block/services/my_virtual_object.rs"]
 /// # mod my_virtual_object;
 /// # use my_virtual_object::MyVirtualObjectClient;
 /// # use restate_sdk::prelude::*;
