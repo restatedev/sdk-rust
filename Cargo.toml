@@ -9,12 +9,12 @@ rust-version = "1.76.0"
 
 [[example]]
 name = "tracing"
-path = "examples/tracing.rs"
+path = "examples/trait_block/tracing.rs"
 required-features = ["tracing-span-filter"]
 
 [[example]]
 name = "schema"
-path = "examples/schema.rs"
+path = "examples/trait_block/schema.rs"
 required-features = ["schemars"]
 
 [features]
