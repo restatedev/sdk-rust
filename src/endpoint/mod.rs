@@ -43,6 +43,7 @@ pub struct InputReceiver(InputReceiverInner);
 enum InputReceiverInner {
     Channel(tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BoxError>>),
     BoxedStream(Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send + 'static>>),
+    Bytes(Option<Bytes>),
 }
 
 impl InputReceiver {
@@ -54,6 +55,10 @@ impl InputReceiver {
         Self(InputReceiverInner::Channel(rx))
     }
 
+    pub fn from_bytes(b: Bytes) -> Self {
+        Self(InputReceiverInner::Bytes(Some(b)))
+    }
+
     async fn recv(&mut self) -> Option<Result<Bytes, BoxError>> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
@@ -62,6 +67,7 @@ impl InputReceiver {
         match &mut self.0 {
             InputReceiverInner::Channel(ch) => ch.poll_recv(cx),
             InputReceiverInner::BoxedStream(s) => s.poll_next_unpin(cx),
+            InputReceiverInner::Bytes(b) => Poll::Ready(b.take().map(Ok)),
         }
     }
 }
@@ -432,6 +438,11 @@ impl Builder {
         Ok(self)
     }
 
+    pub(crate) fn set_protocol_mode(mut self, mode: crate::discovery::ProtocolMode) -> Self {
+        self.discovery.protocol_mode = Some(mode);
+        self
+    }
+
     /// Build the [`Endpoint`].
     pub fn build(self) -> Endpoint {
         Endpoint(Arc::new(EndpointInner {
@@ -439,6 +450,14 @@ impl Builder {
             discovery: self.discovery,
             identity_verifier: self.identity_verifier,
         }))
+    }
+
+    #[cfg(feature = "lambda")]
+    pub fn build_lambda(self) -> crate::lambda::LambdaEndpoint {
+        crate::lambda::LambdaEndpoint::new(
+            self.set_protocol_mode(crate::discovery::ProtocolMode::RequestResponse)
+                .build(),
+        )
     }
 }
 

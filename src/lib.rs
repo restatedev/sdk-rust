@@ -226,6 +226,8 @@ pub mod filter;
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
+#[cfg(feature = "lambda")]
+pub mod lambda;
 pub mod serde;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
