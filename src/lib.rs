@@ -511,6 +511,9 @@ pub mod prelude {
     #[cfg(feature = "http_server")]
     pub use crate::http_server::HttpServer;
 
+    #[cfg(feature = "lambda")]
+    pub use crate::lambda::LambdaEndpoint;
+
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
         ContextSideEffects, ContextTimers, ContextWriteState, HeaderMap, InvocationHandle,
