@@ -190,7 +190,7 @@ impl Endpoint {
     pub fn handle<B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static>(
         &self,
         req: http::Request<B>,
-    ) -> Result<http::Response<ResponseBody>, Error> {
+    ) -> http::Response<ResponseBody> {
         self.handle_with_options(req, HandleOptions::default())
     }
 
@@ -201,13 +201,13 @@ impl Endpoint {
         &self,
         req: http::Request<B>,
         options: HandleOptions,
-    ) -> Result<http::Response<ResponseBody>, Error> {
+    ) -> http::Response<ResponseBody> {
         let (parts, body) = req.into_parts();
         let path = parts.uri.path();
         let headers = parts.headers;
 
         if let Err(e) = self.0.identity_verifier.verify_identity(&headers, path) {
-            return Err(ErrorInner::IdentityVerification(e).into());
+            return error_response(ErrorInner::IdentityVerification(e));
         }
 
         let parts: Vec<&str> = path.split('/').collect();
@@ -221,9 +221,9 @@ impl Endpoint {
 
         // Parse service name/handler name
         let (svc_name, handler_name) = match parts.get(parts.len() - 3..) {
-            None => return Ok(error_response(ErrorInner::BadPath(path.to_owned()))),
+            None => return error_response(ErrorInner::BadPath(path.to_owned())),
             Some(last_elements) if last_elements[0] != "invoke" => {
-                return Ok(error_response(ErrorInner::BadPath(path.to_owned())))
+                return error_response(ErrorInner::BadPath(path.to_owned()))
             }
             Some(last_elements) => (last_elements[1].to_owned(), last_elements[2].to_owned()),
         };
@@ -231,7 +231,7 @@ impl Endpoint {
         // Prepare vm
         let vm = match CoreVM::new(headers, Default::default()) {
             Ok(vm) => vm,
-            Err(e) => return Ok(error_response(e)),
+            Err(e) => return error_response(e),
         };
         let ResponseHead {
             status_code,
@@ -241,9 +241,9 @@ impl Endpoint {
 
         // Resolve service
         if !self.0.svcs.contains_key(&svc_name) {
-            return Ok(error_response(ErrorInner::UnknownService(
+            return error_response(ErrorInner::UnknownService(
                 svc_name.to_owned(),
-            )));
+            ));
         }
 
         // Prepare handle_invocation future
@@ -269,7 +269,7 @@ impl Endpoint {
             invocation_response_builder =
                 invocation_response_builder.header(key.deref(), value.deref());
         }
-        Ok(invocation_response_builder
+        invocation_response_builder
             .body(
                 Either::Right(InvocationRunnerBody {
                     fut: Some(handle_invocation_fut),
@@ -278,25 +278,25 @@ impl Endpoint {
                 })
                 .into(),
             )
-            .expect("Headers should be valid"))
+            .expect("Headers should be valid")
     }
 
-    fn handle_health(&self) -> Result<http::Response<ResponseBody>, Error> {
-        Ok(simple_response(200, vec![], Bytes::default()))
+    fn handle_health(&self) -> http::Response<ResponseBody> {
+        simple_response(200, vec![], Bytes::default())
     }
 
     fn handle_discovery(
         &self,
         headers: http::HeaderMap,
         protocol_mode: ProtocolMode,
-    ) -> Result<http::Response<ResponseBody>, Error> {
+    ) -> http::Response<ResponseBody> {
         // Extract Accept header from request
         let accept_header = match headers
             .extract("accept")
             .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))
         {
             Ok(h) => h,
-            Err(e) => return Ok(error_response(e)),
+            Err(e) => return error_response(e),
         };
 
         // Negotiate discovery protocol version
@@ -310,17 +310,17 @@ impl Endpoint {
                 version = 2;
                 content_type = DISCOVERY_CONTENT_TYPE_V2;
             } else {
-                return Ok(error_response(ErrorInner::BadDiscoveryVersion(
+                return error_response(ErrorInner::BadDiscoveryVersion(
                     accept.to_owned(),
-                )));
+                ));
             }
         }
 
         if let Err(e) = self.validate_discovery_request(version) {
-            return Ok(error_response(e));
+            return error_response(e);
         }
 
-        Ok(simple_response(
+        simple_response(
             200,
             vec![Header {
                 key: "content-type".into(),
@@ -340,7 +340,7 @@ impl Endpoint {
                 })
                 .expect("Discovery should be serializable"),
             ),
-        ))
+        )
     }
 
     fn validate_discovery_request(&self, version: usize) -> Result<(), ErrorInner> {
