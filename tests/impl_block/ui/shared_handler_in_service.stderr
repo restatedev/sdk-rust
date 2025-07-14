@@ -1,0 +1,23 @@
+error: Service handlers cannot be annotated with #[handler(shared)]
+ --> tests/ui/shared_handler_in_service.rs:7:15
+  |
+7 |     #[handler(shared)]
+  |               ^^^^^^
+
+error[E0599]: no method named `with_service` found for struct `restate_sdk::endpoint::Builder` in the current scope
+  --> tests/ui/shared_handler_in_service.rs:18:14
+   |
+17 | /         Endpoint::builder()
+18 | |             .with_service(SharedHandlerInService.serve())
+   | |             -^^^^^^^^^^^^ method not found in `Builder`
+   | |_____________|
+   |
+
+error[E0599]: no method named `serve` found for struct `SharedHandlerInService` in the current scope
+  --> tests/ui/shared_handler_in_service.rs:18:50
+   |
+3  | struct SharedHandlerInService;
+   | ----------------------------- method `serve` not found for this struct
+...
+18 |             .with_service(SharedHandlerInService.serve())
+   |                                                  ^^^^^ method not found in `SharedHandlerInService`

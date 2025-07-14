@@ -16,15 +16,24 @@ extern crate proc_macro;
 mod ast;
 mod gen;
 
-use crate::ast::{Object, Service, Workflow};
+use crate::ast::{Object, Service, ServiceInner, ValidArgs, Workflow};
 use crate::gen::ServiceGenerator;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::parse_macro_input;
 
 #[proc_macro_attribute]
-pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
-    let svc = parse_macro_input!(input as Service);
+pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
+    let mut svc = parse_macro_input!(input as Service);
+
+    match &mut svc.0 {
+        ServiceInner::Trait(..) => {}
+        ServiceInner::Impl(inner) => {
+            let args = parse_macro_input!(args as ValidArgs);
+            inner.restate_name = args.restate_name.unwrap_or(inner.ident.to_string());
+            inner.vis = args.vis;
+        }
+    }
 
     ServiceGenerator::new_service(&svc)
         .into_token_stream()
@@ -32,8 +41,17 @@ pub fn service(_: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
-    let svc = parse_macro_input!(input as Object);
+pub fn object(args: TokenStream, input: TokenStream) -> TokenStream {
+    let mut svc = parse_macro_input!(input as Object);
+
+    match &mut svc.0 {
+        ServiceInner::Trait(..) => {}
+        ServiceInner::Impl(inner) => {
+            let args = parse_macro_input!(args as ValidArgs);
+            inner.restate_name = args.restate_name.unwrap_or(inner.ident.to_string());
+            inner.vis = args.vis;
+        }
+    }
 
     ServiceGenerator::new_object(&svc)
         .into_token_stream()
@@ -41,8 +59,17 @@ pub fn object(_: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
-    let svc = parse_macro_input!(input as Workflow);
+pub fn workflow(args: TokenStream, input: TokenStream) -> TokenStream {
+    let mut svc = parse_macro_input!(input as Workflow);
+
+    match &mut svc.0 {
+        ServiceInner::Trait(..) => {}
+        ServiceInner::Impl(inner) => {
+            let args = parse_macro_input!(args as ValidArgs);
+            inner.restate_name = args.restate_name.unwrap_or(inner.ident.to_string());
+            inner.vis = args.vis;
+        }
+    }
 
     ServiceGenerator::new_workflow(&svc)
         .into_token_stream()

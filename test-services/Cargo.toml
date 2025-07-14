@@ -14,3 +14,11 @@ restate-sdk = { path = "..", features = ["schemars"] }
 schemars = "1.0.0-alpha.17"
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1.40"
+
+[[bin]]
+name = "trait-test-services"
+path = "src/trait_block/main.rs"
+
+[[bin]]
+name = "impl-test-services"
+path = "src/impl_block/main.rs"
