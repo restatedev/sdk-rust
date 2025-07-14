@@ -6,6 +6,7 @@ use crate::endpoint::{Endpoint, HandleOptions, ProtocolMode};
 use http::{Request, Response};
 use hyper::body::Incoming;
 use hyper::service::Service;
+use std::convert::Infallible;
 use std::future::{ready, Ready};
 
 /// Wraps [`Endpoint`] to implement hyper [`Service`].
@@ -20,15 +21,15 @@ impl HyperEndpoint {
 
 impl Service<Request<Incoming>> for HyperEndpoint {
     type Response = Response<endpoint::ResponseBody>;
-    type Error = endpoint::Error;
+    type Error = Infallible;
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        ready(self.0.handle_with_options(
+        ready(Ok(self.0.handle_with_options(
             req,
             HandleOptions {
                 protocol_mode: ProtocolMode::BidiStream,
             },
-        ))
+        )))
     }
 }
