@@ -186,25 +186,11 @@ impl HandlerOptions {
 }
 
 /// Builder for [`Endpoint`]
+#[derive(Default)]
 pub struct Builder {
     svcs: HashMap<String, BoxedService>,
-    discovery: crate::discovery::Endpoint,
+    discovery_services: Vec<crate::discovery::Service>,
     identity_verifier: IdentityVerifier,
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Self {
-            svcs: Default::default(),
-            discovery: crate::discovery::Endpoint {
-                max_protocol_version: 5,
-                min_protocol_version: 5,
-                protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
-                services: vec![],
-            },
-            identity_verifier: Default::default(),
-        }
-    }
 }
 
 impl Builder {
@@ -249,7 +235,7 @@ impl Builder {
         let boxed_service = BoxedService::new(s);
         self.svcs
             .insert(service_metadata.name.to_string(), boxed_service);
-        self.discovery.services.push(service_metadata);
+        self.discovery_services.push(service_metadata);
         self
     }
 
@@ -263,7 +249,7 @@ impl Builder {
     pub fn build(self) -> Endpoint {
         Endpoint(Arc::new(EndpointInner {
             svcs: self.svcs,
-            discovery: self.discovery,
+            discovery_services: self.discovery_services,
             identity_verifier: self.identity_verifier,
         }))
     }

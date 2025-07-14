@@ -1,7 +1,7 @@
 //! Hyper integration.
 
 use crate::endpoint;
-use crate::endpoint::Endpoint;
+use crate::endpoint::{Endpoint, HandleOptions, ProtocolMode};
 
 use http::{Request, Response};
 use hyper::body::Incoming;
@@ -24,6 +24,11 @@ impl Service<Request<Incoming>> for HyperEndpoint {
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        ready(self.0.handle(req))
+        ready(self.0.handle_with_options(
+            req,
+            HandleOptions {
+                protocol_mode: ProtocolMode::BidiStream,
+            },
+        ))
     }
 }

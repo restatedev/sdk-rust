@@ -167,14 +167,40 @@ impl Endpoint {
 
 struct EndpointInner {
     svcs: HashMap<String, BoxedService>,
-    discovery: crate::discovery::Endpoint,
+    discovery_services: Vec<crate::discovery::Service>,
     identity_verifier: IdentityVerifier,
 }
 
+#[derive(Default)]
+pub(crate) enum ProtocolMode {
+    #[allow(dead_code)]
+    RequestResponse,
+    #[default]
+    BidiStream,
+}
+
+/// Options for [`Endpoint::handle`].
+#[derive(Default)]
+pub(crate) struct HandleOptions {
+    pub(crate) protocol_mode: ProtocolMode,
+}
+
 impl Endpoint {
+    /// Handle an [`http::Request`], producing an [`http::Response`].
     pub fn handle<B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static>(
         &self,
         req: http::Request<B>,
+    ) -> Result<http::Response<ResponseBody>, Error> {
+        self.handle_with_options(req, HandleOptions::default())
+    }
+
+    /// Handle an [`http::Request`], producing an [`http::Response`].
+    pub(crate) fn handle_with_options<
+        B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static,
+    >(
+        &self,
+        req: http::Request<B>,
+        options: HandleOptions,
     ) -> Result<http::Response<ResponseBody>, Error> {
         let (parts, body) = req.into_parts();
         let path = parts.uri.path();
@@ -190,7 +216,7 @@ impl Endpoint {
             return self.handle_health();
         }
         if parts.last() == Some(&"discover") {
-            return self.handle_discovery(headers);
+            return self.handle_discovery(headers, options.protocol_mode);
         }
 
         // Parse service name/handler name
@@ -262,6 +288,7 @@ impl Endpoint {
     fn handle_discovery(
         &self,
         headers: http::HeaderMap,
+        protocol_mode: ProtocolMode,
     ) -> Result<http::Response<ResponseBody>, Error> {
         // Extract Accept header from request
         let accept_header = match headers
@@ -300,7 +327,18 @@ impl Endpoint {
                 value: content_type.into(),
             }],
             Bytes::from(
-                serde_json::to_string(&self.0.discovery).expect("Discovery should be serializable"),
+                serde_json::to_string(&crate::discovery::Endpoint {
+                    max_protocol_version: 5,
+                    min_protocol_version: 5,
+                    protocol_mode: Some(match protocol_mode {
+                        ProtocolMode::RequestResponse => {
+                            crate::discovery::ProtocolMode::RequestResponse
+                        }
+                        ProtocolMode::BidiStream => crate::discovery::ProtocolMode::BidiStream,
+                    }),
+                    services: self.0.discovery_services.clone(),
+                })
+                .expect("Discovery should be serializable"),
             ),
         ))
     }
@@ -309,7 +347,7 @@ impl Endpoint {
         // Validate that new discovery fields aren't used with older protocol versions
         if version <= 2 {
             // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
-            for service in &self.0.discovery.services {
+            for service in &self.0.discovery_services {
                 if service.inactivity_timeout.is_some() {
                     Err(ErrorInner::FieldRequiresMinimumVersion(
                         "inactivity_timeout",
