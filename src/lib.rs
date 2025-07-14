@@ -193,6 +193,76 @@
 //! - [Virtual Object](object)
 //! - [Workflow](workflow)
 //!
+//! ## Running on Lambda
+//!
+//! The Restate Rust SDK supports running services on AWS Lambda using Lambda Function URLs. This allows you to deploy your Restate services as serverless functions.
+//!
+//! ### Setup
+//!
+//! First, enable the `lambda` feature in your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! restate-sdk = { version = "0.1", features = ["lambda"] }
+//! tokio = { version = "1", features = ["full"] }
+//! ```
+//!
+//! ### Basic Lambda Service
+//!
+//! Here's how to create a simple Lambda service:
+//!
+//! ```rust,no_run
+//! #![cfg(feature = "lambda")]
+//!
+//! use restate_sdk::prelude::*;
+//!
+//! #[restate_sdk::service]
+//! trait Greeter {
+//!     async fn greet(name: String) -> HandlerResult<String>;
+//! }
+//!
+//! struct GreeterImpl;
+//!
+//! impl Greeter for GreeterImpl {
+//!     async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
+//!         Ok(format!("Greetings {name}"))
+//!     }
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     // To enable logging/tracing
+//!     // check https://docs.aws.amazon.com/lambda/latest/dg/rust-logging.html#rust-logging-tracing
+//!
+//!     // Build and run the Lambda endpoint
+//!     LambdaEndpoint::run(
+//!         Endpoint::builder()
+//!             .bind(GreeterImpl.serve())
+//!             .build(),
+//!     )
+//!     .await
+//!     .unwrap();
+//! }
+//! ```
+//!
+//! ### Deployment
+//!
+//! 1. Install `cargo-lambda`
+//!    ```bash
+//!    cargo install cargo-lambda
+//!    ```
+//! 2. Build your Lambda function:
+//!
+//!    ```bash
+//!    cargo lambda build --release --arm64 --output-format zip
+//!    ```
+//!
+//! 3. Create a Lambda function with the following configuration:
+//!
+//!    - **Runtime**: Amazon Linux 2023
+//!    - **Architecture**: arm64
+//!
+//! 4. Upload your `zip` file to the Lambda function.
 //!
 //! ### Logging
 //!
@@ -226,6 +296,8 @@ pub mod filter;
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
+#[cfg(feature = "lambda")]
+pub mod lambda;
 pub mod serde;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
@@ -508,6 +580,9 @@ pub use restate_sdk_macros::workflow;
 pub mod prelude {
     #[cfg(feature = "http_server")]
     pub use crate::http_server::HttpServer;
+
+    #[cfg(feature = "lambda")]
+    pub use crate::lambda::LambdaEndpoint;
 
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
