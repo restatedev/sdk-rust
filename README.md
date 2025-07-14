@@ -10,11 +10,11 @@
 
 ## Community
 
-* 🤗️ [Join our online community](https://discord.gg/skW3AZ6uGd) for help, sharing feedback and talking to the community.
-* 📖 [Check out our documentation](https://docs.restate.dev) to get quickly started!
-* 📣 [Follow us on Twitter](https://twitter.com/restatedev) for staying up to date.
-* 🙋 [Create a GitHub issue](https://github.com/restatedev/sdk-java/issues) for requesting a new feature or reporting a problem.
-* 🏠 [Visit our GitHub org](https://github.com/restatedev) for exploring other repositories.
+- 🤗️ [Join our online community](https://discord.gg/skW3AZ6uGd) for help, sharing feedback and talking to the community.
+- 📖 [Check out our documentation](https://docs.restate.dev) to get quickly started!
+- 📣 [Follow us on Twitter](https://twitter.com/restatedev) for staying up to date.
+- 🙋 [Create a GitHub issue](https://github.com/restatedev/sdk-java/issues) for requesting a new feature or reporting a problem.
+- 🏠 [Visit our GitHub org](https://github.com/restatedev) for exploring other repositories.
 
 ## Using the SDK
 
@@ -57,6 +57,76 @@ async fn main() {
     .await;
 }
 ```
+
+## Running on Lambda
+
+The Restate Rust SDK supports running services on AWS Lambda using Lambda Function URLs. This allows you to deploy your Restate services as serverless functions.
+
+### Setup
+
+First, enable the `lambda` feature in your `Cargo.toml`:
+
+```toml
+[dependencies]
+restate-sdk = { version = "0.1", features = ["lambda"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+### Basic Lambda Service
+
+Here's how to create a simple Lambda service:
+
+```rust
+use restate_sdk::prelude::*;
+
+#[restate_sdk::service]
+trait Greeter {
+    async fn greet(name: String) -> HandlerResult<String>;
+}
+
+struct GreeterImpl;
+
+impl Greeter for GreeterImpl {
+    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
+        Ok(format!("Greetings {name}"))
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // To enable logging/tracing
+    // tracing_subscriber::fmt::init();
+
+    // Build and run the Lambda endpoint
+    LambdaEndpoint::new(
+        Endpoint::builder()
+            .bind(GreeterImpl.serve())
+            .build(),
+    )
+    .run()
+    .await
+    .unwrap();
+}
+```
+
+### Deployment
+
+1. Install `cargo-lambda`
+   ```
+   cargo install cargo-lambda
+   ```
+2. Build your Lambda function:
+
+   ```bash
+   cargo lambda build --release --arm64 --output-format zip
+   ```
+
+3. Create a Lambda function with the following configuration:
+
+   - **Runtime**: Amazon Linux 2023
+   - **Architecture**: arm64
+
+4. Upload your `zip` file to the Lambda function.
 
 ### Logging
 
@@ -121,15 +191,15 @@ The Rust SDK is currently in active development, and might break across releases
 
 The compatibility with Restate is described in the following table:
 
-| Restate Server\sdk-rust | 0.0 - 0.2 | 0.3 | 0.4 - 0.5 | 0.6              |
-|-------------------------|-----------|-----|-----------|------------------|
-| 1.0                     | ✅         | ❌   | ❌         | ❌                |
-| 1.1                     | ✅         | ✅   | ❌         | ❌                |
-| 1.2                     | ✅         | ✅   | ❌         | ❌                |
-| 1.3                     | ✅         | ✅   | ✅         | ✅ <sup>(1)</sup> |
-| 1.4                     | ✅         | ✅   | ✅         | ✅                |
+| Restate Server\sdk-rust | 0.0 - 0.2 | 0.3 | 0.4 - 0.5 | 0.6               |
+| ----------------------- | --------- | --- | --------- | ----------------- |
+| 1.0                     | ✅        | ❌  | ❌        | ❌                |
+| 1.1                     | ✅        | ✅  | ❌        | ❌                |
+| 1.2                     | ✅        | ✅  | ❌        | ❌                |
+| 1.3                     | ✅        | ✅  | ✅        | ✅ <sup>(1)</sup> |
+| 1.4                     | ✅        | ✅  | ✅        | ✅                |
 
-<sup>(1)</sup> **Note** `bind_with_options` works only from Restate 1.4 onward. 
+<sup>(1)</sup> **Note** `bind_with_options` works only from Restate 1.4 onward.
 
 ## Contributing
 
