@@ -1,70 +1,44 @@
+mod builder;
 mod context;
 mod futures;
 mod handler_state;
 
+pub use builder::{Builder, HandlerOptions, ServiceOptions};
+
 use crate::endpoint::futures::handler_state_aware::HandlerStateAwareFuture;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
-use crate::service::{Discoverable, Service};
+use crate::service::Service;
 use ::futures::future::BoxFuture;
-use ::futures::{Stream, StreamExt};
+use ::futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use bytes::Bytes;
 pub use context::{ContextInternal, InputMetadata};
+use http::header::CONTENT_TYPE;
+use http::{HeaderName, HeaderValue};
+use http_body::{Body, Frame, SizeHint};
+use http_body_util::{BodyExt, Either, Full};
+use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, Error as CoreError, Header, HeaderMap, IdentityVerifier, KeyError, VerifyError, VM,
+    CoreVM, Error as CoreError, Header, HeaderMap, IdentityVerifier, ResponseHead, VerifyError, VM,
 };
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::future::poll_fn;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
-use tracing::{info_span, Instrument};
+use std::task::{ready, Context, Poll};
+use tokio::sync::mpsc;
+use tracing::{info_span, warn, Instrument};
 
+#[allow(clippy::declare_interior_mutable_const)]
+const X_RESTATE_SERVER: HeaderName = HeaderName::from_static("x-restate-server");
+const X_RESTATE_SERVER_VALUE: HeaderValue =
+    HeaderValue::from_static(concat!("restate-sdk-rust/", env!("CARGO_PKG_VERSION")));
 const DISCOVERY_CONTENT_TYPE_V2: &str = "application/vnd.restate.endpointmanifest.v2+json";
 const DISCOVERY_CONTENT_TYPE_V3: &str = "application/vnd.restate.endpointmanifest.v3+json";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
-pub struct OutputSender(tokio::sync::mpsc::UnboundedSender<Bytes>);
-
-impl OutputSender {
-    pub fn from_channel(tx: tokio::sync::mpsc::UnboundedSender<Bytes>) -> Self {
-        Self(tx)
-    }
-
-    fn send(&self, b: Bytes) -> bool {
-        self.0.send(b).is_ok()
-    }
-}
-
-pub struct InputReceiver(InputReceiverInner);
-
-enum InputReceiverInner {
-    Channel(tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BoxError>>),
-    BoxedStream(Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send + 'static>>),
-}
-
-impl InputReceiver {
-    pub fn from_stream<S: Stream<Item = Result<Bytes, BoxError>> + Send + 'static>(s: S) -> Self {
-        Self(InputReceiverInner::BoxedStream(Box::pin(s)))
-    }
-
-    pub fn from_channel(rx: tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BoxError>>) -> Self {
-        Self(InputReceiverInner::Channel(rx))
-    }
-
-    async fn recv(&mut self) -> Option<Result<Bytes, BoxError>> {
-        poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<Bytes, BoxError>>> {
-        match &mut self.0 {
-            InputReceiverInner::Channel(ch) => ch.poll_recv(cx),
-            InputReceiverInner::BoxedStream(s) => s.poll_next_unpin(cx),
-        }
-    }
-}
 
 // TODO can we have the backtrace here?
 /// Endpoint error. This encapsulates any error that happens within the SDK while processing a request.
@@ -80,9 +54,7 @@ impl Error {
             handler_name.to_owned(),
         ))
     }
-}
 
-impl Error {
     /// Returns the HTTP status code for this error.
     pub fn status_code(&self) -> u16 {
         match &self.0 {
@@ -179,269 +151,6 @@ impl Service for BoxedService {
     }
 }
 
-/// Various configuration options that can be provided when binding a service
-#[derive(Default, Debug, Clone)]
-pub struct ServiceOptions {
-    pub(crate) metadata: HashMap<String, String>,
-    pub(crate) inactivity_timeout: Option<Duration>,
-    pub(crate) abort_timeout: Option<Duration>,
-    pub(crate) idempotency_retention: Option<Duration>,
-    pub(crate) journal_retention: Option<Duration>,
-    pub(crate) enable_lazy_state: Option<bool>,
-    pub(crate) ingress_private: Option<bool>,
-    pub(crate) handler_options: HashMap<String, HandlerOptions>,
-
-    _priv: (),
-}
-
-impl ServiceOptions {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
-    /// termination by asking the invocation to suspend (which preserves intermediate progress).
-    ///
-    /// The abort_timeout is used to abort the invocation, in case it doesn't react to the request to
-    /// suspend.
-    ///
-    /// This overrides the default inactivity timeout configured in the restate-server for all
-    /// invocations to this service.
-    pub fn inactivity_timeout(mut self, timeout: Duration) -> Self {
-        self.inactivity_timeout = Some(timeout);
-        self
-    }
-
-    /// This timer guards against stalled service/handler invocations that are supposed to terminate. The
-    /// abort timeout is started after the inactivity_timeout has expired and the service/handler
-    /// invocation has been asked to gracefully terminate. Once the timer expires, it will abort the
-    /// service/handler invocation.
-    ///
-    /// This timer potentially *interrupts* user code. If the user code needs longer to gracefully
-    /// terminate, then this value needs to be set accordingly.
-    ///
-    /// This overrides the default abort timeout configured in the restate-server for all invocations to
-    /// this service.
-    pub fn abort_timeout(mut self, timeout: Duration) -> Self {
-        self.abort_timeout = Some(timeout);
-        self
-    }
-
-    /// The retention duration of idempotent requests to this service.
-    pub fn idempotency_retention(mut self, retention: Duration) -> Self {
-        self.idempotency_retention = Some(retention);
-        self
-    }
-
-    /// The journal retention. When set, this applies to all requests to all handlers of this service.
-    ///
-    /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
-    /// time.
-    pub fn journal_retention(mut self, retention: Duration) -> Self {
-        self.journal_retention = Some(retention);
-        self
-    }
-
-    /// When set to `true`, lazy state will be enabled for all invocations to this service. This is
-    /// relevant only for workflows and virtual objects.
-    pub fn enable_lazy_state(mut self, enable: bool) -> Self {
-        self.enable_lazy_state = Some(enable);
-        self
-    }
-
-    /// When set to `true` this service, with all its handlers, cannot be invoked from the restate-server
-    /// HTTP and Kafka ingress, but only from other services.
-    pub fn ingress_private(mut self, private: bool) -> Self {
-        self.ingress_private = Some(private);
-        self
-    }
-
-    /// Custom metadata of this service definition. This metadata is shown on the Admin API when querying the service definition.
-    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata.insert(key.into(), value.into());
-        self
-    }
-
-    /// Handler-specific options.
-    ///
-    /// *Note*: If you provide a handler name for a non-existing handler, binding the service will *panic!*.
-    pub fn handler(mut self, handler_name: impl Into<String>, options: HandlerOptions) -> Self {
-        self.handler_options.insert(handler_name.into(), options);
-        self
-    }
-}
-
-/// Various configuration options that can be provided when binding a service handler
-#[derive(Default, Debug, Clone)]
-pub struct HandlerOptions {
-    pub(crate) metadata: HashMap<String, String>,
-    pub(crate) inactivity_timeout: Option<Duration>,
-    pub(crate) abort_timeout: Option<Duration>,
-    pub(crate) idempotency_retention: Option<Duration>,
-    pub(crate) workflow_retention: Option<Duration>,
-    pub(crate) journal_retention: Option<Duration>,
-    pub(crate) ingress_private: Option<bool>,
-    pub(crate) enable_lazy_state: Option<bool>,
-
-    _priv: (),
-}
-
-impl HandlerOptions {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Custom metadata of this handler definition. This metadata is shown on the Admin API when querying the service/handler definition.
-    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata.insert(key.into(), value.into());
-        self
-    }
-
-    /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
-    /// termination by asking the invocation to suspend (which preserves intermediate progress).
-    ///
-    /// The abort_timeout is used to abort the invocation, in case it doesn't react to the request to
-    /// suspend.
-    ///
-    /// This overrides the inactivity timeout set for the service and the default set in restate-server.
-    pub fn inactivity_timeout(mut self, timeout: Duration) -> Self {
-        self.inactivity_timeout = Some(timeout);
-        self
-    }
-
-    /// This timer guards against stalled invocations that are supposed to terminate. The abort timeout
-    /// is started after the inactivity_timeout has expired and the invocation has been asked to
-    /// gracefully terminate. Once the timer expires, it will abort the invocation.
-    ///
-    /// This timer potentially *interrupts* user code. If the user code needs longer to gracefully
-    /// terminate, then this value needs to be set accordingly.
-    ///
-    /// This overrides the abort timeout set for the service and the default set in restate-server.
-    pub fn abort_timeout(mut self, timeout: Duration) -> Self {
-        self.abort_timeout = Some(timeout);
-        self
-    }
-
-    /// The retention duration of idempotent requests to this service.
-    pub fn idempotency_retention(mut self, retention: Duration) -> Self {
-        self.idempotency_retention = Some(retention);
-        self
-    }
-
-    /// The retention duration for this workflow handler.
-    pub fn workflow_retention(mut self, retention: Duration) -> Self {
-        self.workflow_retention = Some(retention);
-        self
-    }
-
-    /// The journal retention for invocations to this handler.
-    ///
-    /// In case the request has an idempotency key, the idempotency_retention caps the journal retention
-    /// time.
-    pub fn journal_retention(mut self, retention: Duration) -> Self {
-        self.journal_retention = Some(retention);
-        self
-    }
-
-    /// When set to `true` this handler cannot be invoked from the restate-server HTTP and Kafka ingress,
-    /// but only from other services.
-    pub fn ingress_private(mut self, private: bool) -> Self {
-        self.ingress_private = Some(private);
-        self
-    }
-
-    /// When set to `true`, lazy state will be enabled for all invocations to this handler. This is
-    /// relevant only for workflows and virtual objects.
-    pub fn enable_lazy_state(mut self, enable: bool) -> Self {
-        self.enable_lazy_state = Some(enable);
-        self
-    }
-}
-
-/// Builder for [`Endpoint`]
-pub struct Builder {
-    svcs: HashMap<String, BoxedService>,
-    discovery: crate::discovery::Endpoint,
-    identity_verifier: IdentityVerifier,
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Self {
-            svcs: Default::default(),
-            discovery: crate::discovery::Endpoint {
-                max_protocol_version: 5,
-                min_protocol_version: 5,
-                protocol_mode: Some(crate::discovery::ProtocolMode::BidiStream),
-                services: vec![],
-            },
-            identity_verifier: Default::default(),
-        }
-    }
-}
-
-impl Builder {
-    /// Create a new builder for [`Endpoint`].
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add a [`Service`] to this endpoint.
-    ///
-    /// When using the [`service`](macro@crate::service), [`object`](macro@crate::object) or [`workflow`](macro@crate::workflow) macros,
-    /// you need to pass the result of the `serve` method.
-    pub fn bind<
-        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
-            + Discoverable
-            + Send
-            + Sync
-            + 'static,
-    >(
-        self,
-        s: S,
-    ) -> Self {
-        self.bind_with_options(s, ServiceOptions::default())
-    }
-
-    /// Like [`bind`], but providing options
-    pub fn bind_with_options<
-        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
-            + Discoverable
-            + Send
-            + Sync
-            + 'static,
-    >(
-        mut self,
-        s: S,
-        service_options: ServiceOptions,
-    ) -> Self {
-        // Discover and apply options
-        let mut service_metadata = S::discover();
-        service_metadata.apply_options(service_options);
-
-        let boxed_service = BoxedService::new(s);
-        self.svcs
-            .insert(service_metadata.name.to_string(), boxed_service);
-        self.discovery.services.push(service_metadata);
-        self
-    }
-
-    /// Add identity key, e.g. `publickeyv1_ChjENKeMvCtRnqG2mrBK1HmPKufgFUc98K8B3ononQvp`.
-    pub fn identity_key(mut self, key: &str) -> Result<Self, KeyError> {
-        self.identity_verifier = self.identity_verifier.with_key(key)?;
-        Ok(self)
-    }
-
-    /// Build the [`Endpoint`].
-    pub fn build(self) -> Endpoint {
-        Endpoint(Arc::new(EndpointInner {
-            svcs: self.svcs,
-            discovery: self.discovery,
-            identity_verifier: self.identity_verifier,
-        }))
-    }
-}
-
 /// This struct encapsulates all the business logic to handle incoming requests to the SDK,
 /// including service discovery, invocations and identity verification.
 ///
@@ -456,18 +165,21 @@ impl Endpoint {
     }
 }
 
-pub struct EndpointInner {
+struct EndpointInner {
     svcs: HashMap<String, BoxedService>,
     discovery: crate::discovery::Endpoint,
     identity_verifier: IdentityVerifier,
 }
 
 impl Endpoint {
-    pub fn resolve<H>(&self, path: &str, headers: H) -> Result<Response, Error>
-    where
-        H: HeaderMap,
-        <H as HeaderMap>::Error: std::error::Error + Send + Sync + 'static,
-    {
+    pub fn handle<B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static>(
+        &self,
+        req: http::Request<B>,
+    ) -> Result<http::Response<ResponseBody>, Error> {
+        let (parts, body) = req.into_parts();
+        let path = parts.uri.path();
+        let headers = parts.headers;
+
         if let Err(e) = self.0.identity_verifier.verify_identity(&headers, path) {
             return Err(ErrorInner::IdentityVerification(e).into());
         }
@@ -475,238 +187,345 @@ impl Endpoint {
         let parts: Vec<&str> = path.split('/').collect();
 
         if parts.last() == Some(&"health") {
-            return Ok(Response::ReplyNow {
-                status_code: 200,
-                headers: vec![],
-                body: Bytes::new(),
-            });
+            return self.handle_health();
+        }
+        if parts.last() == Some(&"discover") {
+            return self.handle_discovery(headers);
         }
 
-        if parts.last() == Some(&"discover") {
-            // Extract Accept header from request
-            let accept_header = headers
-                .extract("accept")
-                .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))?;
-
-            // Negotiate discovery protocol version
-            let mut version = 2;
-            let mut content_type = DISCOVERY_CONTENT_TYPE_V2;
-            if let Some(accept) = accept_header {
-                if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
-                    version = 3;
-                    content_type = DISCOVERY_CONTENT_TYPE_V3;
-                } else if accept.contains(DISCOVERY_CONTENT_TYPE_V2) {
-                    version = 2;
-                    content_type = DISCOVERY_CONTENT_TYPE_V2;
-                } else {
-                    Err(ErrorInner::BadDiscoveryVersion(accept.to_owned()))?
-                }
+        // Parse service name/handler name
+        let (svc_name, handler_name) = match parts.get(parts.len() - 3..) {
+            None => return Ok(error_response(ErrorInner::BadPath(path.to_owned()))),
+            Some(last_elements) if last_elements[0] != "invoke" => {
+                return Ok(error_response(ErrorInner::BadPath(path.to_owned())))
             }
+            Some(last_elements) => (last_elements[1].to_owned(), last_elements[2].to_owned()),
+        };
 
-            // Validate that new discovery fields aren't used with older protocol versions
-            if version <= 2 {
-                // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
-                for service in &self.0.discovery.services {
-                    if service.inactivity_timeout.is_some() {
+        // Prepare vm
+        let vm = match CoreVM::new(headers, Default::default()) {
+            Ok(vm) => vm,
+            Err(e) => return Ok(error_response(e)),
+        };
+        let ResponseHead {
+            status_code,
+            headers,
+            ..
+        } = vm.get_response_head();
+
+        // Resolve service
+        if !self.0.svcs.contains_key(&svc_name) {
+            return Ok(error_response(ErrorInner::UnknownService(
+                svc_name.to_owned(),
+            )));
+        }
+
+        // Prepare handle_invocation future
+        let input_receiver =
+            InputReceiver::from_stream(body.into_data_stream().map_err(|e| e.into()));
+        let (output_tx, output_rx) = mpsc::unbounded_channel();
+        let output_sender = OutputSender::from_channel(output_tx);
+        let handle_invocation_fut = Box::pin(handle_invocation(
+            svc_name,
+            handler_name,
+            vm,
+            Arc::clone(&self.0),
+            input_receiver,
+            output_sender,
+        ));
+
+        // Wrap the invocation runner in the response
+        // When the body is pulled, the invocation gets processed.
+        let mut invocation_response_builder = http::Response::builder()
+            .status(status_code)
+            .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE);
+        for Header { key, value } in headers {
+            invocation_response_builder =
+                invocation_response_builder.header(key.deref(), value.deref());
+        }
+        Ok(invocation_response_builder
+            .body(
+                Either::Right(InvocationRunnerBody {
+                    fut: Some(handle_invocation_fut),
+                    output_rx,
+                    end_stream: false,
+                })
+                .into(),
+            )
+            .expect("Headers should be valid"))
+    }
+
+    fn handle_health(&self) -> Result<http::Response<ResponseBody>, Error> {
+        Ok(simple_response(200, vec![], Bytes::default()))
+    }
+
+    fn handle_discovery(
+        &self,
+        headers: http::HeaderMap,
+    ) -> Result<http::Response<ResponseBody>, Error> {
+        // Extract Accept header from request
+        let accept_header = match headers
+            .extract("accept")
+            .map_err(|e| ErrorInner::Header("accept".to_owned(), Box::new(e)))
+        {
+            Ok(h) => h,
+            Err(e) => return Ok(error_response(e)),
+        };
+
+        // Negotiate discovery protocol version
+        let mut version = 2;
+        let mut content_type = DISCOVERY_CONTENT_TYPE_V2;
+        if let Some(accept) = accept_header {
+            if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
+                version = 3;
+                content_type = DISCOVERY_CONTENT_TYPE_V3;
+            } else if accept.contains(DISCOVERY_CONTENT_TYPE_V2) {
+                version = 2;
+                content_type = DISCOVERY_CONTENT_TYPE_V2;
+            } else {
+                return Ok(error_response(ErrorInner::BadDiscoveryVersion(
+                    accept.to_owned(),
+                )));
+            }
+        }
+
+        if let Err(e) = self.validate_discovery_request(version) {
+            return Ok(error_response(e));
+        }
+
+        Ok(simple_response(
+            200,
+            vec![Header {
+                key: "content-type".into(),
+                value: content_type.into(),
+            }],
+            Bytes::from(
+                serde_json::to_string(&self.0.discovery).expect("Discovery should be serializable"),
+            ),
+        ))
+    }
+
+    fn validate_discovery_request(&self, version: usize) -> Result<(), ErrorInner> {
+        // Validate that new discovery fields aren't used with older protocol versions
+        if version <= 2 {
+            // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
+            for service in &self.0.discovery.services {
+                if service.inactivity_timeout.is_some() {
+                    Err(ErrorInner::FieldRequiresMinimumVersion(
+                        "inactivity_timeout",
+                        3,
+                    ))?;
+                }
+                if service.abort_timeout.is_some() {
+                    Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
+                }
+                if service.idempotency_retention.is_some() {
+                    Err(ErrorInner::FieldRequiresMinimumVersion(
+                        "idempotency_retention",
+                        3,
+                    ))?;
+                }
+                if service.journal_retention.is_some() {
+                    Err(ErrorInner::FieldRequiresMinimumVersion(
+                        "journal_retention",
+                        3,
+                    ))?;
+                }
+                if service.enable_lazy_state.is_some() {
+                    Err(ErrorInner::FieldRequiresMinimumVersion(
+                        "enable_lazy_state",
+                        3,
+                    ))?;
+                }
+                if service.ingress_private.is_some() {
+                    Err(ErrorInner::FieldRequiresMinimumVersion(
+                        "ingress_private",
+                        3,
+                    ))?;
+                }
+
+                for handler in &service.handlers {
+                    if handler.inactivity_timeout.is_some() {
                         Err(ErrorInner::FieldRequiresMinimumVersion(
                             "inactivity_timeout",
                             3,
                         ))?;
                     }
-                    if service.abort_timeout.is_some() {
+                    if handler.abort_timeout.is_some() {
                         Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
                     }
-                    if service.idempotency_retention.is_some() {
+                    if handler.idempotency_retention.is_some() {
                         Err(ErrorInner::FieldRequiresMinimumVersion(
                             "idempotency_retention",
                             3,
                         ))?;
                     }
-                    if service.journal_retention.is_some() {
+                    if handler.journal_retention.is_some() {
                         Err(ErrorInner::FieldRequiresMinimumVersion(
                             "journal_retention",
                             3,
                         ))?;
                     }
-                    if service.enable_lazy_state.is_some() {
+                    if handler.workflow_completion_retention.is_some() {
+                        Err(ErrorInner::FieldRequiresMinimumVersion(
+                            "workflow_retention",
+                            3,
+                        ))?;
+                    }
+                    if handler.enable_lazy_state.is_some() {
                         Err(ErrorInner::FieldRequiresMinimumVersion(
                             "enable_lazy_state",
                             3,
                         ))?;
                     }
-                    if service.ingress_private.is_some() {
+                    if handler.ingress_private.is_some() {
                         Err(ErrorInner::FieldRequiresMinimumVersion(
                             "ingress_private",
                             3,
                         ))?;
                     }
-
-                    for handler in &service.handlers {
-                        if handler.inactivity_timeout.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion(
-                                "inactivity_timeout",
-                                3,
-                            ))?;
-                        }
-                        if handler.abort_timeout.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion("abort_timeout", 3))?;
-                        }
-                        if handler.idempotency_retention.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion(
-                                "idempotency_retention",
-                                3,
-                            ))?;
-                        }
-                        if handler.journal_retention.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion(
-                                "journal_retention",
-                                3,
-                            ))?;
-                        }
-                        if handler.workflow_completion_retention.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion(
-                                "workflow_retention",
-                                3,
-                            ))?;
-                        }
-                        if handler.enable_lazy_state.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion(
-                                "enable_lazy_state",
-                                3,
-                            ))?;
-                        }
-                        if handler.ingress_private.is_some() {
-                            Err(ErrorInner::FieldRequiresMinimumVersion(
-                                "ingress_private",
-                                3,
-                            ))?;
-                        }
-                    }
                 }
             }
-
-            return Ok(Response::ReplyNow {
-                status_code: 200,
-                headers: vec![Header {
-                    key: "content-type".into(),
-                    value: content_type.into(),
-                }],
-                body: Bytes::from(
-                    serde_json::to_string(&self.0.discovery)
-                        .expect("Discovery should be serializable"),
-                ),
-            });
         }
-
-        let (svc_name, handler_name) = match parts.get(parts.len() - 3..) {
-            None => return Err(Error(ErrorInner::BadPath(path.to_owned()))),
-            Some(last_elements) if last_elements[0] != "invoke" => {
-                return Err(Error(ErrorInner::BadPath(path.to_owned())))
-            }
-            Some(last_elements) => (last_elements[1].to_owned(), last_elements[2].to_owned()),
-        };
-
-        let vm = CoreVM::new(headers, Default::default()).map_err(ErrorInner::VM)?;
-        if !self.0.svcs.contains_key(&svc_name) {
-            return Err(ErrorInner::UnknownService(svc_name.to_owned()).into());
-        }
-
-        let response_head = vm.get_response_head();
-
-        Ok(Response::BidiStream {
-            status_code: response_head.status_code,
-            headers: response_head.headers,
-            handler: BidiStreamRunner {
-                svc_name,
-                handler_name,
-                vm,
-                endpoint: Arc::clone(&self.0),
-            },
-        })
+        Ok(())
     }
 }
 
-pub enum Response {
-    ReplyNow {
-        status_code: u16,
-        headers: Vec<Header>,
-        body: Bytes,
-    },
-    BidiStream {
-        status_code: u16,
-        headers: Vec<Header>,
-        handler: BidiStreamRunner,
-    },
+type ResponseBodyInner = Either<Full<Bytes>, InvocationRunnerBody>;
+pin_project! {
+    pub struct ResponseBody {
+        #[pin]
+        inner: ResponseBodyInner
+    }
 }
 
-pub struct BidiStreamRunner {
+impl From<ResponseBodyInner> for ResponseBody {
+    fn from(e: ResponseBodyInner) -> Self {
+        ResponseBody { inner: e }
+    }
+}
+
+impl Body for ResponseBody {
+    type Data = <ResponseBodyInner as Body>::Data;
+    type Error = <ResponseBodyInner as Body>::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        self.project().inner.poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+fn simple_response(
+    status_code: u16,
+    headers: Vec<Header>,
+    body: Bytes,
+) -> http::Response<ResponseBody> {
+    let mut response_builder = http::Response::builder()
+        .status(status_code)
+        .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE);
+
+    for header in headers {
+        response_builder = response_builder.header(header.key.deref(), header.value.deref());
+    }
+
+    response_builder
+        .body(Either::Left(Full::new(body)).into())
+        .expect("headers must be valid")
+}
+
+fn error_response(e: impl Into<Error>) -> http::Response<ResponseBody> {
+    let error = e.into();
+    http::Response::builder()
+        .status(error.status_code())
+        .header(X_RESTATE_SERVER, X_RESTATE_SERVER_VALUE)
+        .header(CONTENT_TYPE, "text/plain")
+        .body(Either::Left(Full::new(error.to_string().into())).into())
+        .expect("headers must be valid")
+}
+
+// --- Handle invocation future
+
+struct OutputSender(mpsc::UnboundedSender<Bytes>);
+
+impl OutputSender {
+    fn from_channel(tx: mpsc::UnboundedSender<Bytes>) -> Self {
+        Self(tx)
+    }
+
+    fn send(&self, b: Bytes) -> bool {
+        self.0.send(b).is_ok()
+    }
+}
+
+struct InputReceiver(Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send + 'static>>);
+
+impl InputReceiver {
+    fn from_stream<S: Stream<Item = Result<Bytes, BoxError>> + Send + 'static>(s: S) -> Self {
+        Self(Box::pin(s))
+    }
+
+    async fn recv(&mut self) -> Option<Result<Bytes, BoxError>> {
+        poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<Bytes, BoxError>>> {
+        self.0.poll_next_unpin(cx)
+    }
+}
+
+async fn handle_invocation(
     svc_name: String,
     handler_name: String,
-    vm: CoreVM,
+    mut vm: CoreVM,
     endpoint: Arc<EndpointInner>,
-}
-
-impl BidiStreamRunner {
-    pub async fn handle(
-        self,
-        input_rx: InputReceiver,
-        output_tx: OutputSender,
-    ) -> Result<(), Error> {
-        // Retrieve the service from the Arc
-        let svc = self
-            .endpoint
-            .svcs
-            .get(&self.svc_name)
-            .expect("service must exist at this point");
-
-        let span = info_span!(
-            "restate_sdk_endpoint_handle",
-            "rpc.system" = "restate",
-            "rpc.service" = self.svc_name,
-            "rpc.method" = self.handler_name,
-            "restate.sdk.is_replaying" = false
-        );
-        handle(
-            input_rx,
-            output_tx,
-            self.vm,
-            self.svc_name,
-            self.handler_name,
-            svc,
-        )
-        .instrument(span)
-        .await
-    }
-}
-
-#[doc(hidden)]
-pub async fn handle<S: Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync>(
     mut input_rx: InputReceiver,
     output_tx: OutputSender,
-    vm: CoreVM,
-    svc_name: String,
-    handler_name: String,
-    svc: &S,
 ) -> Result<(), Error> {
-    let mut vm = vm;
-    init_loop_vm(&mut vm, &mut input_rx).await?;
+    // Retrieve the service from the Arc
+    let svc = endpoint
+        .svcs
+        .get(&svc_name)
+        .expect("service must exist at this point");
 
-    // Initialize handler context
-    let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
-    let ctx = ContextInternal::new(
-        vm,
-        svc_name,
-        handler_name,
-        input_rx,
-        output_tx,
-        handler_state_tx,
+    let span = info_span!(
+        "restate_sdk_endpoint_handle",
+        "rpc.system" = "restate",
+        "rpc.service" = svc_name,
+        "rpc.method" = handler_name,
+        "restate.sdk.is_replaying" = false
     );
+    async move {
+        init_loop_vm(&mut vm, &mut input_rx).await?;
 
-    // Start user code
-    let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
+        // Initialize handler context
+        let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
+        let ctx = ContextInternal::new(
+            vm,
+            svc_name,
+            handler_name,
+            input_rx,
+            output_tx,
+            handler_state_tx,
+        );
 
-    // Wrap it in handler state aware future
-    HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
+        // Start user code
+        let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
+
+        // Wrap it in handler state aware future
+        HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
+    }
+    .instrument(span)
+    .await
 }
 
 async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(), ErrorInner> {
@@ -721,4 +540,48 @@ async fn init_loop_vm(vm: &mut CoreVM, input_rx: &mut InputReceiver) -> Result<(
         }
     }
     Ok(())
+}
+
+// --- Invocation runner body
+
+pub struct InvocationRunnerBody {
+    fut: Option<BoxFuture<'static, Result<(), Error>>>,
+    output_rx: mpsc::UnboundedReceiver<Bytes>,
+    end_stream: bool,
+}
+
+impl Body for InvocationRunnerBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        // First try to consume the runner future
+        if let Some(mut fut) = self.fut.take() {
+            match fut.poll_unpin(cx) {
+                Poll::Ready(res) => {
+                    if let Err(e) = res {
+                        warn!("Handler failure: {e:?}")
+                    }
+                    self.output_rx.close();
+                }
+                Poll::Pending => {
+                    self.fut = Some(fut);
+                }
+            }
+        }
+
+        if let Some(out) = ready!(self.output_rx.poll_recv(cx)) {
+            Poll::Ready(Some(Ok(Frame::data(out))))
+        } else {
+            self.end_stream = true;
+            Poll::Ready(None)
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.end_stream
+    }
 }
