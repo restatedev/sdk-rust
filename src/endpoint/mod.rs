@@ -37,6 +37,7 @@ const X_RESTATE_SERVER_VALUE: HeaderValue =
     HeaderValue::from_static(concat!("restate-sdk-rust/", env!("CARGO_PKG_VERSION")));
 const DISCOVERY_CONTENT_TYPE_V2: &str = "application/vnd.restate.endpointmanifest.v2+json";
 const DISCOVERY_CONTENT_TYPE_V3: &str = "application/vnd.restate.endpointmanifest.v3+json";
+const DISCOVERY_CONTENT_TYPE_V4: &str = "application/vnd.restate.endpointmanifest.v4+json";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -301,7 +302,10 @@ impl Endpoint {
         let mut version = 2;
         let mut content_type = DISCOVERY_CONTENT_TYPE_V2;
         if let Some(accept) = accept_header {
-            if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
+            if accept.contains(DISCOVERY_CONTENT_TYPE_V4) {
+                version = 4;
+                content_type = DISCOVERY_CONTENT_TYPE_V4;
+            } else if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
                 version = 3;
                 content_type = DISCOVERY_CONTENT_TYPE_V3;
             } else if accept.contains(DISCOVERY_CONTENT_TYPE_V2) {
@@ -324,6 +328,7 @@ impl Endpoint {
             }],
             Bytes::from(
                 serde_json::to_string(&crate::discovery::Endpoint {
+                    lambda_compression: None,
                     max_protocol_version: 5,
                     min_protocol_version: 5,
                     protocol_mode: Some(match protocol_mode {
@@ -341,6 +346,30 @@ impl Endpoint {
 
     fn validate_discovery_request(&self, version: usize) -> Result<(), ErrorInner> {
         // Validate that new discovery fields aren't used with older protocol versions
+        if version <= 3 {
+            // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
+            for service in &self.0.discovery_services {
+                if service.retry_policy_initial_interval.is_some()
+                    || service.retry_policy_exponentiation_factor.is_some()
+                    || service.retry_policy_max_interval.is_some()
+                    || service.retry_policy_max_attempts.is_some()
+                    || service.retry_policy_on_max_attempts.is_some()
+                {
+                    Err(ErrorInner::FieldRequiresMinimumVersion("retry_policy", 4))?;
+                }
+
+                for handler in &service.handlers {
+                    if handler.retry_policy_initial_interval.is_some()
+                        || handler.retry_policy_exponentiation_factor.is_some()
+                        || handler.retry_policy_max_interval.is_some()
+                        || handler.retry_policy_max_attempts.is_some()
+                        || handler.retry_policy_on_max_attempts.is_some()
+                    {
+                        Err(ErrorInner::FieldRequiresMinimumVersion("retry_policy", 4))?;
+                    }
+                }
+            }
+        }
         if version <= 2 {
             // Check for new discovery fields in version 3 that shouldn't be used in version 2 or lower
             for service in &self.0.discovery_services {
