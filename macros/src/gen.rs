@@ -230,6 +230,11 @@ impl<'a> ServiceGenerator<'a> {
                     workflow_completion_retention: None,
                     enable_lazy_state: None,
                     ingress_private: None,
+                    retry_policy_initial_interval: None,
+                    retry_policy_max_interval: None,
+                    retry_policy_max_attempts: None,
+                    retry_policy_exponentiation_factor: None,
+                    retry_policy_on_max_attempts: None,
                 }
             }
         });
@@ -252,6 +257,11 @@ impl<'a> ServiceGenerator<'a> {
                         idempotency_retention: None,
                         enable_lazy_state: None,
                         ingress_private: None,
+                        retry_policy_initial_interval: None,
+                        retry_policy_max_interval: None,
+                        retry_policy_max_attempts: None,
+                        retry_policy_exponentiation_factor: None,
+                        retry_policy_on_max_attempts: None,
                     }
                 }
             }

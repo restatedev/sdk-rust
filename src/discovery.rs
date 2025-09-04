@@ -60,6 +60,16 @@ impl Service {
         self.journal_retention = options.journal_retention.map(|d| d.as_millis() as u64);
         self.enable_lazy_state = options.enable_lazy_state;
         self.ingress_private = options.ingress_private;
+        // Retry policy
+        self.retry_policy_initial_interval = options
+            .retry_policy_initial_interval
+            .map(|d| d.as_millis() as u64);
+        self.retry_policy_exponentiation_factor = options.retry_policy_exponentiation_factor;
+        self.retry_policy_max_interval = options
+            .retry_policy_max_interval
+            .map(|d| d.as_millis() as u64);
+        self.retry_policy_max_attempts = options.retry_policy_max_attempts;
+        self.retry_policy_on_max_attempts = options.retry_policy_on_max_attempts;
 
         // Apply handler specific options
         for (handler_name, handler_options) in options.handler_options {
@@ -86,5 +96,15 @@ impl Handler {
             options.workflow_retention.map(|d| d.as_millis() as u64);
         self.enable_lazy_state = options.enable_lazy_state;
         self.ingress_private = options.ingress_private;
+        // Retry policy
+        self.retry_policy_initial_interval = options
+            .retry_policy_initial_interval
+            .map(|d| d.as_millis() as u64);
+        self.retry_policy_exponentiation_factor = options.retry_policy_exponentiation_factor;
+        self.retry_policy_max_interval = options
+            .retry_policy_max_interval
+            .map(|d| d.as_millis() as u64);
+        self.retry_policy_max_attempts = options.retry_policy_max_attempts;
+        self.retry_policy_on_max_attempts = options.retry_policy_on_max_attempts;
     }
 }

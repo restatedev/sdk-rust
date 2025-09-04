@@ -16,6 +16,12 @@ pub struct ServiceOptions {
     pub(crate) journal_retention: Option<Duration>,
     pub(crate) enable_lazy_state: Option<bool>,
     pub(crate) ingress_private: Option<bool>,
+    // Retry policy options
+    pub(crate) retry_policy_initial_interval: Option<Duration>,
+    pub(crate) retry_policy_exponentiation_factor: Option<f64>,
+    pub(crate) retry_policy_max_interval: Option<Duration>,
+    pub(crate) retry_policy_max_attempts: Option<u64>,
+    pub(crate) retry_policy_on_max_attempts: Option<crate::discovery::RetryPolicyOnMaxAttempts>,
     pub(crate) handler_options: HashMap<String, HandlerOptions>,
 
     _priv: (),
@@ -89,6 +95,53 @@ impl ServiceOptions {
         self
     }
 
+    /// Initial delay before the first retry attempt.
+    ///
+    /// If unset, the server default is used.
+    pub fn retry_policy_initial_interval(mut self, interval: Duration) -> Self {
+        self.retry_policy_initial_interval = Some(interval);
+        self
+    }
+
+    /// Exponential backoff multiplier used to compute the next retry delay.
+    ///
+    /// For attempt n, the next delay is roughly previousDelay * exponentiationFactor,
+    /// capped by retry_policy_max_interval if set.
+    pub fn retry_policy_exponentiation_factor(mut self, factor: f64) -> Self {
+        self.retry_policy_exponentiation_factor = Some(factor);
+        self
+    }
+
+    /// Upper bound for the computed retry delay.
+    pub fn retry_policy_max_interval(mut self, interval: Duration) -> Self {
+        self.retry_policy_max_interval = Some(interval);
+        self
+    }
+
+    /// Maximum number of attempts before giving up retrying.
+    ///
+    /// The initial call counts as the first attempt; retries increment the count by 1.
+    pub fn retry_policy_max_attempts(mut self, attempts: u64) -> Self {
+        self.retry_policy_max_attempts = Some(attempts);
+        self
+    }
+
+    /// Behavior when the configured retry_policy_max_attempts is reached: pause the invocation.
+    ///
+    /// The invocation enters the paused state and can be manually resumed from the CLI or UI.
+    pub fn retry_policy_pause_on_max_attempts(mut self) -> Self {
+        self.retry_policy_on_max_attempts = Some(crate::discovery::RetryPolicyOnMaxAttempts::Pause);
+        self
+    }
+
+    /// Behavior when the configured retry_policy_max_attempts is reached: kill the invocation.
+    ///
+    /// The invocation will be marked as failed and will not be retried unless explicitly re-triggered.
+    pub fn retry_policy_kill_on_max_attempts(mut self) -> Self {
+        self.retry_policy_on_max_attempts = Some(crate::discovery::RetryPolicyOnMaxAttempts::Kill);
+        self
+    }
+
     /// Handler-specific options.
     ///
     /// *Note*: If you provide a handler name for a non-existing handler, binding the service will *panic!*.
@@ -109,6 +162,12 @@ pub struct HandlerOptions {
     pub(crate) journal_retention: Option<Duration>,
     pub(crate) ingress_private: Option<bool>,
     pub(crate) enable_lazy_state: Option<bool>,
+    // Retry policy options
+    pub(crate) retry_policy_initial_interval: Option<Duration>,
+    pub(crate) retry_policy_exponentiation_factor: Option<f64>,
+    pub(crate) retry_policy_max_interval: Option<Duration>,
+    pub(crate) retry_policy_max_attempts: Option<u64>,
+    pub(crate) retry_policy_on_max_attempts: Option<crate::discovery::RetryPolicyOnMaxAttempts>,
 
     _priv: (),
 }
@@ -181,6 +240,53 @@ impl HandlerOptions {
     /// relevant only for workflows and virtual objects.
     pub fn enable_lazy_state(mut self, enable: bool) -> Self {
         self.enable_lazy_state = Some(enable);
+        self
+    }
+
+    /// Initial delay before the first retry attempt.
+    ///
+    /// If unset, the server default is used.
+    pub fn retry_policy_initial_interval(mut self, interval: Duration) -> Self {
+        self.retry_policy_initial_interval = Some(interval);
+        self
+    }
+
+    /// Exponential backoff multiplier used to compute the next retry delay.
+    ///
+    /// For attempt n, the next delay is roughly previousDelay * exponentiationFactor,
+    /// capped by retry_policy_max_interval if set.
+    pub fn retry_policy_exponentiation_factor(mut self, factor: f64) -> Self {
+        self.retry_policy_exponentiation_factor = Some(factor);
+        self
+    }
+
+    /// Upper bound for the computed retry delay.
+    pub fn retry_policy_max_interval(mut self, interval: Duration) -> Self {
+        self.retry_policy_max_interval = Some(interval);
+        self
+    }
+
+    /// Maximum number of attempts before giving up retrying.
+    ///
+    /// The initial call counts as the first attempt; retries increment the count by 1.
+    pub fn retry_policy_max_attempts(mut self, attempts: u64) -> Self {
+        self.retry_policy_max_attempts = Some(attempts);
+        self
+    }
+
+    /// Behavior when the configured retry_policy_max_attempts is reached: pause the invocation.
+    ///
+    /// The invocation enters the paused state and can be manually resumed from the CLI or UI.
+    pub fn retry_policy_pause_on_max_attempts(mut self) -> Self {
+        self.retry_policy_on_max_attempts = Some(crate::discovery::RetryPolicyOnMaxAttempts::Pause);
+        self
+    }
+
+    /// Behavior when the configured retry_policy_max_attempts is reached: kill the invocation.
+    ///
+    /// The invocation will be marked as failed and will not be retried unless explicitly re-triggered.
+    pub fn retry_policy_kill_on_max_attempts(mut self) -> Self {
+        self.retry_policy_on_max_attempts = Some(crate::discovery::RetryPolicyOnMaxAttempts::Kill);
         self
     }
 }
