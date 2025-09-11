@@ -91,8 +91,8 @@ impl RunRetryPolicy {
         self
     }
 
-    /// Gives up retrying when either at least the given number of attempts is reached,
-    /// or `max_duration` (if set) is reached first.
+    /// Gives up retrying when either at least the given number of attempts, including the initial attempt,
+    /// is reached, or `max_duration` (if set) is reached first.
     ///
     /// **Note:** The number of actual retries may be higher than the provided value.
     /// This is due to the nature of the run operation, which executes the closure on the service and sends the result afterward to Restate.
