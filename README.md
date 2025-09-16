@@ -190,15 +190,18 @@ The Rust SDK is currently in active development, and might break across releases
 
 The compatibility with Restate is described in the following table:
 
-| Restate Server\sdk-rust | 0.0 - 0.2 | 0.3 | 0.4 - 0.5 | 0.6               |
-| ----------------------- | --------- | --- | --------- | ----------------- |
-| 1.0                     | ✅        | ❌  | ❌        | ❌                |
-| 1.1                     | ✅        | ✅  | ❌        | ❌                |
-| 1.2                     | ✅        | ✅  | ❌        | ❌                |
-| 1.3                     | ✅        | ✅  | ✅        | ✅ <sup>(1)</sup> |
-| 1.4                     | ✅        | ✅  | ✅        | ✅                |
+| Restate Server\sdk-rust | < 0.4            | 0.4 - 0.5 | 0.6              | 0.7              |
+|-------------------------|------------------|-----------|------------------|------------------|
+| < 1.3                   | ✅                | ❌         | ❌                | ❌                |
+| 1.3                     | ✅                | ✅         | ✅ <sup>(1)</sup> | ✅ <sup>(2)</sup> |
+| 1.4                     | ✅                | ✅         | ✅                | ✅ <sup>(2)</sup> |
+| 1.5                     | ⚠ <sup>(3)</sup> | ✅         | ✅                | ✅                |
 
 <sup>(1)</sup> **Note** `bind_with_options` works only from Restate 1.4 onward.
+
+<sup>(2)</sup> **Note** the new `retry_policy` options work only from Restate 1.5 onward. Check the in-code documentation for more details.
+
+<sup>(3)</sup> **Warning** SDK versions < 0.4 are deprecated, and cannot be registered anymore. Check the [Restate 1.5 release notes](https://github.com/restatedev/restate/releases/tag/v1.5.0) for more info.
 
 ## Contributing
 
