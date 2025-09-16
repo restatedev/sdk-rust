@@ -1,6 +1,6 @@
 [package]
 name = "restate-sdk"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "Restate SDK for Rust"
 license = "MIT"
@@ -35,7 +35,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful"
 pin-project-lite = "0.2"
 rand = { version = "0.9", optional = true }
 regress = "=0.10.3"
-restate-sdk-macros = { version = "0.6", path = "macros" }
+restate-sdk-macros = { version = "0.7", path = "macros" }
 restate-sdk-shared-core = { version = "=0.6.0", features = ["request_identity", "sha2_random_seed", "http"] }
 schemars = { version = "1.0.0", optional = true }
 serde = "1.0"
