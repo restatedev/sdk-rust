@@ -14,10 +14,10 @@
 extern crate proc_macro;
 
 mod ast;
-mod gen;
+mod generator;
 
 use crate::ast::{Object, Service, Workflow};
-use crate::gen::ServiceGenerator;
+use crate::generator::ServiceGenerator;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::parse_macro_input;

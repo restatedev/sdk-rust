@@ -2,14 +2,14 @@
 
 use std::fmt::Debug;
 use tracing::{
+    Event, Id, Metadata, Subscriber,
     field::{Field, Visit},
     span::{Attributes, Record},
-    Event, Id, Metadata, Subscriber,
 };
 use tracing_subscriber::{
+    Layer,
     layer::{Context, Filter},
     registry::LookupSpan,
-    Layer,
 };
 
 #[derive(Debug)]

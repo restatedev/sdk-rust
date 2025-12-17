@@ -76,7 +76,8 @@ macro_rules! select {
         let handles = vec![$(
             $crate::count_field!(futures_init.$($skip)*).handle()
         ,)+];
-        let select_fut = futures_init.0.inner_context().select(handles);
+        let inner_context = futures_init.0.inner_context();
+        let select_fut = inner_context.select(handles);
 
         match select_fut.await {
             $(
