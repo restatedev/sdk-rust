@@ -4,7 +4,7 @@ use crate::errors::TerminalError;
 use pin_project_lite::pin_project;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 pin_project! {
     /// Future that intercepts errors of inner future, and passes them to ContextInternal

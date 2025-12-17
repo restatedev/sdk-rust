@@ -1,10 +1,11 @@
 [package]
 name = "restate-sdk-macros"
 version = "0.7.0"
-edition = "2021"
+edition = "2024"
 description = "Restate SDK for Rust macros"
 license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
+rust-version = "1.85.0"
 
 [lib]
 proc-macro = true

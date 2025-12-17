@@ -1,5 +1,5 @@
-use crate::endpoint::context::ContextInternalInner;
 use crate::endpoint::ErrorInner;
+use crate::endpoint::context::ContextInternalInner;
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{
     DoProgressResponse, Error as CoreError, NotificationHandle, TakeOutputResult, TerminalFailure,
@@ -65,7 +65,7 @@ impl Future for VmSelectAsyncResultPollFuture {
                             }
                         }
                         TakeOutputResult::EOF => {
-                            return Poll::Ready(Err(ErrorInner::UnexpectedOutputClosed))
+                            return Poll::Ready(Err(ErrorInner::UnexpectedOutputClosed));
                         }
                     }
 
@@ -125,7 +125,7 @@ impl Future for VmSelectAsyncResultPollFuture {
                                 code: 409,
                                 message: "cancelled".to_string(),
                             }
-                            .into())))
+                            .into())));
                         }
                         Err(e) => {
                             return Poll::Ready(Err(e.into()));

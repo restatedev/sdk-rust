@@ -1,7 +1,7 @@
 use restate_sdk::prelude::*;
 use std::time::Duration;
 use tracing::info;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[restate_sdk::service]
 trait Greeter {

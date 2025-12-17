@@ -1,10 +1,10 @@
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use restate_sdk::prelude::*;
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 #[restate_sdk::service]

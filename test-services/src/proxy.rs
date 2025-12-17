@@ -1,5 +1,5 @@
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use restate_sdk::context::RequestTarget;
 use restate_sdk::prelude::*;
 use schemars::JsonSchema;
