@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
 
 #[restate_sdk::object]
@@ -17,7 +17,7 @@ pub(crate) trait Failing {
     async fn terminally_failing_side_effect(error_message: String) -> HandlerResult<()>;
     #[name = "sideEffectSucceedsAfterGivenAttempts"]
     async fn side_effect_succeeds_after_given_attempts(minimum_attempts: i32)
-        -> HandlerResult<i32>;
+    -> HandlerResult<i32>;
     #[name = "sideEffectFailsAfterGivenAttempts"]
     async fn side_effect_fails_after_given_attempts(
         retry_policy_max_retry_count: i32,

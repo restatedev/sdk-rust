@@ -7,7 +7,7 @@ use http::{Request, Response};
 use hyper::body::Incoming;
 use hyper::service::Service;
 use std::convert::Infallible;
-use std::future::{ready, Ready};
+use std::future::{Ready, ready};
 
 /// Wraps [`Endpoint`] to implement hyper [`Service`].
 #[derive(Clone)]

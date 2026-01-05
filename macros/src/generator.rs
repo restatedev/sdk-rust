@@ -1,7 +1,7 @@
 use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
-use quote::{format_ident, quote, ToTokens};
+use quote::{ToTokens, format_ident, quote};
 use syn::{Attribute, PatType, Visibility};
 
 pub(crate) struct ServiceGenerator<'a> {
@@ -386,7 +386,7 @@ impl<'a> ServiceGenerator<'a> {
     }
 }
 
-impl<'a> ToTokens for ServiceGenerator<'a> {
+impl ToTokens for ServiceGenerator<'_> {
     fn to_tokens(&self, output: &mut TokenStream2) {
         output.extend(vec![
             self.trait_service(),

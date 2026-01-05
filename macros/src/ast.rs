@@ -16,8 +16,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::{
-    braced, parenthesized, parse_quote, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument,
-    Ident, Lit, Pat, PatType, Path, PathArguments, Result, ReturnType, Token, Type, Visibility,
+    Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit, Pat, PatType, Path,
+    PathArguments, Result, ReturnType, Token, Type, Visibility, braced, parenthesized, parse_quote,
 };
 
 /// Accumulates multiple errors into a result.
@@ -194,10 +194,12 @@ impl Parse for Handler {
         input.parse::<Token![;]>()?;
 
         let (ok_ty, err_ty) = match &return_type {
-            ReturnType::Default =>    return Err(Error::new(
-                return_type.span(),
-                "The return type cannot be empty, only Result or restate_sdk::prelude::HandlerResult is supported as return type",
-            )),
+            ReturnType::Default => {
+                return Err(Error::new(
+                    return_type.span(),
+                    "The return type cannot be empty, only Result or restate_sdk::prelude::HandlerResult is supported as return type",
+                ));
+            }
             ReturnType::Type(_, ty) => {
                 if let Some((ok_ty, err_ty)) = extract_handler_result_parameter(ty) {
                     (ok_ty, err_ty)
@@ -251,7 +253,7 @@ fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
         .filter(|val| val.path.require_ident().is_ok_and(|i| i == "name"))
         .map(|val| {
             if let Expr::Lit(ExprLit {
-                lit: Lit::Str(ref literal),
+                lit: Lit::Str(literal),
                 ..
             }) = &val.value
             {

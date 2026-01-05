@@ -4,9 +4,9 @@ use restate_sdk::prelude::{Endpoint, HttpServer};
 use serde::{Deserialize, Serialize};
 use testcontainers::core::wait::HttpWaitStrategy;
 use testcontainers::{
+    ContainerAsync, ContainerRequest, GenericImage, ImageExt,
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
-    ContainerAsync, ContainerRequest, GenericImage, ImageExt,
 };
 use tokio::{io::AsyncBufReadExt, net::TcpListener, task};
 use tracing::{error, info, warn};
@@ -128,14 +128,20 @@ impl StartedEndpoint {
             {
                 Ok(res) if res.status().is_success() => break,
                 Ok(res) => {
-                    warn!("Error when waiting for service endpoint server to be healthy, got response {}", res.status());
+                    warn!(
+                        "Error when waiting for service endpoint server to be healthy, got response {}",
+                        res.status()
+                    );
                     retries += 1;
                     if retries > 10 {
                         anyhow::bail!("Service endpoint server failed to start")
                     }
                 }
                 Err(err) => {
-                    warn!("Error when waiting for service endpoint server to be healthy, got error {}", err);
+                    warn!(
+                        "Error when waiting for service endpoint server to be healthy, got error {}",
+                        err
+                    );
                     retries += 1;
                     if retries > 10 {
                         anyhow::bail!("Service endpoint server failed to start")

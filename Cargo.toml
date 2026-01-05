@@ -1,11 +1,11 @@
 [package]
 name = "restate-sdk"
 version = "0.7.0"
-edition = "2021"
+edition = "2024"
 description = "Restate SDK for Rust"
 license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
-rust-version = "1.76.0"
+rust-version = "1.85.0"
 
 [[example]]
 name = "tracing"

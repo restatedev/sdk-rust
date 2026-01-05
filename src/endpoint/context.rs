@@ -16,16 +16,16 @@ use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
     CoreVM, DoProgressResponse, Error as CoreError, Header, NonEmptyValue, NotificationHandle,
-    RetryPolicy, RunExitResult, TakeOutputResult, Target, TerminalFailure, Value, VM,
+    RetryPolicy, RunExitResult, TakeOutputResult, Target, TerminalFailure, VM, Value,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::future::{ready, Future};
+use std::future::{Future, ready};
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant, SystemTime};
 
 pub struct ContextInternalInner {

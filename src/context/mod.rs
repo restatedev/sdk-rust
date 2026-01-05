@@ -26,7 +26,7 @@ pub struct Context<'ctx> {
     inner: &'ctx ContextInternal,
 }
 
-impl<'ctx> Context<'ctx> {
+impl Context<'_> {
     /// Get request headers.
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
@@ -60,7 +60,7 @@ pub struct SharedObjectContext<'ctx> {
     pub(crate) inner: &'ctx ContextInternal,
 }
 
-impl<'ctx> SharedObjectContext<'ctx> {
+impl SharedObjectContext<'_> {
     /// Get object key.
     pub fn key(&self) -> &str {
         &self.key
@@ -100,7 +100,7 @@ pub struct ObjectContext<'ctx> {
     pub(crate) inner: &'ctx ContextInternal,
 }
 
-impl<'ctx> ObjectContext<'ctx> {
+impl ObjectContext<'_> {
     /// Get object key.
     pub fn key(&self) -> &str {
         &self.key
@@ -153,7 +153,7 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for SharedWorkflowContex
     }
 }
 
-impl<'ctx> SharedWorkflowContext<'ctx> {
+impl SharedWorkflowContext<'_> {
     /// Get workflow key.
     pub fn key(&self) -> &str {
         &self.key
@@ -193,7 +193,7 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for WorkflowContext<'ctx
     }
 }
 
-impl<'ctx> WorkflowContext<'ctx> {
+impl WorkflowContext<'_> {
     /// Get workflow key.
     pub fn key(&self) -> &str {
         &self.key
@@ -752,7 +752,7 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// # use restate_sdk::prelude::*;
     /// # use rand::Rng;
     /// async fn rand_generate(mut ctx: Context<'_>) {
-    /// let x: u32 = ctx.rand().gen();
+    /// let x: u32 = ctx.rand().random();
     /// # }
     /// ```
     ///
@@ -832,13 +832,13 @@ pub trait ContextReadState<'ctx>: private::SealedContext<'ctx> {
     /// Get state
     fn get<T: Deserialize + 'static>(
         &self,
-        key: &str,
+        key: &'ctx str,
     ) -> impl Future<Output = Result<Option<T>, TerminalError>> + 'ctx {
         self.inner_context().get(key)
     }
 
     /// Get state keys
-    fn get_keys(&self) -> impl Future<Output = Result<Vec<String>, TerminalError>> + 'ctx {
+    fn get_keys(&'ctx self) -> impl Future<Output = Result<Vec<String>, TerminalError>> + 'ctx {
         self.inner_context().get_keys()
     }
 }
@@ -923,7 +923,7 @@ pub trait ContextPromises<'ctx>: private::SealedContext<'ctx> {
     /// Create a promise
     fn promise<T: Deserialize + 'static>(
         &'ctx self,
-        key: &str,
+        key: &'ctx str,
     ) -> impl DurableFuture<Output = Result<T, TerminalError>> + 'ctx {
         self.inner_context().promise(key)
     }
@@ -931,7 +931,7 @@ pub trait ContextPromises<'ctx>: private::SealedContext<'ctx> {
     /// Peek a promise
     fn peek_promise<T: Deserialize + 'static>(
         &self,
-        key: &str,
+        key: &'ctx str,
     ) -> impl Future<Output = Result<Option<T>, TerminalError>> + 'ctx {
         self.inner_context().peek_promise(key)
     }

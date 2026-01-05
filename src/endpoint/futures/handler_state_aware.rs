@@ -58,7 +58,9 @@ where
                 Poll::Pending => Poll::Pending,
             },
             Err(oneshot::error::TryRecvError::Closed) => {
-                panic!("This is unexpected, this future is still being polled although the sender side was dropped. This should not be possible, because the sender is dropped when this future returns Poll:ready().")
+                panic!(
+                    "This is unexpected, this future is still being polled although the sender side was dropped. This should not be possible, because the sender is dropped when this future returns Poll:ready()."
+                )
             }
         }
     }
