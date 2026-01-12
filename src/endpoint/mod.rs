@@ -177,7 +177,7 @@ struct EndpointInner {
 }
 
 #[derive(Default)]
-pub(crate) enum ProtocolMode {
+pub enum ProtocolMode {
     #[allow(dead_code)]
     RequestResponse,
     #[default]
@@ -186,8 +186,8 @@ pub(crate) enum ProtocolMode {
 
 /// Options for [`Endpoint::handle`].
 #[derive(Default)]
-pub(crate) struct HandleOptions {
-    pub(crate) protocol_mode: ProtocolMode,
+pub struct HandleOptions {
+    pub protocol_mode: ProtocolMode,
 }
 
 impl Endpoint {
@@ -200,7 +200,7 @@ impl Endpoint {
     }
 
     /// Handle an [`http::Request`], producing an [`http::Response`].
-    pub(crate) fn handle_with_options<
+    pub fn handle_with_options<
         B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static,
     >(
         &self,

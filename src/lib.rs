@@ -520,7 +520,9 @@ pub mod prelude {
         ObjectContext, Request, RunFuture, RunRetryPolicy, SharedObjectContext,
         SharedWorkflowContext, WorkflowContext,
     };
-    pub use crate::endpoint::{Endpoint, HandlerOptions, ServiceOptions};
+    pub use crate::endpoint::{
+        Endpoint, HandleOptions, HandlerOptions, ProtocolMode, ServiceOptions,
+    };
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
 }
