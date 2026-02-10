@@ -8,7 +8,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! restate-sdk = { version = "0.1", features = ["lambda"] }
+//! restate-sdk = { version = "0.8", features = ["lambda"] }
 //! tokio = { version = "1", features = ["full"] }
 //! ```
 //!
