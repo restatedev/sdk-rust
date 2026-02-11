@@ -1,6 +1,6 @@
 [package]
 name = "restate-sdk-macros"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 description = "Restate SDK for Rust macros"
 license = "MIT"
