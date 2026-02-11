@@ -233,8 +233,30 @@ You need the [Rust toolchain](https://rustup.rs/). To verify:
 just verify
 ```
 
-To release we use [cargo-release](https://github.com/crate-ci/cargo-release):
+To release you must be part of the [owners team](https://github.com/orgs/restatedev/teams/owners).
+
+To release we use [cargo-release](https://github.com/crate-ci/cargo-release).
 
 ```
-cargo release <VERSION> --exclude test-services --workspace
+cargo install cargo-release
 ```
+
+Before releasing you need to log into crates.io for which you have to create an API token on https://crates.io/me
+
+```
+cargo login
+```
+
+You might have to use the `+nightly` toolchain because of releasing multiple crates at once.
+First try the dry-run:
+
+```
+cargo +nightly release <VERSION> --exclude test-services --workspace
+```
+
+If everything looks good run with `--execute`
+
+```
+cargo +nightly release <VERSION> --exclude test-services --workspace --execute
+```
+
