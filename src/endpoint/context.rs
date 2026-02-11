@@ -363,7 +363,11 @@ impl ContextInternal {
         DurableFutureImpl::new(self.clone(), handle, Either::Left(poll_future))
     }
 
-    pub fn request<Req, Res>(&self, request_target: RequestTarget, req: Req) -> Request<Req, Res> {
+    pub fn request<Req, Res>(
+        &self,
+        request_target: RequestTarget,
+        req: Req,
+    ) -> Request<'_, Req, Res> {
         Request::new(self, request_target, req)
     }
 

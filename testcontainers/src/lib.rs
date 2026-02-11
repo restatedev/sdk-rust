@@ -29,13 +29,6 @@ pub struct RegisterDeploymentRequestLambda {
     dry_run: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct VersionResponse {
-    version: String,
-    min_admin_api_version: u32,
-    max_admin_api_version: u32,
-}
-
 pub struct TestEnvironment {
     container_name: String,
     container_tag: String,
