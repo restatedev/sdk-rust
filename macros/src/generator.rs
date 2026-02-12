@@ -1,7 +1,7 @@
 use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
-use quote::{format_ident, quote, ToTokens};
+use quote::{ToTokens, format_ident, quote};
 use syn::{Attribute, PatType, Visibility};
 
 pub(crate) struct ServiceGenerator<'a> {
@@ -194,6 +194,12 @@ impl<'a> ServiceGenerator<'a> {
                 quote! { None }
             };
 
+            let lazy_state = if handler.is_lazy_state {
+                quote! { Some(true) }
+            } else {
+                quote! { None}
+            };
+
             let input_schema = match &handler.arg {
                 Some(PatType { ty, .. }) => {
                     quote! {
@@ -228,7 +234,7 @@ impl<'a> ServiceGenerator<'a> {
                     journal_retention: None,
                     idempotency_retention: None,
                     workflow_completion_retention: None,
-                    enable_lazy_state: None,
+                    enable_lazy_state: #lazy_state,
                     ingress_private: None,
                     retry_policy_initial_interval: None,
                     retry_policy_max_interval: None,
@@ -386,7 +392,7 @@ impl<'a> ServiceGenerator<'a> {
     }
 }
 
-impl<'a> ToTokens for ServiceGenerator<'a> {
+impl ToTokens for ServiceGenerator<'_> {
     fn to_tokens(&self, output: &mut TokenStream2) {
         output.extend(vec![
             self.trait_service(),

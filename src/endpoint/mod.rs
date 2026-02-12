@@ -19,7 +19,7 @@ use http_body::{Body, Frame, SizeHint};
 use http_body_util::{BodyExt, Either, Full};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, Error as CoreError, Header, HeaderMap, IdentityVerifier, ResponseHead, VerifyError, VM,
+    CoreVM, Error as CoreError, Header, HeaderMap, IdentityVerifier, ResponseHead, VM, VerifyError,
 };
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -27,9 +27,9 @@ use std::future::poll_fn;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use tokio::sync::mpsc;
-use tracing::{info_span, warn, Instrument};
+use tracing::{Instrument, info_span, warn};
 
 #[allow(clippy::declare_interior_mutable_const)]
 const X_RESTATE_SERVER: HeaderName = HeaderName::from_static("x-restate-server");
@@ -87,9 +87,13 @@ pub(crate) enum ErrorInner {
     IdentityVerification(#[from] VerifyError),
     #[error("Cannot convert header '{0}', reason: {1}")]
     Header(String, #[source] BoxError),
-    #[error("Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2 and v3")]
+    #[error(
+        "Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2 and v3"
+    )]
     BadDiscoveryVersion(String),
-    #[error("The field '{0}' was set in the service/handler options, but it requires minimum discovery protocol version {1}")]
+    #[error(
+        "The field '{0}' was set in the service/handler options, but it requires minimum discovery protocol version {1}"
+    )]
     FieldRequiresMinimumVersion(&'static str, u32),
     #[error("Bad path '{0}', expected either '/discover' or '/invoke/service/handler'")]
     BadPath(String),
@@ -173,7 +177,7 @@ struct EndpointInner {
 }
 
 #[derive(Default)]
-pub(crate) enum ProtocolMode {
+pub enum ProtocolMode {
     #[allow(dead_code)]
     RequestResponse,
     #[default]
@@ -182,8 +186,8 @@ pub(crate) enum ProtocolMode {
 
 /// Options for [`Endpoint::handle`].
 #[derive(Default)]
-pub(crate) struct HandleOptions {
-    pub(crate) protocol_mode: ProtocolMode,
+pub struct HandleOptions {
+    pub protocol_mode: ProtocolMode,
 }
 
 impl Endpoint {
@@ -196,7 +200,7 @@ impl Endpoint {
     }
 
     /// Handle an [`http::Request`], producing an [`http::Response`].
-    pub(crate) fn handle_with_options<
+    pub fn handle_with_options<
         B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static,
     >(
         &self,
@@ -224,7 +228,7 @@ impl Endpoint {
         let (svc_name, handler_name) = match parts.get(parts.len() - 3..) {
             None => return error_response(ErrorInner::BadPath(path.to_owned())),
             Some(last_elements) if last_elements[0] != "invoke" => {
-                return error_response(ErrorInner::BadPath(path.to_owned()))
+                return error_response(ErrorInner::BadPath(path.to_owned()));
             }
             Some(last_elements) => (last_elements[1].to_owned(), last_elements[2].to_owned()),
         };

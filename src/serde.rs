@@ -87,7 +87,7 @@ where
 ///
 /// ```toml
 /// [dependencies]
-/// restate-sdk = { version = "0.3", features = ["schemars"] }
+/// restate-sdk = { version = "0.8", features = ["schemars"] }
 /// schemars = "1.0.0-alpha.17"
 /// ```
 ///

@@ -4,9 +4,9 @@ use restate_sdk::prelude::{Endpoint, HttpServer};
 use serde::{Deserialize, Serialize};
 use testcontainers::core::wait::HttpWaitStrategy;
 use testcontainers::{
+    ContainerAsync, ContainerRequest, GenericImage, ImageExt,
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
-    ContainerAsync, ContainerRequest, GenericImage, ImageExt,
 };
 use tokio::{io::AsyncBufReadExt, net::TcpListener, task};
 use tracing::{error, info, warn};
@@ -27,13 +27,6 @@ pub struct RegisterDeploymentRequestLambda {
     assume_role_arn: Option<String>,
     force: bool,
     dry_run: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct VersionResponse {
-    version: String,
-    min_admin_api_version: u32,
-    max_admin_api_version: u32,
 }
 
 pub struct TestEnvironment {
@@ -128,14 +121,20 @@ impl StartedEndpoint {
             {
                 Ok(res) if res.status().is_success() => break,
                 Ok(res) => {
-                    warn!("Error when waiting for service endpoint server to be healthy, got response {}", res.status());
+                    warn!(
+                        "Error when waiting for service endpoint server to be healthy, got response {}",
+                        res.status()
+                    );
                     retries += 1;
                     if retries > 10 {
                         anyhow::bail!("Service endpoint server failed to start")
                     }
                 }
                 Err(err) => {
-                    warn!("Error when waiting for service endpoint server to be healthy, got error {}", err);
+                    warn!(
+                        "Error when waiting for service endpoint server to be healthy, got error {}",
+                        err
+                    );
                     retries += 1;
                     if retries > 10 {
                         anyhow::bail!("Service endpoint server failed to start")

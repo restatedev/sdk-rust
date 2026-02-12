@@ -9,6 +9,8 @@ use std::time::Duration;
 /// Various configuration options that can be provided when binding a service
 #[derive(Default, Debug, Clone)]
 pub struct ServiceOptions {
+    /// When set, overrides the service name (defaults to trait name or `#[name]` attribute)
+    pub(crate) name: Option<String>,
     pub(crate) metadata: HashMap<String, String>,
     pub(crate) inactivity_timeout: Option<Duration>,
     pub(crate) abort_timeout: Option<Duration>,

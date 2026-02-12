@@ -8,7 +8,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! restate-sdk = { version = "0.1", features = ["lambda"] }
+//! restate-sdk = { version = "0.8", features = ["lambda"] }
 //! tokio = { version = "1", features = ["full"] }
 //! ```
 //!
@@ -75,9 +75,9 @@ use aws_lambda_events::encodings::Base64Data;
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Uri};
 use http_body_util::{BodyExt, Full};
+use lambda_runtime::LambdaEvent;
 use lambda_runtime::service_fn;
 use lambda_runtime::tower::ServiceExt;
-use lambda_runtime::LambdaEvent;
 use serde::{Deserialize, Serialize};
 
 use crate::endpoint::{Endpoint, HandleOptions, ProtocolMode};

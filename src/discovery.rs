@@ -52,6 +52,9 @@ impl OutputPayload {
 impl Service {
     pub(crate) fn apply_options(&mut self, options: ServiceOptions) {
         // Apply service options
+        if let Some(name) = options.name {
+            self.name = ServiceName::try_from(name).expect("Service name valid");
+        }
         self.metadata.extend(options.metadata);
         self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
         self.abort_timeout = options.abort_timeout.map(|d| d.as_millis() as u64);
