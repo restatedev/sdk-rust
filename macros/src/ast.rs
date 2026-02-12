@@ -142,6 +142,7 @@ impl ServiceInner {
 pub(crate) struct Handler {
     pub(crate) attrs: Vec<Attribute>,
     pub(crate) is_shared: bool,
+    pub(crate) is_lazy_state: bool,
     pub(crate) restate_name: String,
     pub(crate) ident: Ident,
     pub(crate) arg: Option<PatType>,
@@ -214,11 +215,14 @@ impl Parse for Handler {
 
         // Process attributes
         let mut is_shared = false;
+        let mut is_lazy_state = false;
         let mut restate_name = ident.to_string();
         let mut attrs = vec![];
         for attr in parsed_attrs {
             if is_shared_attr(&attr) {
                 is_shared = true;
+            } else if is_lazy_state_attr(&attr) {
+                is_lazy_state = true;
             } else if let Some(name) = read_literal_attribute_name(&attr)? {
                 restate_name = name;
             } else {
@@ -230,6 +234,7 @@ impl Parse for Handler {
         Ok(Self {
             attrs,
             is_shared,
+            is_lazy_state,
             restate_name,
             ident,
             arg: args.pop(),
@@ -244,6 +249,13 @@ fn is_shared_attr(attr: &Attribute) -> bool {
         .require_path_only()
         .and_then(Path::require_ident)
         .is_ok_and(|i| i == "shared")
+}
+
+fn is_lazy_state_attr(attr: &Attribute) -> bool {
+    attr.meta
+        .require_path_only()
+        .and_then(Path::require_ident)
+        .is_ok_and(|i| i == "lazy_state")
 }
 
 fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {

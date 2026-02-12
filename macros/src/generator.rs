@@ -194,6 +194,12 @@ impl<'a> ServiceGenerator<'a> {
                 quote! { None }
             };
 
+            let lazy_state = if handler.is_lazy_state {
+                quote! { Some(true) }
+            } else {
+                quote! { None}
+            };
+
             let input_schema = match &handler.arg {
                 Some(PatType { ty, .. }) => {
                     quote! {
@@ -228,7 +234,7 @@ impl<'a> ServiceGenerator<'a> {
                     journal_retention: None,
                     idempotency_retention: None,
                     workflow_completion_retention: None,
-                    enable_lazy_state: None,
+                    enable_lazy_state: #lazy_state,
                     ingress_private: None,
                     retry_policy_initial_interval: None,
                     retry_policy_max_interval: None,
