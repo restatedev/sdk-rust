@@ -333,8 +333,8 @@ impl Endpoint {
             Bytes::from(
                 serde_json::to_string(&crate::discovery::Endpoint {
                     lambda_compression: None,
-                    max_protocol_version: 5,
-                    min_protocol_version: 5,
+                    max_protocol_version: std::num::NonZero::new(5).unwrap(),
+                    min_protocol_version: std::num::NonZero::new(5).unwrap(),
                     protocol_mode: Some(match protocol_mode {
                         ProtocolMode::RequestResponse => {
                             crate::discovery::ProtocolMode::RequestResponse

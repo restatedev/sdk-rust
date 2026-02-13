@@ -156,7 +156,9 @@ impl LambdaResponseBuilder {
     }
 
     pub fn body(mut self, body: Bytes) -> Self {
-        self.body = Some(Base64Data(body.into()));
+        let mut data = Base64Data::default();
+        data.0 = body.into();
+        self.body = Some(data);
         self
     }
 

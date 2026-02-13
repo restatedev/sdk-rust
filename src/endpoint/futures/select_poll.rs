@@ -124,6 +124,7 @@ impl Future for VmSelectAsyncResultPollFuture {
                             return Poll::Ready(Ok(Err(TerminalFailure {
                                 code: 409,
                                 message: "cancelled".to_string(),
+                                metadata: vec![],
                             }
                             .into())));
                         }

@@ -25,44 +25,44 @@ tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
 
 [dependencies]
-bytes = "1.10"
+bytes = "1.11"
 futures = "0.3"
-http = "1.3"
+http = "1.4"
 http-body = "1.0.1"
 http-body-util = { version = "0.1", optional = true }
-hyper = { version = "1.6", optional = true}
+hyper = { version = "1.8", optional = true}
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http2"], optional = true }
 pin-project-lite = "0.2"
-rand = { version = "0.9", optional = true }
-regress = "=0.10.3"
+rand = { version = "0.10", optional = true }
+regress = "0.10"
 restate-sdk-macros = { version = "0.8", path = "macros" }
-restate-sdk-shared-core = { version = "=0.6.0", features = ["request_identity", "sha2_random_seed", "http"] }
-schemars = { version = "1.0.0", optional = true }
+restate-sdk-shared-core = { version = "=0.7.1", features = ["request_identity", "sha2_random_seed", "http"] }
+schemars = { version = "1.2", optional = true }
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.44", default-features = false, features = ["sync"] }
+tokio = { version = "1.49", default-features = false, features = ["sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"], optional = true }
-uuid = { version = "1.16.0", optional = true }
+uuid = { version = "1.20", optional = true }
 http-serde = { version = "2.1.1", optional = true }
-aws_lambda_events = { version = "0.16.1", optional = true }
-lambda_runtime = { version = "0.14.2", optional = true }
+aws_lambda_events = { version = "1.0", optional = true }
+lambda_runtime = { version = "1.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 trybuild = "1.0"
-reqwest = { version = "0.12", features = ["json"] }
-rand = "0.9"
-schemars = "1.0.0-alpha.17"
+reqwest = { version = "0.13", features = ["json"] }
+rand = "0.10"
+schemars = "1.2"
 
 [build-dependencies]
-jsonptr = "0.5.1"
+jsonptr = "0.7"
 prettyplease = "0.2"
 serde_json = { version = "1.0" }
 syn = "2.0"
-typify = { version = "0.1.0" }
+typify = { version = "0.6" }
 
 [workspace]
 members = ["macros", "test-services", "testcontainers"]

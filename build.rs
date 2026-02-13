@@ -46,11 +46,8 @@ fn main() -> std::io::Result<()> {
         .add_root_schema(serde_json::from_value(parsed_content).unwrap())
         .unwrap();
 
-    let contents = format!(
-        "{}\n{}",
-        "use serde::{Deserialize, Serialize};",
-        prettyplease::unparse(&syn::parse2::<syn::File>(type_space.to_stream()).unwrap())
-    );
-
-    std::fs::write(out_dir.join("endpoint_manifest.rs"), contents)
+    std::fs::write(
+        out_dir.join("endpoint_manifest.rs"),
+        prettyplease::unparse(&syn::parse2::<syn::File>(type_space.to_stream()).unwrap()),
+    )
 }

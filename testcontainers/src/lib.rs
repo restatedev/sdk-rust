@@ -168,16 +168,16 @@ impl StartedRestateContainer {
         )
         .with_exposed_port(8080.tcp())
         .with_exposed_port(9070.tcp())
-        .with_wait_for(WaitFor::Http(
+        .with_wait_for(WaitFor::Http(Box::new(
             HttpWaitStrategy::new("/restate/health")
                 .with_port(8080.tcp())
                 .with_response_matcher(|res| res.status().is_success()),
-        ))
-        .with_wait_for(WaitFor::Http(
+        )))
+        .with_wait_for(WaitFor::Http(Box::new(
             HttpWaitStrategy::new("/health")
                 .with_port(9070.tcp())
                 .with_response_matcher(|res| res.status().is_success()),
-        ));
+        )));
 
         // Start container
         let container = ContainerRequest::from(image)

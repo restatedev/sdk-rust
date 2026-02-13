@@ -16,7 +16,8 @@ use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
     CoreVM, DoProgressResponse, Error as CoreError, Header, NonEmptyValue, NotificationHandle,
-    RetryPolicy, RunExitResult, TakeOutputResult, Target, TerminalFailure, VM, Value,
+    PayloadOptions, RetryPolicy, RunExitResult, TakeOutputResult, Target, TerminalFailure, VM,
+    Value,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -59,7 +60,7 @@ impl ContextInternalInner {
         self.maybe_flip_span_replaying_field();
         self.vm.notify_error(
             CoreError::new(500u16, e.0.to_string())
-                .with_stacktrace(Cow::Owned(format!("{:#}", e.0))),
+                .with_stacktrace(Cow::<str>::Owned(format!("{:#}", e.0))),
             None,
         );
         self.handler_state.mark_error(e);
@@ -237,7 +238,7 @@ impl ContextInternal {
                 };
                 let _ = inner_lock
                     .vm
-                    .sys_write_output(NonEmptyValue::Failure(err.into()));
+                    .sys_write_output(NonEmptyValue::Failure(err.into()), PayloadOptions::stable());
                 let _ = inner_lock.vm.sys_end();
                 // This causes the trap, plus logs the error
                 inner_lock.handler_state.mark_error(error_inner.into());
@@ -256,7 +257,12 @@ impl ContextInternal {
         key: &str,
     ) -> impl Future<Output = Result<Option<T>, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
-        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get(key.to_owned()));
+        let handle = unwrap_or_trap!(
+            inner_lock,
+            inner_lock
+                .vm
+                .sys_state_get(key.to_owned(), PayloadOptions::stable())
+        );
         inner_lock.maybe_flip_span_replaying_field();
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
@@ -301,7 +307,9 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         match t.serialize() {
             Ok(b) => {
-                let _ = inner_lock.vm.sys_state_set(key.to_owned(), b);
+                let _ = inner_lock
+                    .vm
+                    .sys_state_set(key.to_owned(), b, PayloadOptions::stable());
                 inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
@@ -391,7 +399,12 @@ impl ContextInternal {
             .collect();
         let call_result = Req::serialize(&req)
             .map_err(|e| Error::serialization("call", e))
-            .and_then(|input| inner_lock.vm.sys_call(target, input).map_err(Into::into));
+            .and_then(|input| {
+                inner_lock
+                    .vm
+                    .sys_call(target, input, PayloadOptions::stable())
+                    .map_err(Into::into)
+            });
 
         let call_handle = match call_result {
             Ok(t) => t,
@@ -487,6 +500,7 @@ impl ContextInternal {
                     .expect("Duration since unix epoch cannot fail")
                     + delay
             }),
+            PayloadOptions::stable(),
         ) {
             Ok(h) => h,
             Err(e) => {
@@ -579,9 +593,11 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         match t.serialize() {
             Ok(b) => {
-                let _ = inner_lock
-                    .vm
-                    .sys_complete_awakeable(id.to_owned(), NonEmptyValue::Success(b));
+                let _ = inner_lock.vm.sys_complete_awakeable(
+                    id.to_owned(),
+                    NonEmptyValue::Success(b),
+                    PayloadOptions::stable(),
+                );
             }
             Err(e) => {
                 inner_lock.fail(Error::serialization("resolve_awakeable", e));
@@ -590,9 +606,11 @@ impl ContextInternal {
     }
 
     pub fn reject_awakeable(&self, id: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner)
-            .vm
-            .sys_complete_awakeable(id.to_owned(), NonEmptyValue::Failure(failure.into()));
+        let _ = must_lock!(self.inner).vm.sys_complete_awakeable(
+            id.to_owned(),
+            NonEmptyValue::Failure(failure.into()),
+            PayloadOptions::stable(),
+        );
     }
 
     pub fn promise<T: Deserialize>(
@@ -657,9 +675,11 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         match t.serialize() {
             Ok(b) => {
-                let _ = inner_lock
-                    .vm
-                    .sys_complete_promise(name.to_owned(), NonEmptyValue::Success(b));
+                let _ = inner_lock.vm.sys_complete_promise(
+                    name.to_owned(),
+                    NonEmptyValue::Success(b),
+                    PayloadOptions::stable(),
+                );
             }
             Err(e) => {
                 inner_lock.fail(
@@ -674,9 +694,11 @@ impl ContextInternal {
     }
 
     pub fn reject_promise(&self, id: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner)
-            .vm
-            .sys_complete_promise(id.to_owned(), NonEmptyValue::Failure(failure.into()));
+        let _ = must_lock!(self.inner).vm.sys_complete_promise(
+            id.to_owned(),
+            NonEmptyValue::Failure(failure.into()),
+            PayloadOptions::stable(),
+        );
     }
 
     pub fn run<'a, Run, Fut, Out>(
@@ -719,7 +741,9 @@ impl ContextInternal {
             },
         };
 
-        let _ = inner_lock.vm.sys_write_output(res_to_write);
+        let _ = inner_lock
+            .vm
+            .sys_write_output(res_to_write, PayloadOptions::stable());
         inner_lock.maybe_flip_span_replaying_field();
     }
 
@@ -886,6 +910,7 @@ where
                                     Ok(Err(TerminalError::from(TerminalFailure {
                                         code: 409,
                                         message: "cancelled".to_string(),
+                                        metadata: vec![],
                                     })))
                                 }
                                 .boxed(),

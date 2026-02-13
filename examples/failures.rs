@@ -1,4 +1,4 @@
-use rand::RngCore;
+use rand::Rng;
 use restate_sdk::prelude::*;
 
 #[restate_sdk::service]

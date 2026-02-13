@@ -155,6 +155,7 @@ impl From<TerminalError> for TerminalFailure {
         Self {
             code: value.0.code,
             message: value.0.message,
+            metadata: vec![],
         }
     }
 }
