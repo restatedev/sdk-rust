@@ -402,7 +402,7 @@ impl ContextInternal {
             .and_then(|input| {
                 inner_lock
                     .vm
-                    .sys_call(target, input, PayloadOptions::stable())
+                    .sys_call(target, input, None, PayloadOptions::stable())
                     .map_err(Into::into)
             });
 
@@ -500,6 +500,7 @@ impl ContextInternal {
                     .expect("Duration since unix epoch cannot fail")
                     + delay
             }),
+            None,
             PayloadOptions::stable(),
         ) {
             Ok(h) => h,
@@ -755,10 +756,10 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
 
         let out = inner_lock.vm.take_output();
-        if let TakeOutputResult::Buffer(b) = out {
-            if !inner_lock.write.send(b) {
-                // Nothing we can do anymore here
-            }
+        if let TakeOutputResult::Buffer(b) = out
+            && !inner_lock.write.send(b)
+        {
+            // Nothing we can do anymore here
         }
     }
 

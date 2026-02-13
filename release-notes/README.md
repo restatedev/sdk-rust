@@ -8,7 +8,7 @@ This directory contains release notes for the Restate Rust SDK, organized to tra
 release-notes/
 ├── README.md          # This file
 ├── v0.8.0.md          # Consolidated release notes for v0.8.0
-├── v0.9.0.md          # (future releases follow the same pattern)
+├── v0.9.0.md          # Consolidated release notes for v0.9.0
 └── unreleased/        # Release notes for changes not yet released
     └── *.md           # Individual release note files
 ```
