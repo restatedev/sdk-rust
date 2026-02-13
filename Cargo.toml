@@ -1,11 +1,11 @@
 [package]
 name = "restate-sdk"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "Restate SDK for Rust"
 license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
-rust-version = "1.85.0"
+rust-version = "1.90.0"
 
 [[example]]
 name = "tracing"
@@ -35,7 +35,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful"
 pin-project-lite = "0.2"
 rand = { version = "0.10", optional = true }
 regress = "0.10"
-restate-sdk-macros = { version = "0.8", path = "macros" }
+restate-sdk-macros = { version = "0.9", path = "macros" }
 restate-sdk-shared-core = { version = "=0.7.1", features = ["request_identity", "sha2_random_seed", "http"] }
 schemars = { version = "1.2", optional = true }
 serde = "1.0"

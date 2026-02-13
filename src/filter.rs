@@ -54,10 +54,10 @@ impl<S: Subscriber + for<'lookup> LookupSpan<'lookup>> Filter<S> for ReplayAware
         if let Some(scope) = cx.event_scope(event) {
             let iterator = scope.from_root();
             for span in iterator {
-                if span.name() == "restate_sdk_endpoint_handle" {
-                    if let Some(replay) = span.extensions().get::<ReplayField>() {
-                        return !replay.0;
-                    }
+                if span.name() == "restate_sdk_endpoint_handle"
+                    && let Some(replay) = span.extensions().get::<ReplayField>()
+                {
+                    return !replay.0;
                 }
             }
         }
@@ -65,24 +65,24 @@ impl<S: Subscriber + for<'lookup> LookupSpan<'lookup>> Filter<S> for ReplayAware
     }
 
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            if span.name() == "restate_sdk_endpoint_handle" {
-                let mut visitor = ReplayFieldVisitor(false);
-                attrs.record(&mut visitor);
-                let mut extensions = span.extensions_mut();
-                extensions.replace::<ReplayField>(ReplayField(visitor.0));
-            }
+        if let Some(span) = ctx.span(id)
+            && span.name() == "restate_sdk_endpoint_handle"
+        {
+            let mut visitor = ReplayFieldVisitor(false);
+            attrs.record(&mut visitor);
+            let mut extensions = span.extensions_mut();
+            extensions.replace::<ReplayField>(ReplayField(visitor.0));
         }
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            if span.name() == "restate_sdk_endpoint_handle" {
-                let mut visitor = ReplayFieldVisitor(false);
-                values.record(&mut visitor);
-                let mut extensions = span.extensions_mut();
-                extensions.replace::<ReplayField>(ReplayField(visitor.0));
-            }
+        if let Some(span) = ctx.span(id)
+            && span.name() == "restate_sdk_endpoint_handle"
+        {
+            let mut visitor = ReplayFieldVisitor(false);
+            values.record(&mut visitor);
+            let mut extensions = span.extensions_mut();
+            extensions.replace::<ReplayField>(ReplayField(visitor.0));
         }
     }
 }

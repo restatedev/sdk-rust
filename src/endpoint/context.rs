@@ -755,10 +755,10 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
 
         let out = inner_lock.vm.take_output();
-        if let TakeOutputResult::Buffer(b) = out {
-            if !inner_lock.write.send(b) {
-                // Nothing we can do anymore here
-            }
+        if let TakeOutputResult::Buffer(b) = out
+            && !inner_lock.write.send(b)
+        {
+            // Nothing we can do anymore here
         }
     }
 
