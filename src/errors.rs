@@ -16,6 +16,20 @@
 //! ```
 //!
 //! You can catch terminal exceptions. For example, you can catch the terminal exception that comes out of a [call to another service][crate::context::ContextClient], and build your control flow around it.
+//!
+//! ## Converting Errors to Terminal Errors
+//!
+//! The [`TerminalErrorExt`] trait provides a convenient way to convert any `Result` error
+//! into a terminal error using the `.terminal()` or `.terminal_with_code()` methods:
+//!
+//! ```rust,no_run
+//! # use restate_sdk::prelude::*;
+//! # use restate_sdk::TerminalErrorExt;
+//! # async fn handle() -> Result<(), HandlerError> {
+//! let parsed: i32 = "not a number".parse().terminal()?;
+//! # Ok(())
+//! # }
+//! ```
 use restate_sdk_shared_core::TerminalFailure;
 use std::error::Error as StdError;
 use std::fmt;
@@ -161,3 +175,51 @@ impl From<TerminalError> for TerminalFailure {
 
 /// Result type for a Restate handler.
 pub type HandlerResult<T> = Result<T, HandlerError>;
+
+/// Extension trait for converting any `Result` error into a [`TerminalError`].
+///
+/// This trait provides a convenient way to convert errors from fallible operations
+/// into terminal errors that will not be retried by Restate.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use restate_sdk::prelude::*;
+/// use restate_sdk::TerminalErrorExt;
+///
+/// async fn handle() -> Result<(), HandlerError> {
+///     let parsed: i32 = "not a number".parse().terminal()?;
+///     Ok(())
+/// }
+/// ```
+///
+/// You can also specify a custom HTTP status code:
+///
+/// ```rust,no_run
+/// use restate_sdk::prelude::*;
+/// use restate_sdk::TerminalErrorExt;
+///
+/// async fn handle() -> Result<(), HandlerError> {
+///     let parsed: i32 = "not a number".parse().terminal_with_code(400)?;
+///     Ok(())
+/// }
+/// ```
+pub trait TerminalErrorExt<T, E> {
+    /// Convert the error into a [`TerminalError`] with the default status code (500).
+    fn terminal(self) -> Result<T, HandlerError>;
+    /// Convert the error into a [`TerminalError`] with a custom status code.
+    fn terminal_with_code(self, code: u16) -> Result<T, HandlerError>;
+}
+
+impl<T, E> TerminalErrorExt<T, E> for Result<T, E>
+where
+    E: std::fmt::Display + Send + Sync + 'static,
+{
+    fn terminal(self) -> Result<T, HandlerError> {
+        self.map_err(|err| TerminalError::new(err.to_string()).into())
+    }
+
+    fn terminal_with_code(self, code: u16) -> Result<T, HandlerError> {
+        self.map_err(|err| TerminalError::new_with_code(code, err.to_string()).into())
+    }
+}

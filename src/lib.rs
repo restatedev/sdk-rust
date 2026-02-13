@@ -526,3 +526,5 @@ pub mod prelude {
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
 }
+
+pub use crate::errors::TerminalErrorExt;
