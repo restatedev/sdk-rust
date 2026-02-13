@@ -79,7 +79,7 @@
 //!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/myHandler`. You can optionally override the handler name used via `#[name = "myHandler"]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
 //! - Implement the trait on a concrete type, for example on a struct.
 //! - The first parameter of a handler after `&self` is always a [`Context`](crate::context::Context) to interact with Restate.
-//!     The SDK stores the actions you do on the context in the Restate journal to make them durable.
+//!   The SDK stores the actions you do on the context in the Restate journal to make them durable.
 //! - Finally, create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
 //!
 //! ## Virtual Objects
@@ -133,8 +133,8 @@
 //! - The first argument of each handler must be the [`ObjectContext`](crate::context::ObjectContext) parameter. Handlers with the `ObjectContext` parameter can write to the K/V state store. Only one handler can be active at a time per object, to ensure consistency.
 //! - You can retrieve the key of the object you are in via [`ObjectContext.key`].
 //! - If you want to have a handler that executes concurrently to the others and doesn't have write access to the K/V state, add `#[shared]` to the handler definition in the trait.
-//!     Shared handlers need to use the [`SharedObjectContext`](crate::context::SharedObjectContext).
-//!     You can use these handlers, for example, to read K/V state and expose it to the outside world, or to interact with the blocking handler and resolve awakeables etc.
+//!   Shared handlers need to use the [`SharedObjectContext`](crate::context::SharedObjectContext).
+//!   You can use these handlers, for example, to read K/V state and expose it to the outside world, or to interact with the blocking handler and resolve awakeables etc.
 //!
 //! ## Workflows
 //!
@@ -180,11 +180,11 @@
 //! - Specify that you want to create a Workflow by using the [`#[restate_sdk::workflow]` macro](workflow).
 //! - The workflow needs to have a `run` handler.
 //! - The first argument of the `run` handler must be the [`WorkflowContext`](crate::context::WorkflowContext) parameter.
-//!     The `WorkflowContext` parameter is used to interact with Restate.
-//!     The `run` handler executes exactly once per workflow instance.
+//!   The `WorkflowContext` parameter is used to interact with Restate.
+//!   The `run` handler executes exactly once per workflow instance.
 //! - The other handlers of the workflow are used to interact with the workflow: either query it, or signal it.
-//!     They use the [`SharedWorkflowContext`](crate::context::SharedWorkflowContext) to interact with the SDK.
-//!     These handlers can run concurrently with the run handler and can still be called after the run handler has finished.
+//!   They use the [`SharedWorkflowContext`](crate::context::SharedWorkflowContext) to interact with the SDK.
+//!   These handlers can run concurrently with the run handler and can still be called after the run handler has finished.
 //! - Have a look at the [workflow docs](workflow) to learn more.
 //!
 //!
@@ -454,7 +454,7 @@ pub use restate_sdk_macros::object;
 /// Do the following:
 /// 1. Create a promise that is durable and distributed in the `run` handler, and wait for its completion. In the example, we wait on the promise `email.clicked`.
 /// 2. Resolve or reject the promise in another handler in the workflow. This can be done at most one time.
-///     In the example, the `click` handler gets called when the user clicks a link in an email and resolves the `email.clicked` promise.
+///    In the example, the `click` handler gets called when the user clicks a link in an email and resolves the `email.clicked` promise.
 ///
 /// You can also use this pattern in reverse and let the `run` handler resolve promises that other handlers are waiting on.
 /// For example, the `run` handler could resolve a promise when it finishes a step of the workflow, so that other handlers can request whether this step has been completed.
