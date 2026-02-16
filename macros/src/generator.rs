@@ -1,4 +1,4 @@
-use crate::ast::{Handler, Object, Service, ServiceInner, ServiceType, Workflow};
+use crate::ast::{Handler, HandlerConfig, Object, Service, ServiceInner, ServiceType, Workflow};
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro2::{Ident, Literal};
 use quote::{ToTokens, format_ident, quote};
@@ -55,10 +55,10 @@ impl<'a> ServiceGenerator<'a> {
         let handler_fns = handlers
             .iter()
             .map(
-                |Handler { attrs, ident, arg, is_shared, output_ok, output_err, .. }| {
+                |Handler { attrs, ident, arg, config: HandlerConfig{shared, ..}, output_ok, output_err, .. }| {
                     let args = arg.iter();
 
-                    let ctx = match (&service_ty, is_shared) {
+                    let ctx = match (&service_ty, shared) {
                         (ServiceType::Service, _) => quote! { ::restate_sdk::prelude::Context },
                         (ServiceType::Object, true) => quote! { ::restate_sdk::prelude::SharedObjectContext },
                         (ServiceType::Object, false) => quote! { ::restate_sdk::prelude::ObjectContext },
@@ -185,7 +185,7 @@ impl<'a> ServiceGenerator<'a> {
         let handlers = handlers.iter().map(|handler| {
             let handler_literal = Literal::string(&handler.restate_name);
 
-            let handler_ty = if handler.is_shared {
+            let handler_ty = if handler.config.shared {
                 quote! { Some(::restate_sdk::discovery::HandlerType::Shared) }
             } else if *service_ty == ServiceType::Workflow {
                 quote! { Some(::restate_sdk::discovery::HandlerType::Workflow) }
@@ -194,11 +194,19 @@ impl<'a> ServiceGenerator<'a> {
                 quote! { None }
             };
 
-            let lazy_state = if handler.is_lazy_state {
+            let lazy_state = if handler.config.lazy_state {
                 quote! { Some(true) }
             } else {
                 quote! { None}
             };
+
+            let inactivity_timeout = handler.config.inactivity_timeout.map(|timeout| {
+                quote! { Some(#timeout) }
+            }).unwrap_or_else(|| quote! { None });
+
+            let abort_timeout = handler.config.abort_timeout.map(|timeout| {
+                quote! { Some(#timeout) }
+            }).unwrap_or_else(|| quote! { None });
 
             let input_schema = match &handler.arg {
                 Some(PatType { ty, .. }) => {
@@ -229,8 +237,8 @@ impl<'a> ServiceGenerator<'a> {
                     ty: #handler_ty,
                     documentation: None,
                     metadata: Default::default(),
-                    abort_timeout: None,
-                    inactivity_timeout: None,
+                    abort_timeout: #abort_timeout,
+                    inactivity_timeout: #inactivity_timeout,
                     journal_retention: None,
                     idempotency_retention: None,
                     workflow_completion_retention: None,
