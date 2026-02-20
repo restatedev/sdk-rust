@@ -15,10 +15,6 @@
 //! If you are calling another handler from within a currently executing
 //! handler, prefer the context client APIs in [`crate::context`].
 //!
-//! ## Feature flag
-//!
-//! This module is available when the `ingress-client` feature is enabled.
-//!
 //! ## Core types
 //!
 //! - [`Client`]: shared HTTP client for building typed service/object/workflow clients.
@@ -40,28 +36,38 @@
 //!    - `.idempotency_key(...)`
 //!    - `.timeout(...)`
 //!    - `.delay(...)`
-//!    - `.call().await`
+//!    - `.call(&executor).await`
 //!
 //! ## Typed client example
 //!
 //! ```no_run
-//! # use restate_sdk::ingress::{AuthToken, Client, ServerUrl};
+//! # use restate_sdk::ingress::{AuthToken, Client, ServerUrl, RequestError};
+//! # use restate_sdk::ingress::executor::{Executor, HttpRequest, HttpResponse};
+//! # use std::future::Future;
+//! # use std::pin::Pin;
 //! #[restate_sdk::service]
 //! trait Greeter {
 //!     async fn greet(name: String) -> restate_sdk::errors::HandlerResult<String>;
 //! }
-//!
+//! # struct DemoExecutor;
+//! # impl Executor for DemoExecutor {
+//! #     fn execute<'a>(&'a self, _request: HttpRequest) -> Pin<Box<dyn Future<Output = Result<HttpResponse, RequestError>> + Send + 'a>> {
+//! #         Box::pin(async { Err(RequestError::Request("demo executor".to_string())) })
+//! #     }
+//! # }
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let executor = DemoExecutor;
 //! let server_url: ServerUrl = "https://api.example.com".try_into()?;
 //! let token = AuthToken::new("token".to_string().into())?;
-//! let client = Client::new(server_url, Some(token))?;
+//! let client = Client::new(server_url, Some(token));
 //!
 //! # async fn invoke(client: Client) -> Result<(), Box<dyn std::error::Error>> {
+//! let executor = DemoExecutor;
 //! let response: String = client
 //!     .service_client::<GreeterClient>()
 //!     .greet("Ada".to_string())
 //!     .idempotency_key("greet-ada")
-//!     .call()
+//!     .call(&executor)
 //!     .await?;
 //!
 //! # let _ = response;
@@ -72,6 +78,10 @@
 //! # }
 //! ```
 //!
+//! ## Reqwest executor
+//!
+//! Enable feature `reqwest-client` to use `reqwest::Client` as an ingress executor.
+//!
 //! ## Notes
 //!
 //! - The ingress client is cheap to clone and can be shared across threads.
@@ -80,24 +90,22 @@
 //! - Successful responses are JSON-decoded into the handler return type.
 //!
 use http::Uri;
+use http::header::AUTHORIZATION;
+use http::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderValue};
 use http::uri::Authority;
-use reqwest::Url;
-use reqwest::header::AUTHORIZATION;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
-use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use url::Url;
 
-pub use reqwest;
 pub use secrecy;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 /// Shared ingress HTTP client used by generated service/object/workflow clients.
 ///
-/// A `Client` holds a configured `reqwest::Client` plus a validated [`ServerUrl`].
+/// A `Client` holds a validated [`ServerUrl`] and optional [`AuthToken`].
 /// It is cheap to clone and can be reused across threads.
 ///
 /// # Example
@@ -107,33 +115,28 @@ pub use secrecy;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let server_url: ServerUrl = "https://api.example.com".try_into()?;
 /// let token = AuthToken::new("token".to_string().into())?;
-/// let client = Client::new(server_url, Some(token))?;
+/// let client = Client::new(server_url, Some(token));
 /// # let _ = client;
 /// # Ok(())
 /// # }
 /// ```
-pub struct Client(Arc<(reqwest::Client, ServerUrl)>);
+pub struct Client {
+    server_url: ServerUrl,
+    auth_token: Option<AuthToken>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Client(..)")
+    }
+}
 
 impl Client {
-    pub fn new(server_url: ServerUrl, token: Option<AuthToken>) -> Result<Client, reqwest::Error> {
-        Self::for_builder(reqwest::Client::builder(), server_url, token)
-    }
-
-    pub fn for_builder(
-        builder: reqwest::ClientBuilder,
-        server_url: ServerUrl,
-        token: Option<AuthToken>,
-    ) -> Result<Client, reqwest::Error> {
-        let client = if let Some(token) = token {
-            builder.default_headers(token.headers()).build()?
-        } else {
-            builder.build()?
-        };
-        Ok(Client::for_reqwest(client, server_url))
-    }
-
-    pub fn for_reqwest(reqwest: reqwest::Client, server_url: ServerUrl) -> Self {
-        Self(Arc::new((reqwest, server_url)))
+    pub fn new(server_url: ServerUrl, auth_token: Option<AuthToken>) -> Client {
+        Client {
+            server_url,
+            auth_token,
+        }
     }
 
     pub fn service_client<C>(&self) -> C::Request<'_>
@@ -171,7 +174,7 @@ impl Client {
 /// # use restate_sdk::ingress::ServerUrl;
 /// # use http::Uri;
 /// # use http::uri::Authority;
-/// # use reqwest::Url;
+/// # use url::Url;
 /// # use std::net::SocketAddr;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let from_str: ServerUrl = "http://localhost:8080".try_into()?;
@@ -291,17 +294,6 @@ impl AuthToken {
         (AUTHORIZATION, authorization)
     }
 
-    pub fn insert_in(&self, headers: &mut HeaderMap) {
-        let (name, value) = self.to_request_header();
-        headers.insert(name, value);
-    }
-
-    pub fn headers(&self) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        self.insert_in(&mut headers);
-        headers
-    }
-
     fn parse_header_value(token: &SecretString) -> Result<HeaderValue, InvalidHeaderValue> {
         HeaderValue::from_str(&format!("Bearer {}", token.expose_secret()))
     }
@@ -324,9 +316,12 @@ pub enum RequestError {
     /// Request URL construction failed (invalid base URL or request path composition).
     #[error("request invalid path: {0}")]
     InvalidPath(#[from] url::ParseError),
-    /// Transport-layer request execution failed in `reqwest`.
+    /// Transport-layer request execution failed in the configured executor.
     #[error("request failed: {0}")]
-    Request(#[from] reqwest::Error),
+    Request(String),
+    /// Invalid header key or value was provided when building request metadata.
+    #[error("invalid header: {0}")]
+    InvalidHeader(String),
     /// The server returned a non-success status code; body contains response text.
     #[error("non-success status {status}: {body}")]
     Status { status: u16, body: String },
@@ -339,8 +334,7 @@ impl From<std::convert::Infallible> for RequestError {
 }
 
 pub struct Request<Res = ()> {
-    builder: Result<reqwest::RequestBuilder, RequestError>,
-    delay: Option<Duration>,
+    request: Result<executor::HttpRequest, RequestError>,
     _res: PhantomData<Res>,
 }
 
@@ -351,20 +345,16 @@ pub struct Request<Res = ()> {
 impl<Res> From<RequestError> for Request<Res> {
     fn from(value: RequestError) -> Self {
         Self {
-            builder: Err(value),
-            delay: None,
+            request: Err(value),
             _res: PhantomData,
         }
     }
 }
 
 impl<Res> Request<Res> {
-    pub(crate) fn from_builder_result(
-        builder: Result<reqwest::RequestBuilder, RequestError>,
-    ) -> Self {
+    fn from_request_result(request: Result<executor::HttpRequest, RequestError>) -> Self {
         Self {
-            builder,
-            delay: None,
+            request,
             _res: PhantomData,
         }
     }
@@ -378,71 +368,85 @@ impl<Res> Request<Res> {
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
-        if let Ok(builder) = self.builder {
-            self.builder = Ok(builder.header(key, value));
-        }
+        self.request = match self.request {
+            Ok(mut request) => {
+                let name = match HeaderName::try_from(key) {
+                    Ok(name) => name,
+                    Err(err) => return RequestError::InvalidHeader(err.into().to_string()).into(),
+                };
+                let value = match HeaderValue::try_from(value) {
+                    Ok(value) => value,
+                    Err(err) => return RequestError::InvalidHeader(err.into().to_string()).into(),
+                };
+                request.headers.insert(name, value);
+                Ok(request)
+            }
+            Err(err) => Err(err),
+        };
         self
     }
 
     /// Adds a map of HTTP headers to the ingress request.
     /// See the module-level typed client example for end-to-end usage.
     pub fn headers(mut self, headers: HeaderMap) -> Self {
-        if let Ok(builder) = self.builder {
-            self.builder = Ok(builder.headers(headers));
+        if let Ok(mut request) = self.request {
+            request.headers.extend(headers);
+            self.request = Ok(request);
         }
         self
     }
 
     /// Sets a per-request timeout for the ingress call.
-    /// See the module-level typed client example for end-to-end usage.
     pub fn timeout(mut self, timeout: Duration) -> Self {
-        if let Ok(builder) = self.builder {
-            self.builder = Ok(builder.timeout(timeout));
+        if let Ok(mut request) = self.request {
+            request.timeout = Some(timeout);
+            self.request = Ok(request);
         }
         self
     }
 
     /// Sets Restate's idempotency key for this ingress request.
-    /// See the module-level typed client example for end-to-end usage.
     pub fn idempotency_key(mut self, idempotency_key: impl AsRef<str>) -> Self {
-        if let Ok(builder) = self.builder {
-            self.builder = Ok(builder.header("Idempotency-Key", idempotency_key.as_ref()));
+        if let Ok(mut request) = self.request {
+            let value = match HeaderValue::from_str(idempotency_key.as_ref()) {
+                Ok(value) => value,
+                Err(err) => return RequestError::InvalidHeader(err.to_string()).into(),
+            };
+            let name = HeaderName::from_static("idempotency-key");
+            request.headers.insert(name, value);
+            self.request = Ok(request);
         }
         self
     }
 
     /// Adds a Restate ingress `delay` query parameter to defer invocation.
-    /// See the module-level typed client example for end-to-end usage.
     pub fn delay(mut self, delay: Duration) -> Self {
-        self.delay = Some(delay);
+        if let Ok(mut request) = self.request {
+            request
+                .url
+                .query_pairs_mut()
+                .append_pair("delay", &format!("{}ms", delay.as_millis()));
+            self.request = Ok(request);
+        }
         self
     }
 
     /// Sends the request and deserializes the JSON response into `Res`.
     ///
     /// Non-success HTTP responses are returned as [`RequestError::Status`].
-    pub async fn call(self) -> Result<Res, RequestError>
+    pub async fn call(self, executor: &dyn executor::Executor) -> Result<Res, RequestError>
     where
         Res: DeserializeOwned,
     {
-        let builder = self.builder?;
-        let response = if let Some(delay) = self.delay {
-            let (client, request) = builder.build_split();
-            let mut request = request?;
-            request
-                .url_mut()
-                .query_pairs_mut()
-                .append_pair("delay", &format!("{}ms", delay.as_millis()));
-            client.execute(request).await?
-        } else {
-            builder.send().await?
-        };
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
+        let request = self.request?;
+
+        let response = executor.execute(request).await?;
+        if response.status < 200 || response.status > 299 {
+            let status = response.status;
+            let body = String::from_utf8_lossy(response.body.as_ref()).into_owned();
             return Err(RequestError::Status { status, body });
         }
-        let body = response.bytes().await?;
+        let body = response.body;
         let body = if body.is_empty() {
             b"null" as &[u8]
         } else {
@@ -453,12 +457,59 @@ impl<Res> Request<Res> {
     }
 }
 
+pub mod executor {
+    use super::RequestError;
+    use http::HeaderMap;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::time::Duration;
+    use url::Url;
+
+    /// Transport abstraction for executing ingress HTTP requests.
+    ///
+    /// Implement this trait to plug in a custom HTTP client backend.
+    /// The ingress client builds a [`HttpRequest`] and delegates delivery to this trait.
+    ///
+    /// For reqwest, enable the `reqwest-client` feature and pass a `reqwest::Client`
+    /// directly to [`crate::ingress::Request::call`].
+    #[derive(Clone, Debug)]
+    /// Transport-agnostic ingress request payload produced by the ingress builder.
+    pub struct HttpRequest {
+        pub url: Url,
+        pub headers: HeaderMap,
+        pub body: bytes::Bytes,
+        pub timeout: Option<Duration>,
+    }
+
+    #[derive(Debug)]
+    /// Transport-agnostic ingress response returned by an [`Executor`].
+    pub struct HttpResponse {
+        pub status: u16,
+        pub body: bytes::Bytes,
+    }
+
+    /// Executes an ingress [`HttpRequest`] and returns an [`HttpResponse`].
+    ///
+    /// This trait is object-safe and intended for dynamic dispatch in
+    /// [`crate::ingress::Request::call`].
+    pub trait Executor: Send + Sync {
+        fn execute<'a>(
+            &'a self,
+            request: HttpRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, RequestError>> + Send + 'a>>;
+    }
+}
+
 #[doc(hidden)]
 pub mod builder {
+    use super::executor::HttpRequest;
     use super::{Client, ServerUrl};
     use crate::ingress::{Request, RequestError};
     use crate::serde::Serialize;
-    use reqwest::Url;
+    use http::header::CONTENT_TYPE;
+    use http::header::HeaderMap;
+    use http::header::HeaderValue;
+    use url::Url;
 
     pub trait IntoServiceRequest: Sized {
         type Request<'a>;
@@ -483,9 +534,12 @@ pub mod builder {
         Req: Serialize,
         RequestError: From<Req::Error>,
     {
-        Request::from_builder_result(build_post(client, req, |server_url| {
-            server_url.build_for_path(request_path)
-        }))
+        Request::from_request_result(build_post(
+            req,
+            |server_url| server_url.build_for_path(request_path),
+            &client.server_url,
+            client,
+        ))
     }
 
     pub fn object<Req, Res>(
@@ -499,7 +553,7 @@ pub mod builder {
         Req: Serialize,
         RequestError: From<Req::Error>,
     {
-        post_keyed(client, service, key, handler, req)
+        keyed(client, service, key, handler, req)
     }
 
     pub fn workflow<Req, Res>(
@@ -513,10 +567,10 @@ pub mod builder {
         Req: Serialize,
         RequestError: From<Req::Error>,
     {
-        post_keyed(client, service, key, handler, req)
+        keyed(client, service, key, handler, req)
     }
 
-    fn post_keyed<Req, Res>(
+    fn keyed<Req, Res>(
         client: &Client,
         service: &str,
         key: &str,
@@ -527,23 +581,79 @@ pub mod builder {
         Req: Serialize,
         RequestError: From<Req::Error>,
     {
-        Request::from_builder_result(build_post(client, req, |server_url| {
-            Ok(server_url.build_for_keyed(service, key, handler))
-        }))
+        Request::from_request_result(build_post(
+            req,
+            |server_url| Ok(server_url.build_for_keyed(service, key, handler)),
+            &client.server_url,
+            client,
+        ))
     }
 
     fn build_post<Req>(
-        client: &Client,
         req: Req,
         make_url: impl FnOnce(&ServerUrl) -> Result<Url, RequestError>,
-    ) -> Result<reqwest::RequestBuilder, RequestError>
+        server_url: &ServerUrl,
+        client: &Client,
+    ) -> Result<HttpRequest, RequestError>
     where
         Req: Serialize,
         RequestError: From<Req::Error>,
     {
-        let (ingress_client, server_url) = &*client.0;
         let request_url = make_url(server_url)?;
         let body = req.serialize()?;
-        Ok(ingress_client.post(request_url).body(body))
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if let Some(auth_token) = &client.auth_token {
+            let (name, value) = auth_token.to_request_header();
+            headers.insert(name, value);
+        }
+
+        Ok(HttpRequest {
+            url: request_url,
+            headers,
+            body,
+            timeout: None,
+        })
+    }
+}
+
+#[cfg(feature = "reqwest-client")]
+pub mod reqwest {
+    use super::RequestError;
+    use super::executor::{Executor as IngressExecutor, HttpRequest, HttpResponse};
+    use std::future::Future;
+    use std::pin::Pin;
+
+    pub use ::reqwest;
+
+    impl IngressExecutor for ::reqwest::Client {
+        fn execute<'a>(
+            &'a self,
+            request: HttpRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, RequestError>> + Send + 'a>> {
+            Box::pin(execute_with_client(self, request))
+        }
+    }
+
+    async fn execute_with_client(
+        client: &::reqwest::Client,
+        request: HttpRequest,
+    ) -> Result<HttpResponse, RequestError> {
+        let mut req = client
+            .post(request.url)
+            .headers(request.headers)
+            .body(request.body);
+        if let Some(timeout) = request.timeout {
+            req = req.timeout(timeout);
+        }
+
+        let response = req.send().await.map_err(request_error)?;
+        let status = response.status().as_u16();
+        let body = response.bytes().await.map_err(request_error)?;
+        Ok(HttpResponse { status, body })
+    }
+
+    fn request_error(err: ::reqwest::Error) -> RequestError {
+        RequestError::Request(err.to_string())
     }
 }

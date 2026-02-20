@@ -1,0 +1,7 @@
+error[E0277]: the trait bound `reqwest::Client: Executor` is not satisfied
+  --> tests/ui/reqwest-client/reqwest_client_ext_without_feature.rs:16:15
+   |
+16 |         .call(&executor);
+   |               ^^^^^^^^^ the trait `Executor` is not implemented for `reqwest::Client`
+   |
+   = note: required for the cast from `&reqwest::Client` to `&dyn Executor`
