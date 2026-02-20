@@ -9,7 +9,8 @@ rust-version = "1.85.0"
 
 [features]
 default = []
-ingress-client = ["restate-sdk/ingress-client"]
+reqwest-client = ["restate-sdk/reqwest-client"]
+ingress-client = ["reqwest-client"]
 
 
 [dependencies]

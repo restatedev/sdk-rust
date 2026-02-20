@@ -68,22 +68,20 @@ async fn test_container() {
     );
 }
 
-#[cfg(feature = "ingress-client")]
+#[cfg(feature = "reqwest-client")]
 #[tokio::test]
 async fn test_container_ingress_client() {
+    use restate_sdk::ingress;
     let test_environment = start_test_environment().await;
 
-    let client = restate_sdk::ingress::Client::new(
-        test_environment.ingress_url().try_into().unwrap(),
-        None,
-    )
-    .unwrap();
+    let client = ingress::Client::new(test_environment.ingress_url().try_into().unwrap(), None);
+    let executor = reqwest::Client::new();
 
     let response = client
         .service_client::<MyServiceClient>()
         .my_handler()
         .idempotency_key("abc")
-        .call()
+        .call(&executor)
         .await
         .unwrap();
 

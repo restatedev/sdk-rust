@@ -217,7 +217,6 @@
 pub mod endpoint;
 pub mod service;
 
-#[cfg(feature = "ingress-client")]
 pub mod ingress;
 
 pub mod context;
@@ -517,7 +516,6 @@ pub mod prelude {
     #[cfg(feature = "lambda")]
     pub use crate::lambda::LambdaEndpoint;
 
-    #[cfg(feature = "ingress-client")]
     pub use crate::ingress;
 
     pub use crate::context::{

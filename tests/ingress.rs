@@ -1,4 +1,4 @@
-#[cfg(feature = "ingress-client")]
+#[cfg(feature = "reqwest-client")]
 mod ingress_client_tests {
     use assert_matches::assert_matches;
     use restate_sdk::prelude::*;
@@ -10,6 +10,10 @@ mod ingress_client_tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    fn executor() -> reqwest::Client {
+        reqwest::Client::new()
+    }
 
     #[restate_sdk::service]
     trait GreeterService {
@@ -57,7 +61,7 @@ mod ingress_client_tests {
     #[test]
     fn reqwest_builder_exposes_typed_service_client() -> TestResult {
         let client =
-            ingress::Client::new(ingress::ServerUrl::try_from("http://localhost:8080")?, None)?;
+            ingress::Client::new(ingress::ServerUrl::try_from("http://localhost:8080")?, None);
 
         let _request = client
             .service_client::<GreeterServiceClient>()
@@ -76,7 +80,7 @@ mod ingress_client_tests {
     fn reqwest_builder_accepts_auth_token() -> TestResult {
         let token = ingress::AuthToken::new("token".to_string().into())?;
         let server_url = "https://localhost:8080/".try_into()?;
-        let _client = ingress::Client::new(server_url, Some(token))?;
+        let _client = ingress::Client::new(server_url, Some(token));
         Ok(())
     }
 
@@ -85,22 +89,24 @@ mod ingress_client_tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/GreeterService/greet"))
+            .and(header("Content-Type", "application/json"))
             .and(body_string("\"hi\""))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"hello hi\""),
             )
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         let response = client
             .service_client::<GreeterServiceClient>()
             .greet("hi".to_string())
-            .call()
+            .call(&executor)
             .await?;
 
         assert_eq!(response, "hello hi");
@@ -114,19 +120,20 @@ mod ingress_client_tests {
             .and(path("/UnitService/ping"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string(""),
             )
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         client
             .service_client::<UnitServiceClient>()
             .ping()
-            .call()
+            .call(&executor)
             .await?;
 
         Ok(())
@@ -140,14 +147,15 @@ mod ingress_client_tests {
             .and(body_json(serde_json::json!({"name":"alice","age":42})))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"ok\""),
             )
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         let response = client
             .service_client::<JsonServiceClient>()
@@ -155,7 +163,7 @@ mod ingress_client_tests {
                 name: "alice".to_string(),
                 age: 42,
             }))
-            .call()
+            .call(&executor)
             .await?;
 
         assert_eq!(response, "ok");
@@ -187,12 +195,13 @@ mod ingress_client_tests {
     #[tokio::test]
     async fn reqwest_builder_post_propagates_serialize_failure() -> TestResult {
         let client =
-            ingress::Client::new(ingress::ServerUrl::try_from("http://localhost:8080")?, None)?;
+            ingress::Client::new(ingress::ServerUrl::try_from("http://localhost:8080")?, None);
+        let executor = executor();
 
         let result = client
             .service_client::<FailingServiceClient>()
             .fail(FailingPayload)
-            .call()
+            .call(&executor)
             .await;
 
         assert_matches!(result, Err(ingress::RequestError::Serde(_)));
@@ -209,12 +218,13 @@ mod ingress_client_tests {
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         let result = client
             .service_client::<GreeterServiceClient>()
             .greet("hi".to_string())
-            .call()
+            .call(&executor)
             .await;
 
         assert_matches!(
@@ -234,20 +244,21 @@ mod ingress_client_tests {
             .and(body_string("\"hi\""))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"hello hi\""),
             )
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         let response = client
             .service_client::<GreeterServiceClient>()
             .greet("hi".to_string())
             .delay(Duration::from_secs(5))
-            .call()
+            .call(&executor)
             .await?;
 
         assert_eq!(response, "hello hi");
@@ -262,19 +273,20 @@ mod ingress_client_tests {
             .and(body_string("\"hi\""))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"hello hi\""),
             )
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         let response = client
             .service_client::<RenamedServiceClient>()
             .greet("hi".to_string())
-            .call()
+            .call(&executor)
             .await?;
 
         assert_eq!(response, "hello hi");
@@ -286,23 +298,24 @@ mod ingress_client_tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/GreeterService/greet"))
-            .and(header("idempotency-key", "test-key-1"))
+            .and(header("Idempotency-Key", "test-key-1"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"hello hi\""),
             )
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = ingress::Client::new(server.uri().try_into()?, None)?;
+        let client = ingress::Client::new(server.uri().try_into()?, None);
+        let executor = executor();
 
         let response = client
             .service_client::<GreeterServiceClient>()
             .greet("hi".to_string())
             .idempotency_key("test-key-1")
-            .call()
+            .call(&executor)
             .await?;
 
         assert_eq!(response, "hello hi");
@@ -317,19 +330,20 @@ mod ingress_client_tests {
             .and(body_string("\"hi\""))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"hello hi\""),
             )
             .expect(1)
             .mount(&object_server)
             .await;
 
-        let object_client = ingress::Client::new(object_server.uri().try_into()?, None)?;
+        let object_client = ingress::Client::new(object_server.uri().try_into()?, None);
+        let object_executor = executor();
 
         let object_response = object_client
             .object_client::<GreeterObjectClient>("my-object-key")
             .greet("hi".to_string())
-            .call()
+            .call(&object_executor)
             .await?;
 
         assert_eq!(object_response, "hello hi");
@@ -340,19 +354,20 @@ mod ingress_client_tests {
             .and(body_string("\"hi\""))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
+                    .insert_header("Content-Type", "application/json")
                     .set_body_string("\"hello hi\""),
             )
             .expect(1)
             .mount(&workflow_server)
             .await;
 
-        let workflow_client = ingress::Client::new(workflow_server.uri().try_into()?, None)?;
+        let workflow_client = ingress::Client::new(workflow_server.uri().try_into()?, None);
+        let workflow_executor = executor();
 
         let workflow_response = workflow_client
             .workflow_client::<GreeterWorkflowClient>("my-workflow-key")
             .greet("hi".to_string())
-            .call()
+            .call(&workflow_executor)
             .await?;
 
         assert_eq!(workflow_response, "hello hi");

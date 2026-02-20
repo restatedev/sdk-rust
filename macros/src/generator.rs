@@ -58,8 +58,7 @@ impl<'a> ServiceGenerator<'a> {
     }
 
     fn impl_ingress(&self) -> TokenStream2 {
-        self.service
-            .impl_ingress_tokens(self.handlers.iter())
+        self.service.impl_ingress_tokens(self.handlers.iter())
     }
 }
 
@@ -257,7 +256,6 @@ impl ServiceScope<'_> {
         let ingress_ident = &self.ingress_ident;
         match self.service_ty {
             ServiceType::Service => quote! {
-                #[cfg(feature = "ingress-client")]
                 impl<'ctx> ::restate_sdk::ingress::builder::IntoServiceRequest for #client_ident<'ctx> {
                     type Request<'a> = #ingress_ident<'a>;
 
@@ -269,7 +267,6 @@ impl ServiceScope<'_> {
                 }
             },
             ServiceType::Object => quote! {
-                #[cfg(feature = "ingress-client")]
                 impl<'ctx> ::restate_sdk::ingress::builder::IntoObjectRequest for #client_ident<'ctx> {
                     type Request<'a> = #ingress_ident<'a>;
 
@@ -282,7 +279,6 @@ impl ServiceScope<'_> {
                 }
             },
             ServiceType::Workflow => quote! {
-                #[cfg(feature = "ingress-client")]
                 impl<'ctx> ::restate_sdk::ingress::builder::IntoWorkflowRequest for #client_ident<'ctx> {
                     type Request<'a> = #ingress_ident<'a>;
 
@@ -308,7 +304,6 @@ impl ServiceScope<'_> {
         );
 
         quote! {
-            #[cfg(feature = "ingress-client")]
             #[doc = #doc_msg]
             #vis struct #ingress_ident<'a> {
                 client: &'a ::restate_sdk::ingress::Client,
@@ -378,7 +373,6 @@ impl ServiceScope<'_> {
             .map(|handler| handler.ingress_method_tokens(self));
 
         quote! {
-            #[cfg(feature = "ingress-client")]
             impl #ingress_ident<'_> {
                 #( #handler_fns )*
             }
