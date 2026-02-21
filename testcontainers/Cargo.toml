@@ -10,8 +10,6 @@ rust-version = "1.85.0"
 [features]
 default = []
 reqwest-client = ["restate-sdk/reqwest-client"]
-ingress-client = ["reqwest-client"]
-
 
 [dependencies]
 anyhow = "1.0"

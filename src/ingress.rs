@@ -602,7 +602,9 @@ pub mod builder {
         let request_url = make_url(server_url)?;
         let body = req.serialize()?;
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if !body.is_empty() {
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        }
         if let Some(auth_token) = &client.auth_token {
             let (name, value) = auth_token.to_request_header();
             headers.insert(name, value);

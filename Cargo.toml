@@ -24,7 +24,6 @@ http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net"
 tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
 reqwest-client = ["dep:reqwest"]
-ingress-client = ["reqwest-client"]
 
 [dependencies]
 bytes = "1.11"
