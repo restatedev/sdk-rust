@@ -43,16 +43,14 @@
 //! ```no_run
 //! # use restate_sdk::ingress::{AuthToken, Client, ServerUrl, RequestError};
 //! # use restate_sdk::ingress::executor::{Executor, HttpRequest, HttpResponse};
-//! # use std::future::Future;
-//! # use std::pin::Pin;
 //! #[restate_sdk::service]
 //! trait Greeter {
 //!     async fn greet(name: String) -> restate_sdk::errors::HandlerResult<String>;
 //! }
 //! # struct DemoExecutor;
 //! # impl Executor for DemoExecutor {
-//! #     fn execute<'a>(&'a self, _request: HttpRequest) -> Pin<Box<dyn Future<Output = Result<HttpResponse, RequestError>> + Send + 'a>> {
-//! #         Box::pin(async { Err(RequestError::Request("demo executor".to_string())) })
+//! #     fn execute(&self, _request: HttpRequest) -> impl std::future::Future<Output = Result<HttpResponse, RequestError>> + Send {
+//! #         async { Err(RequestError::Request("demo executor".to_string())) }
 //! #     }
 //! # }
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -434,34 +432,38 @@ impl<Res> Request<Res> {
     /// Sends the request and deserializes the JSON response into `Res`.
     ///
     /// Non-success HTTP responses are returned as [`RequestError::Status`].
-    pub async fn call(self, executor: &dyn executor::Executor) -> Result<Res, RequestError>
+    pub async fn call<E>(self, executor: &E) -> Result<Res, RequestError>
     where
+        E: executor::Executor,
         Res: DeserializeOwned,
     {
-        let request = self.request?;
-
-        let response = executor.execute(request).await?;
-        if response.status < 200 || response.status > 299 {
-            let status = response.status;
-            let body = String::from_utf8_lossy(response.body.as_ref()).into_owned();
-            return Err(RequestError::Status { status, body });
-        }
-        let body = response.body;
-        let body = if body.is_empty() {
-            b"null" as &[u8]
-        } else {
-            body.as_ref()
-        };
-        let response = serde_json::from_slice::<Res>(body)?;
-        Ok(response)
+        decode_response(executor.execute(self.request?).await?)
     }
+}
+
+fn decode_response<Res>(response: executor::HttpResponse) -> Result<Res, RequestError>
+where
+    Res: DeserializeOwned,
+{
+    if response.status < 200 || response.status > 299 {
+        let status = response.status;
+        let body = String::from_utf8_lossy(response.body.as_ref()).into_owned();
+        return Err(RequestError::Status { status, body });
+    }
+    let body = response.body;
+    let body = if body.is_empty() {
+        b"null" as &[u8]
+    } else {
+        body.as_ref()
+    };
+    let response = serde_json::from_slice::<Res>(body)?;
+    Ok(response)
 }
 
 pub mod executor {
     use super::RequestError;
     use http::HeaderMap;
     use std::future::Future;
-    use std::pin::Pin;
     use std::time::Duration;
     use url::Url;
 
@@ -490,13 +492,13 @@ pub mod executor {
 
     /// Executes an ingress [`HttpRequest`] and returns an [`HttpResponse`].
     ///
-    /// This trait is object-safe and intended for dynamic dispatch in
-    /// [`crate::ingress::Request::call`].
-    pub trait Executor: Send + Sync {
-        fn execute<'a>(
-            &'a self,
+    /// Implement this with your async HTTP transport and pass the executor
+    /// by reference to [`crate::ingress::Request::call`].
+    pub trait Executor {
+        fn execute(
+            &self,
             request: HttpRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, RequestError>> + Send + 'a>>;
+        ) -> impl Future<Output = Result<HttpResponse, RequestError>> + Send;
     }
 }
 
@@ -624,38 +626,27 @@ pub mod reqwest {
     use super::RequestError;
     use super::executor::{Executor as IngressExecutor, HttpRequest, HttpResponse};
     use std::future::Future;
-    use std::pin::Pin;
+    type IngressResult = std::result::Result<HttpResponse, RequestError>;
+    pub use reqwest::*;
 
-    pub use ::reqwest;
-
-    impl IngressExecutor for ::reqwest::Client {
-        fn execute<'a>(
-            &'a self,
-            request: HttpRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, RequestError>> + Send + 'a>> {
-            Box::pin(execute_with_client(self, request))
+    impl IngressExecutor for Client {
+        fn execute(&self, request: HttpRequest) -> impl Future<Output = IngressResult> + Send {
+            fn request_error(err: Error) -> RequestError {
+                RequestError::Request(err.to_string())
+            }
+            async move {
+                let mut req = self
+                    .post(request.url)
+                    .headers(request.headers)
+                    .body(request.body);
+                if let Some(timeout) = request.timeout {
+                    req = req.timeout(timeout);
+                }
+                let response = req.send().await.map_err(request_error)?;
+                let status = response.status().as_u16();
+                let body = response.bytes().await.map_err(request_error)?;
+                Ok(HttpResponse { status, body })
+            }
         }
-    }
-
-    async fn execute_with_client(
-        client: &::reqwest::Client,
-        request: HttpRequest,
-    ) -> Result<HttpResponse, RequestError> {
-        let mut req = client
-            .post(request.url)
-            .headers(request.headers)
-            .body(request.body);
-        if let Some(timeout) = request.timeout {
-            req = req.timeout(timeout);
-        }
-
-        let response = req.send().await.map_err(request_error)?;
-        let status = response.status().as_u16();
-        let body = response.bytes().await.map_err(request_error)?;
-        Ok(HttpResponse { status, body })
-    }
-
-    fn request_error(err: ::reqwest::Error) -> RequestError {
-        RequestError::Request(err.to_string())
     }
 }

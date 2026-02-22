@@ -224,7 +224,7 @@ impl ServiceScope<'_> {
         }
     }
 
-    fn into_client_impl_tokens(&self) -> TokenStream2 {
+    fn client_into_impl_tokens(&self) -> TokenStream2 {
         let client_ident = &self.client_ident;
         match self.service_ty {
             ServiceType::Service => quote! {
@@ -251,7 +251,7 @@ impl ServiceScope<'_> {
         }
     }
 
-    fn into_impl_ingress_tokens(&self) -> TokenStream2 {
+    fn ingress_into_impl_tokens(&self) -> TokenStream2 {
         let client_ident = &self.client_ident;
         let ingress_ident = &self.ingress_ident;
         match self.service_ty {
@@ -297,7 +297,7 @@ impl ServiceScope<'_> {
         let vis = &self.service.vis;
         let ingress_ident = &self.ingress_ident;
         let key_field = self.key_field_tokens();
-        let into_ingress_client_impl = self.into_impl_ingress_tokens();
+        let ingress_into_client_impl = self.ingress_into_impl_tokens();
         let service_ident = &self.service.ident;
         let doc_msg = format!(
             "Struct exposing the ingress client to invoke [`{service_ident}`] from from the ingress API."
@@ -310,7 +310,7 @@ impl ServiceScope<'_> {
                 #key_field
             }
 
-            #into_ingress_client_impl
+            #ingress_into_client_impl
         }
     }
 
@@ -318,7 +318,7 @@ impl ServiceScope<'_> {
         let vis = &self.service.vis;
         let client_ident = &self.client_ident;
         let key_field = self.key_field_tokens();
-        let into_client_impl_tokens = self.into_client_impl_tokens();
+        let client_into_impl_tokens = self.client_into_impl_tokens();
         let service_ident = &self.service.ident;
         let doc_msg = format!(
             "Struct exposing the client to invoke [`{service_ident}`] from another service."
@@ -331,7 +331,7 @@ impl ServiceScope<'_> {
                 #key_field
             }
 
-            #into_client_impl_tokens
+            #client_into_impl_tokens
         }
     }
 
