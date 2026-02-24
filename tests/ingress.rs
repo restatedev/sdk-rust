@@ -25,6 +25,7 @@ mod ingress_client_tests {
         async fn ping() -> HandlerResult<()>;
     }
 
+    #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct TestUser {
         name: String,
