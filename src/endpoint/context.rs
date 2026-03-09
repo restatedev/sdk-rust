@@ -21,7 +21,7 @@ use restate_sdk_shared_core::{
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::future::{Future, ready};
+use std::future::{Future, poll_fn, ready};
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
@@ -761,6 +761,33 @@ impl ContextInternal {
         {
             // Nothing we can do anymore here
         }
+    }
+
+    /// Drain the request input stream to completion.
+    ///
+    /// This ensures we don't close the HTTP/2 response stream before the request
+    /// stream is done, which causes connection errors on proxies like Google Cloud Run.
+    pub(crate) async fn drain_input(&self) -> Result<(), ErrorInner> {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let result = poll_fn(|cx| {
+                    let mut inner = must_lock!(self.inner);
+                    inner.read.poll_recv(cx)
+                })
+                .await;
+                match result {
+                    None => return Ok(()),
+                    Some(Ok(_)) => continue,
+                    Some(Err(e)) => return Err(ErrorInner::InputDrain(e)),
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(ErrorInner::InputDrain(
+                "Timed out draining input stream after 60s".into(),
+            ))
+        })
     }
 
     pub(super) fn fail(&self, e: Error) {
