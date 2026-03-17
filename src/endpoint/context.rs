@@ -752,7 +752,7 @@ impl ContextInternal {
         let _ = must_lock!(self.inner).vm.sys_end();
     }
 
-    pub(crate) fn consume_to_end(&self) {
+    pub(crate) fn consume_to_end(&mut self) {
         let mut inner_lock = must_lock!(self.inner);
 
         let out = inner_lock.vm.take_output();
@@ -761,6 +761,12 @@ impl ContextInternal {
         {
             // Nothing we can do anymore here
         }
+    }
+
+    pub(crate) fn drain_input(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let mut inner_lock = must_lock!(self.inner);
+        while ready!(inner_lock.read.poll_recv(cx)).is_some() {}
+        Poll::Ready(())
     }
 
     pub(super) fn fail(&self, e: Error) {
