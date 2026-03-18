@@ -589,7 +589,7 @@ async fn handle_invocation(
         let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
 
         // Wrap it in handler state aware future
-        HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
+        HandlerStateAwareFuture::new(ctx, handler_state_rx, user_code_fut).await
     }
     .instrument(span)
     .await
