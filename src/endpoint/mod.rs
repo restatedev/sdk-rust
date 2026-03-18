@@ -66,7 +66,8 @@ impl Error {
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
-            | ErrorInner::HandlerResult { .. } => 500,
+            | ErrorInner::HandlerResult { .. }
+            | ErrorInner::DrainError { .. } => 500,
             ErrorInner::FieldRequiresMinimumVersion { .. } => 500,
             ErrorInner::BadDiscoveryVersion(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
@@ -123,6 +124,8 @@ pub(crate) enum ErrorInner {
         #[source]
         err: BoxError,
     },
+    #[error("Error while draining the input stream: {err}")]
+    DrainError { err: BoxError },
 }
 
 impl From<CoreError> for Error {
@@ -589,7 +592,7 @@ async fn handle_invocation(
         let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
 
         // Wrap it in handler state aware future
-        HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await
+        HandlerStateAwareFuture::new(ctx, handler_state_rx, user_code_fut).await
     }
     .instrument(span)
     .await
