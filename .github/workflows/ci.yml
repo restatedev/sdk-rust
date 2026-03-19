@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04]
+        os: [warp-ubuntu-latest-x64-4x]
     env:
       RUST_BACKTRACE: full
     steps:
@@ -30,6 +30,12 @@ jobs:
         with:
           components: clippy
           rustflags: ""
+          cache: false
+
+      - name: Setup Rust Caching
+        uses: WarpBuilds/rust-cache@v2
+        with:
+          cache-on-failure: "true"
 
       - name: Install nextest
         uses: taiki-e/install-action@nextest
