@@ -92,11 +92,12 @@ use http::header::AUTHORIZATION;
 use http::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderValue};
 use http::uri::Authority;
 use secrecy::{ExposeSecret, SecretString};
-use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
 use url::Url;
+
+use crate::serde::Deserialize;
 
 pub use secrecy;
 
@@ -410,8 +411,9 @@ impl<Res> Request<Res> {
                 Ok(value) => value,
                 Err(err) => return RequestError::InvalidHeader(err.to_string()).into(),
             };
-            let name = HeaderName::from_static("idempotency-key");
-            request.headers.insert(name, value);
+
+            const IDP_KEY_HEADER: HeaderName = HeaderName::from_static("idempotency-key");
+            request.headers.insert(IDP_KEY_HEADER, value);
             self.request = Ok(request);
         }
         self
@@ -435,7 +437,7 @@ impl<Res> Request<Res> {
     pub async fn call<E>(self, executor: &E) -> Result<Res, RequestError>
     where
         E: executor::Executor,
-        Res: DeserializeOwned,
+        Res: Deserialize<Error = serde_json::Error>,
     {
         decode_response(executor.execute(self.request?).await?)
     }
@@ -443,20 +445,15 @@ impl<Res> Request<Res> {
 
 fn decode_response<Res>(response: executor::HttpResponse) -> Result<Res, RequestError>
 where
-    Res: DeserializeOwned,
+    Res: Deserialize<Error = serde_json::Error>,
 {
     if response.status < 200 || response.status > 299 {
         let status = response.status;
         let body = String::from_utf8_lossy(response.body.as_ref()).into_owned();
         return Err(RequestError::Status { status, body });
     }
-    let body = response.body;
-    let body = if body.is_empty() {
-        b"null" as &[u8]
-    } else {
-        body.as_ref()
-    };
-    let response = serde_json::from_slice::<Res>(body)?;
+    let mut body = response.body;
+    let response = Res::deserialize(&mut body)?;
     Ok(response)
 }
 
