@@ -2,7 +2,7 @@ use restate_sdk::prelude::*;
 use std::time::Duration;
 
 /// This example shows how to fan out multiple calls and process results as they complete,
-/// using [`select_any`] for dynamic concurrent operations.
+/// using [`DurableFuturesUnordered`] for dynamic concurrent operations.
 ///
 /// The `fan_out` handler spawns multiple sleep timers and collects results as they complete,
 /// similar to how you'd use `FuturesUnordered` in regular async Rust.
@@ -21,22 +21,22 @@ struct FanOutImpl;
 
 impl FanOut for FanOutImpl {
     async fn fan_out(&self, ctx: Context<'_>) -> Result<String, TerminalError> {
-        // Fan out: create a dynamic number of durable futures
-        let mut futures = vec![
-            ctx.sleep(Duration::from_secs(3)),
-            ctx.sleep(Duration::from_secs(1)),
-            ctx.sleep(Duration::from_secs(2)),
-        ];
+        let labels = vec!["fast", "medium", "slow"];
 
-        // Process all results as they complete (like FuturesUnordered)
+        // Fan out: create a dynamic number of durable futures
+        let mut futures = DurableFuturesUnordered::new();
+        futures.push(ctx.sleep(Duration::from_secs(1)));
+        futures.push(ctx.sleep(Duration::from_secs(2)));
+        futures.push(ctx.sleep(Duration::from_secs(3)));
+
+        // Process results as they complete — index tells you which future finished
         let mut completion_order = Vec::new();
-        while !futures.is_empty() {
-            let (index, result) = select_any(&mut futures).await?;
+        while let Some((index, result)) = futures.next().await? {
             result?;
-            completion_order.push(index);
+            completion_order.push(labels[index]);
         }
 
-        Ok(format!("Completed in order: {:?}", completion_order))
+        Ok(format!("Completed in order: {completion_order:?}"))
     }
 }
 
