@@ -11,9 +11,11 @@ pub mod macro_support;
 mod request;
 mod run;
 mod select;
+mod select_any;
 
 pub use request::{CallFuture, InvocationHandle, Request, RequestTarget};
 pub use run::{RunClosure, RunFuture, RunRetryPolicy};
+pub use select_any::select_any;
 
 pub type HeaderMap = http::HeaderMap<String>;
 

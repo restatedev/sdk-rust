@@ -506,6 +506,8 @@ pub use restate_sdk_macros::object;
 /// For more details, check the [`service` macro](macro@crate::service) documentation.
 pub use restate_sdk_macros::workflow;
 
+pub use context::select_any;
+
 /// Prelude contains all the useful imports you need to get started with Restate.
 pub mod prelude {
     #[cfg(feature = "http_server")]
@@ -518,7 +520,7 @@ pub mod prelude {
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
         ContextSideEffects, ContextTimers, ContextWriteState, HeaderMap, InvocationHandle,
         ObjectContext, Request, RunFuture, RunRetryPolicy, SharedObjectContext,
-        SharedWorkflowContext, WorkflowContext,
+        SharedWorkflowContext, WorkflowContext, select_any,
     };
     pub use crate::endpoint::{
         Endpoint, HandleOptions, HandlerOptions, ProtocolMode, ServiceOptions,
