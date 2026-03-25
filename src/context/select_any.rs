@@ -37,7 +37,10 @@ pub async fn select_any<F>(futures: &mut Vec<F>) -> Result<(usize, F::Output), T
 where
     F: DurableFuture,
 {
-    assert!(!futures.is_empty(), "select_any requires at least one future");
+    assert!(
+        !futures.is_empty(),
+        "select_any requires at least one future"
+    );
 
     let handles: Vec<_> = futures.iter().map(|f| f.handle()).collect();
     let ctx = futures[0].inner_context();
