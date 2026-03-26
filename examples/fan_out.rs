@@ -21,7 +21,7 @@ struct FanOutImpl;
 
 impl FanOut for FanOutImpl {
     async fn fan_out(&self, ctx: Context<'_>) -> Result<String, TerminalError> {
-        let labels = vec!["fast", "medium", "slow"];
+        let labels = ["fast", "medium", "slow"];
 
         // Fan out: create a dynamic number of durable futures
         let mut futures = DurableFuturesUnordered::new();
