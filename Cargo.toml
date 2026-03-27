@@ -23,6 +23,7 @@ hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
 tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
+reqwest-client = ["dep:reqwest"]
 
 [dependencies]
 bytes = "1.11"
@@ -48,6 +49,9 @@ uuid = { version = "1.20", optional = true }
 http-serde = { version = "2.1.1", optional = true }
 aws_lambda_events = { version = "1.0", optional = true }
 lambda_runtime = { version = "1.0", optional = true }
+reqwest = { version = "0.13", features = ["json"], optional = true }
+secrecy = { version = "0.10" }
+url = { version = "2" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -56,6 +60,8 @@ trybuild = "1.0"
 reqwest = { version = "0.13", features = ["json"] }
 rand = "0.10"
 schemars = "1.2"
+wiremock = "0.6"
+assert_matches = "1.5"
 
 [build-dependencies]
 jsonptr = "0.7"
