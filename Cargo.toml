@@ -72,6 +72,6 @@ typify = { version = "0.6" }
 members = ["macros", "test-services", "testcontainers"]
 
 # TODO: remove this patch and bump the restate-sdk-shared-core version once
-# https://github.com/restatedev/sdk-shared-core/pull/XXX is released.
+# https://github.com/restatedev/sdk-shared-core/pull/76 is released.
 [patch.crates-io]
 restate-sdk-shared-core = { git = "https://github.com/jackkleeman/sdk-shared-core", branch = "jsonwebtoken-backend-passthrough" }
