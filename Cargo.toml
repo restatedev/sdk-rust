@@ -18,11 +18,15 @@ path = "examples/schema.rs"
 required-features = ["schemars"]
 
 [features]
-default = ["http_server", "rand", "uuid", "tracing-span-filter"]
+default = ["http_server", "rand", "uuid", "tracing-span-filter", "rust_crypto"]
 hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
 tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
+# jsonwebtoken crypto backend pass-through for request identity verification.
+# Enable exactly one (or call jsonwebtoken's CryptoProvider::install_default yourself).
+rust_crypto = ["restate-sdk-shared-core/rust_crypto"]
+aws_lc_rs = ["restate-sdk-shared-core/aws_lc_rs"]
 
 [dependencies]
 bytes = "1.11"
@@ -66,3 +70,8 @@ typify = { version = "0.6" }
 
 [workspace]
 members = ["macros", "test-services", "testcontainers"]
+
+# TODO: remove this patch and bump the restate-sdk-shared-core version once
+# https://github.com/restatedev/sdk-shared-core/pull/XXX is released.
+[patch.crates-io]
+restate-sdk-shared-core = { git = "https://github.com/jackkleeman/sdk-shared-core", branch = "jsonwebtoken-backend-passthrough" }
