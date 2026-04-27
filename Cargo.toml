@@ -74,4 +74,4 @@ members = ["macros", "test-services", "testcontainers"]
 # TODO: remove this patch and bump the restate-sdk-shared-core version once
 # https://github.com/restatedev/sdk-shared-core/pull/76 is released.
 [patch.crates-io]
-restate-sdk-shared-core = { git = "https://github.com/jackkleeman/sdk-shared-core", branch = "jsonwebtoken-backend-passthrough" }
+restate-sdk-shared-core = { git = "https://github.com/jackkleeman/sdk-shared-core", rev = "2dde4f07fe03b61914283a0521239e77ba12f987" }
