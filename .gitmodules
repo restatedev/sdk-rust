@@ -1,3 +1,0 @@
-[submodule "restate-proto"]
-	path = restate-proto
-	url = ../proto.git
