@@ -190,7 +190,7 @@ The Rust SDK is currently in active development, and might break across releases
 
 The compatibility with Restate is described in the following table:
 
-| Restate Server\sdk-rust | < 0.4            | 0.4 - 0.5 | 0.6              | 0.7 - 0.9        |
+| Restate Server\sdk-rust | < 0.4            | 0.4 - 0.5 | 0.6              | 0.7 - 0.10       |
 |-------------------------|------------------|-----------|------------------|------------------|
 | < 1.3                   | ✅                | ❌         | ❌                | ❌                |
 | 1.3                     | ✅                | ✅         | ✅ <sup>(1)</sup> | ✅ <sup>(2)</sup> |
