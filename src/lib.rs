@@ -517,7 +517,7 @@ pub mod prelude {
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
         ContextSideEffects, ContextTimers, ContextWriteState, HeaderMap, InvocationHandle,
-        ObjectContext, Request, RunFuture, RunRetryPolicy, SharedObjectContext,
+        ObjectContext, Request, RunFuture, RunRetryPolicy, ServiceClient, SharedObjectContext,
         SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::{

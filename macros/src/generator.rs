@@ -280,14 +280,23 @@ impl<'a> ServiceGenerator<'a> {
             ref client_ident,
             // service_ident,
             ref service_ty,
+            restate_name,
             ..
         } = self;
+
+        let service_literal = Literal::string(restate_name);
 
         let key_field = match service_ty {
             ServiceType::Service => quote! {},
             ServiceType::Object | ServiceType::Workflow => quote! {
                 key: String,
             },
+        };
+
+        let service_client_impl = quote! {
+            impl ::restate_sdk::context::ServiceClient for #client_ident<'_> {
+                const SERVICE_NAME: &'static str = #service_literal;
+            }
         };
 
         let into_client_impl = match service_ty {
@@ -301,18 +310,22 @@ impl<'a> ServiceGenerator<'a> {
                 }
             }
             ServiceType::Object => quote! {
-                impl<'ctx> ::restate_sdk::context::IntoObjectClient<'ctx> for #client_ident<'ctx> {
+                impl<'ctx> ::restate_sdk::context::KeyedClient<'ctx> for #client_ident<'ctx> {
                     fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal, key: String) -> Self {
                         Self { ctx, key }
                     }
                 }
+
+                impl<'ctx> ::restate_sdk::context::IntoObjectClient<'ctx> for #client_ident<'ctx> {}
             },
             ServiceType::Workflow => quote! {
-                impl<'ctx> ::restate_sdk::context::IntoWorkflowClient<'ctx> for #client_ident<'ctx> {
+                impl<'ctx> ::restate_sdk::context::KeyedClient<'ctx> for #client_ident<'ctx> {
                     fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal, key: String) -> Self {
                         Self { ctx, key }
                     }
                 }
+
+                impl<'ctx> ::restate_sdk::context::IntoWorkflowClient<'ctx> for #client_ident<'ctx> {}
             },
         };
 
@@ -323,6 +336,7 @@ impl<'a> ServiceGenerator<'a> {
                 #key_field
             }
 
+            #service_client_impl
             #into_client_impl
         }
     }
