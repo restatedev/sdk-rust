@@ -226,7 +226,15 @@ impl ServiceScope<'_> {
 
     fn client_into_impl_tokens(&self) -> TokenStream2 {
         let client_ident = &self.client_ident;
-        match self.service_ty {
+        let service_literal = &self.service_literal;
+
+        let service_client_impl = quote! {
+            impl ::restate_sdk::context::ServiceClient for #client_ident<'_> {
+                const SERVICE_NAME: &'static str = #service_literal;
+            }
+        };
+
+        let specific_impl = match self.service_ty {
             ServiceType::Service => quote! {
                 impl<'ctx> ::restate_sdk::context::IntoServiceClient<'ctx> for #client_ident<'ctx> {
                     fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal) -> Self {
@@ -235,19 +243,28 @@ impl ServiceScope<'_> {
                 }
             },
             ServiceType::Object => quote! {
-                impl<'ctx> ::restate_sdk::context::IntoObjectClient<'ctx> for #client_ident<'ctx> {
+                impl<'ctx> ::restate_sdk::context::KeyedClient<'ctx> for #client_ident<'ctx> {
                     fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal, key: String) -> Self {
                         Self { ctx, key }
                     }
                 }
+
+                impl<'ctx> ::restate_sdk::context::IntoObjectClient<'ctx> for #client_ident<'ctx> {}
             },
             ServiceType::Workflow => quote! {
-                impl<'ctx> ::restate_sdk::context::IntoWorkflowClient<'ctx> for #client_ident<'ctx> {
+                impl<'ctx> ::restate_sdk::context::KeyedClient<'ctx> for #client_ident<'ctx> {
                     fn create_client(ctx: &'ctx ::restate_sdk::endpoint::ContextInternal, key: String) -> Self {
                         Self { ctx, key }
                     }
                 }
+
+                impl<'ctx> ::restate_sdk::context::IntoWorkflowClient<'ctx> for #client_ident<'ctx> {}
             },
+        };
+
+        quote! {
+            #service_client_impl
+            #specific_impl
         }
     }
 
