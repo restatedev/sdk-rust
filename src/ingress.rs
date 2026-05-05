@@ -437,7 +437,8 @@ impl<Res> Request<Res> {
     pub async fn call<E>(self, executor: &E) -> Result<Res, RequestError>
     where
         E: executor::Executor,
-        Res: Deserialize<Error = serde_json::Error>,
+        Res: Deserialize,
+        RequestError: From<Res::Error>,
     {
         decode_response(executor.execute(self.request?).await?)
     }
@@ -445,7 +446,8 @@ impl<Res> Request<Res> {
 
 fn decode_response<Res>(response: executor::HttpResponse) -> Result<Res, RequestError>
 where
-    Res: Deserialize<Error = serde_json::Error>,
+    Res: Deserialize,
+    RequestError: From<Res::Error>,
 {
     if response.status < 200 || response.status > 299 {
         let status = response.status;
