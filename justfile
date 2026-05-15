@@ -63,7 +63,7 @@ build *flags: (_target-installed target)
 print-target:
     @echo {{ _resolved_target }}
 
-test: (_target-installed target)
+test: (_target-installed target) _nextest-installed
     cargo nextest run {{ _target-option }} --all-features --workspace
 
 doctest:
@@ -80,4 +80,15 @@ _target-installed target:
     set -euo pipefail
     if ! rustup target list --installed |grep -qF '{{ target }}' 2>/dev/null ; then
         rustup target add '{{ target }}'
+    fi
+
+_nextest-installed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if cargo nextest --version >/dev/null 2>&1; then
+        exit 0
+    fi
+    if ! cargo install cargo-nextest --locked; then
+        echo "Latest cargo-nextest incompatible with current rustc; falling back to 0.9.128"
+        cargo install cargo-nextest --locked --version 0.9.128
     fi
