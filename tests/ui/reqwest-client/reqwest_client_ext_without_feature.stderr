@@ -1,0 +1,16 @@
+error[E0277]: the trait bound `reqwest::Client: Executor` is not satisfied
+  --> tests/ui/reqwest-client/reqwest_client_ext_without_feature.rs:16:15
+   |
+16 |         .call(&executor);
+   |          ---- ^^^^^^^^^ the trait `Executor` is not implemented for `reqwest::Client`
+   |          |
+   |          required by a bound introduced by this call
+   |
+note: required by a bound in `restate_sdk::ingress::Request::<Res>::call`
+  --> src/ingress.rs
+   |
+   |     pub async fn call<E>(self, executor: &E) -> Result<Res, RequestError>
+   |                  ---- required by a bound in this associated function
+   |     where
+   |         E: executor::Executor,
+   |            ^^^^^^^^^^^^^^^^^^ required by this bound in `Request::<Res>::call`

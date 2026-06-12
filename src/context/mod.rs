@@ -575,20 +575,26 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     }
 }
 
+/// Base trait for all generated service clients. Provides the service name.
+pub trait ServiceClient {
+    const SERVICE_NAME: &'static str;
+}
+
 /// Trait used by codegen to create the service client.
-pub trait IntoServiceClient<'ctx>: Sized {
+pub trait IntoServiceClient<'ctx>: ServiceClient + Sized {
     fn create_client(ctx: &'ctx ContextInternal) -> Self;
 }
 
-/// Trait used by codegen to use the object client.
-pub trait IntoObjectClient<'ctx>: Sized {
+/// Trait for keyed clients (objects and workflows) that can be constructed with a key.
+pub trait KeyedClient<'ctx>: ServiceClient + Sized {
     fn create_client(ctx: &'ctx ContextInternal, key: String) -> Self;
 }
 
+/// Trait used by codegen to use the object client.
+pub trait IntoObjectClient<'ctx>: KeyedClient<'ctx> {}
+
 /// Trait used by codegen to use the workflow client.
-pub trait IntoWorkflowClient<'ctx>: Sized {
-    fn create_client(ctx: &'ctx ContextInternal, key: String) -> Self;
-}
+pub trait IntoWorkflowClient<'ctx>: KeyedClient<'ctx> {}
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextClient<'ctx> for CTX {}
 

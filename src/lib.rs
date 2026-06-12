@@ -217,6 +217,8 @@
 pub mod endpoint;
 pub mod service;
 
+pub mod ingress;
+
 pub mod context;
 pub mod discovery;
 pub mod errors;
@@ -514,10 +516,13 @@ pub mod prelude {
     #[cfg(feature = "lambda")]
     pub use crate::lambda::LambdaEndpoint;
 
+    pub use crate::ingress;
+
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
         ContextSideEffects, ContextTimers, ContextWriteState, DurableFuturesUnordered, HeaderMap,
-        InvocationHandle, ObjectContext, Request, RunFuture, RunRetryPolicy, SharedObjectContext,
+        InvocationHandle, ObjectContext, Request, RunFuture, RunRetryPolicy, ServiceClient,
+        SharedObjectContext,
         SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::{
