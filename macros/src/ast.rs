@@ -11,12 +11,13 @@
 // Some parts copied from https://github.com/dtolnay/thiserror/blob/39aaeb00ff270a49e3c254d7b38b10e934d3c7a5/impl/src/ast.rs
 // License Apache-2.0 or MIT
 
+use quote::ToTokens;
 use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::{
-    Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit, Pat, PatType, Path,
+    Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident, Lit, Meta, Pat, PatType, Path,
     PathArguments, Result, ReturnType, Token, Type, Visibility, braced, parenthesized, parse_quote,
 };
 
@@ -83,7 +84,7 @@ impl ServiceInner {
         while !content.is_empty() {
             let h: Handler = content.parse()?;
 
-            if h.is_shared && service_type == ServiceType::Service {
+            if h.config.shared && service_type == ServiceType::Service {
                 return Err(Error::new(
                     h.ident.span(),
                     "Service handlers cannot be annotated with #[shared]",
@@ -139,10 +140,78 @@ impl ServiceInner {
     }
 }
 
+/// Parsed configuration from #[restate(...)] attribute
+#[derive(Default)]
+pub(crate) struct HandlerConfig {
+    pub(crate) shared: bool,
+    pub(crate) lazy_state: bool,
+    pub(crate) inactivity_timeout: Option<u64>,
+    pub(crate) abort_timeout: Option<u64>,
+}
+
+/// Parse a duration string like "30s", "5m", "1h" into milliseconds
+fn parse_duration_ms(s: &str, span: proc_macro2::Span) -> Result<u64> {
+    let duration: humantime::Duration = s
+        .trim()
+        .parse()
+        .map_err(|err| Error::new(span, format!("Failed to parse duration: {err}")))?;
+
+    u64::try_from(duration.as_millis()).map_err(|_| Error::new(span, "Duration overflows u64"))
+}
+
+/// Parse #[restate(...)] attribute
+fn parse_restate_attr(attr: &Attribute) -> Result<HandlerConfig> {
+    let mut result = HandlerConfig::default();
+
+    let meta_list = match &attr.meta {
+        Meta::List(list) => list,
+        _ => return Err(Error::new_spanned(attr, "Expected #[restate(...)]")),
+    };
+
+    // Parse the nested meta items
+    meta_list.parse_nested_meta(|meta| {
+        let path = &meta.path;
+
+        // Check if this is a boolean flag (e.g., "shared") or named value (e.g., "shared=true")
+        if path.is_ident("shared") {
+            if meta.input.peek(Token![=]) {
+                // Parse as "shared = true" or "shared = false"
+                let value: syn::LitBool = meta.value()?.parse()?;
+                result.shared = value.value;
+            } else {
+                // Parse as just "shared" (flag syntax)
+                result.shared = true;
+            }
+        } else if path.is_ident("lazy_state") {
+            if meta.input.peek(Token![=]) {
+                let value: syn::LitBool = meta.value()?.parse()?;
+                result.lazy_state = value.value;
+            } else {
+                result.lazy_state = true;
+            }
+        } else if path.is_ident("inactivity_timeout") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            result.inactivity_timeout = Some(parse_duration_ms(&value.value(), value.span())?);
+        } else if path.is_ident("abort_timeout") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            result.abort_timeout = Some(parse_duration_ms(&value.value(), value.span())?);
+        } else {
+            return Err(meta.error(format!(
+                "Unknown restate attribute: {}. Supported attributes are: \
+                shared, lazy_state, inactivity_timeout, abort_timeout",
+                path.to_token_stream()
+            )));
+        }
+
+        Ok(())
+    })?;
+
+    Ok(result)
+}
+
 pub(crate) struct Handler {
     pub(crate) attrs: Vec<Attribute>,
-    pub(crate) is_shared: bool,
-    pub(crate) is_lazy_state: bool,
+    pub(crate) config: HandlerConfig,
     pub(crate) restate_name: String,
     pub(crate) ident: Ident,
     pub(crate) arg: Option<PatType>,
@@ -198,7 +267,8 @@ impl Parse for Handler {
             ReturnType::Default => {
                 return Err(Error::new(
                     return_type.span(),
-                    "The return type cannot be empty, only Result or restate_sdk::prelude::HandlerResult is supported as return type",
+                    "The return type cannot be empty, only Result or \
+                     restate_sdk::prelude::HandlerResult is supported as return type",
                 ));
             }
             ReturnType::Type(_, ty) => {
@@ -214,15 +284,16 @@ impl Parse for Handler {
         };
 
         // Process attributes
-        let mut is_shared = false;
-        let mut is_lazy_state = false;
         let mut restate_name = ident.to_string();
         let mut attrs = vec![];
+        let mut config = HandlerConfig::default();
+        let mut has_legacy_shared = false;
         for attr in parsed_attrs {
             if is_shared_attr(&attr) {
-                is_shared = true;
-            } else if is_lazy_state_attr(&attr) {
-                is_lazy_state = true;
+                // support deprecated shared
+                has_legacy_shared = true;
+            } else if is_restate_attr(&attr) {
+                config = parse_restate_attr(&attr)?;
             } else if let Some(name) = read_literal_attribute_name(&attr)? {
                 restate_name = name;
             } else {
@@ -231,10 +302,13 @@ impl Parse for Handler {
             }
         }
 
+        if has_legacy_shared {
+            config.shared = true;
+        }
+
         Ok(Self {
             attrs,
-            is_shared,
-            is_lazy_state,
+            config,
             restate_name,
             ident,
             arg: args.pop(),
@@ -251,11 +325,12 @@ fn is_shared_attr(attr: &Attribute) -> bool {
         .is_ok_and(|i| i == "shared")
 }
 
-fn is_lazy_state_attr(attr: &Attribute) -> bool {
-    attr.meta
-        .require_path_only()
-        .and_then(Path::require_ident)
-        .is_ok_and(|i| i == "lazy_state")
+fn is_restate_attr(attr: &Attribute) -> bool {
+    if let Meta::List(list) = &attr.meta {
+        list.path.is_ident("restate")
+    } else {
+        false
+    }
 }
 
 fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
