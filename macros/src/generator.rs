@@ -146,7 +146,7 @@ impl<'a> ServiceGenerator<'a> {
 
                 fn handle(&self, ctx: ::restate_sdk::endpoint::ContextInternal) -> Self::Future {
                     let service_clone = ::std::sync::Arc::clone(&self.service);
-                    Box::pin(async move {
+                    ::std::boxed::Box::pin(async move {
                         match ctx.handler_name() {
                             #( #match_arms ),*
                             _ => {

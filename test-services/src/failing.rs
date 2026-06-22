@@ -1,20 +1,34 @@
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailureToPropagate {
+    error_message: String,
+    #[serde(default)]
+    metadata: HashMap<String, String>,
+}
 
 #[restate_sdk::object]
 #[name = "Failing"]
 pub(crate) trait Failing {
     #[name = "terminallyFailingCall"]
-    async fn terminally_failing_call(error_message: String) -> HandlerResult<()>;
+    async fn terminally_failing_call(failure: Json<FailureToPropagate>) -> HandlerResult<()>;
     #[name = "callTerminallyFailingCall"]
-    async fn call_terminally_failing_call(error_message: String) -> HandlerResult<String>;
+    async fn call_terminally_failing_call(
+        failure: Json<FailureToPropagate>,
+    ) -> HandlerResult<String>;
     #[name = "failingCallWithEventualSuccess"]
     async fn failing_call_with_eventual_success() -> HandlerResult<i32>;
     #[name = "terminallyFailingSideEffect"]
-    async fn terminally_failing_side_effect(error_message: String) -> HandlerResult<()>;
+    async fn terminally_failing_side_effect(failure: Json<FailureToPropagate>)
+    -> HandlerResult<()>;
     #[name = "sideEffectSucceedsAfterGivenAttempts"]
     async fn side_effect_succeeds_after_given_attempts(minimum_attempts: i32)
     -> HandlerResult<i32>;
@@ -35,20 +49,20 @@ impl Failing for FailingImpl {
     async fn terminally_failing_call(
         &self,
         _: ObjectContext<'_>,
-        error_message: String,
+        Json(failure): Json<FailureToPropagate>,
     ) -> HandlerResult<()> {
-        Err(TerminalError::new(error_message).into())
+        Err(TerminalError::new(failure.error_message).into())
     }
 
     async fn call_terminally_failing_call(
         &self,
         mut context: ObjectContext<'_>,
-        error_message: String,
+        Json(failure): Json<FailureToPropagate>,
     ) -> HandlerResult<String> {
         let uuid = context.rand_uuid().to_string();
         context
             .object_client::<FailingClient>(uuid)
-            .terminally_failing_call(error_message)
+            .terminally_failing_call(Json(failure))
             .call()
             .await?;
 
@@ -69,10 +83,10 @@ impl Failing for FailingImpl {
     async fn terminally_failing_side_effect(
         &self,
         context: ObjectContext<'_>,
-        error_message: String,
+        Json(failure): Json<FailureToPropagate>,
     ) -> HandlerResult<()> {
         context
-            .run::<_, _, ()>(|| async move { Err(TerminalError::new(error_message))? })
+            .run::<_, _, ()>(|| async move { Err(TerminalError::new(failure.error_message))? })
             .await?;
 
         unreachable!("This should be unreachable")

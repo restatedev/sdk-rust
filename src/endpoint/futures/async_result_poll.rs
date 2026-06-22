@@ -59,7 +59,11 @@ impl Future for VmAsyncResultPollFuture {
                     let out = inner_lock.vm.take_output();
                     match out {
                         TakeOutputResult::Buffer(b) => {
-                            if !inner_lock.write.send(b) {
+                            // Skip empty buffers: take_output returns an empty buffer when there's
+                            // nothing to send (e.g. while replaying completed entries). Sending it
+                            // would emit an empty HTTP/2 DATA frame per replayed await, which some
+                            // proxies (e.g. Envoy) reject when consecutive. See sdk-rust#114.
+                            if !b.is_empty() && !inner_lock.write.send(b) {
                                 return Poll::Ready(Err(ErrorInner::Suspended));
                             }
                         }

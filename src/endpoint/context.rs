@@ -757,6 +757,7 @@ impl ContextInternal {
 
         let out = inner_lock.vm.take_output();
         if let TakeOutputResult::Buffer(b) = out
+            && !b.is_empty()
             && !inner_lock.write.send(b)
         {
             // Nothing we can do anymore here
