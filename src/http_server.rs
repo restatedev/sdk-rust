@@ -16,19 +16,17 @@
 //! async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(define_service("MyService").handler(my_service::my_handler).build())
-//!             .bind(
-//!                 define_object("MyVirtualObject")
-//!                     .handler(my_virtual_object::my_handler)
-//!                     .handler(my_virtual_object::my_concurrent_handler)
-//!                     .build(),
-//!             )
-//!             .bind(
-//!                 define_workflow("MyWorkflow")
-//!                     .handler(my_workflow::run)
-//!                     .handler(my_workflow::interact_with_workflow)
-//!                     .build(),
-//!             )
+//!             .bind(service!("MyService", my_service::my_handler))
+//!             .bind(object!(
+//!                 "MyVirtualObject",
+//!                 my_virtual_object::my_handler,
+//!                 my_virtual_object::my_concurrent_handler
+//!             ))
+//!             .bind(workflow!(
+//!                 "MyWorkflow",
+//!                 my_workflow::run,
+//!                 my_workflow::interact_with_workflow
+//!             ))
 //!             .build(),
 //!     )
 //!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
@@ -53,7 +51,7 @@
 //! # async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(define_service("MyService").handler(my_service::my_handler).build())
+//!             .bind(service!("MyService", my_service::my_handler))
 //!             .identity_key("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
 //!             .unwrap()
 //!             .build(),

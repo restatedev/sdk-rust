@@ -34,9 +34,5 @@ pub(crate) async fn clear(ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<Stri
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_object("ListObject")
-        .handler(append)
-        .handler(get)
-        .handler(clear)
-        .build()
+    object!("ListObject", append, get, clear)
 }

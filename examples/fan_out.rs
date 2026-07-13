@@ -35,7 +35,7 @@ async fn fan_out(ctx: Context<'_>) -> Result<String, TerminalError> {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let fan_out_svc = define_service("FanOut").handler(fan_out).build();
+    let fan_out_svc = service!("FanOut", fan_out);
     HttpServer::new(Endpoint::builder().bind(fan_out_svc).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;

@@ -226,9 +226,9 @@ fn generate_server(iface: &Interface) -> TokenStream {
         Kind::Workflow => quote!(::restate_sdk::service::WorkflowKind),
     };
     let builder_fn = match iface.kind {
-        Kind::Service => quote!(::restate_sdk::service::define_service),
-        Kind::Object => quote!(::restate_sdk::service::define_object),
-        Kind::Workflow => quote!(::restate_sdk::service::define_workflow),
+        Kind::Service => quote!(::restate_sdk::service::service),
+        Kind::Object => quote!(::restate_sdk::service::object),
+        Kind::Workflow => quote!(::restate_sdk::service::workflow),
     };
 
     let generics: Vec<Ident> = (0..iface.handlers.len())

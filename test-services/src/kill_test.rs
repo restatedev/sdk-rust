@@ -53,7 +53,5 @@ pub(crate) fn singleton_definition() -> ServiceDefinition {
 }
 
 pub(crate) fn runner_definition() -> ServiceDefinition {
-    define_object("KillTestRunner")
-        .handler(start_call_tree)
-        .build()
+    object!("KillTestRunner", start_call_tree)
 }

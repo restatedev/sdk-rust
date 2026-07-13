@@ -44,7 +44,7 @@ async fn main() {
     // tracing_subscriber::fmt::init();
 
     // Compose handlers into a service and bind it to the endpoint.
-    let greeter = define_service("Greeter").handler(greet).build();
+    let greeter = service!("Greeter", greet);
     HttpServer::new(Endpoint::builder().bind(greeter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
@@ -86,17 +86,9 @@ Here's how to create a simple Lambda service:
 ```rust
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
-trait Greeter {
-    async fn greet(name: String) -> HandlerResult<String>;
-}
-
-struct GreeterImpl;
-
-impl Greeter for GreeterImpl {
-    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
-        Ok(format!("Greetings {name}"))
-    }
+#[restate_sdk::handler]
+async fn greet(_ctx: Context<'_>, name: String) -> HandlerResult<String> {
+    Ok(format!("Greetings {name}"))
 }
 
 #[tokio::main]
@@ -107,7 +99,7 @@ async fn main() {
     // Build and run the Lambda endpoint
     LambdaEndpoint::run(
         Endpoint::builder()
-            .bind(GreeterImpl.serve())
+            .bind(service!("Greeter", greet))
             .build(),
     )
     .await

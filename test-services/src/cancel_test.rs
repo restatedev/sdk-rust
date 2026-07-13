@@ -88,10 +88,7 @@ pub(crate) async fn is_unlocked(_context: ObjectContext<'_>) -> HandlerResult<()
 }
 
 pub(crate) fn runner_definition() -> ServiceDefinition {
-    define_object("CancelTestRunner")
-        .handler(start_test)
-        .handler(verify_test)
-        .build()
+    object!("CancelTestRunner", start_test, verify_test)
 }
 
 pub(crate) fn blocking_definition() -> ServiceDefinition {

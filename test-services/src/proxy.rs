@@ -112,9 +112,5 @@ pub(crate) async fn many_calls(
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_service("Proxy")
-        .handler(call)
-        .handler(one_way_call)
-        .handler(many_calls)
-        .build()
+    service!("Proxy", call, one_way_call, many_calls)
 }

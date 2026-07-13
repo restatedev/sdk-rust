@@ -22,7 +22,7 @@ async fn do_run(ctx: Context<'_>) -> Result<(), TerminalError> {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let failure_example = define_service("FailureExample").handler(do_run).build();
+    let failure_example = service!("FailureExample", do_run);
     HttpServer::new(Endpoint::builder().bind(failure_example).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;

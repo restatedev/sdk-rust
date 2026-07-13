@@ -225,17 +225,17 @@ impl<Kind: 'static> ServiceBuilder<Kind> {
 }
 
 /// Start building a plain [Service](https://docs.restate.dev/concepts/services#services-1).
-pub fn define_service(name: impl Into<String>) -> ServiceBuilder<ServiceKind> {
+pub fn service(name: impl Into<String>) -> ServiceBuilder<ServiceKind> {
     ServiceBuilder::new(name.into(), crate::discovery::ServiceType::Service)
 }
 
 /// Start building a [Virtual Object](https://docs.restate.dev/concepts/services#virtual-objects).
-pub fn define_object(name: impl Into<String>) -> ServiceBuilder<ObjectKind> {
+pub fn object(name: impl Into<String>) -> ServiceBuilder<ObjectKind> {
     ServiceBuilder::new(name.into(), crate::discovery::ServiceType::VirtualObject)
 }
 
 /// Start building a [Workflow](https://docs.restate.dev/concepts/services#workflows).
-pub fn define_workflow(name: impl Into<String>) -> ServiceBuilder<WorkflowKind> {
+pub fn workflow(name: impl Into<String>) -> ServiceBuilder<WorkflowKind> {
     ServiceBuilder::new(name.into(), crate::discovery::ServiceType::Workflow)
 }
 
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn builds_definition_with_discovery_and_state() {
-        let def = define_service("Greeter").handler(Greet).state(42u32).build();
+        let def = service("Greeter").handler(Greet).state(42u32).build();
 
         assert!(matches!(def.discovery.ty, ServiceType::Service));
         assert_eq!(def.discovery.name.to_string(), "Greeter");

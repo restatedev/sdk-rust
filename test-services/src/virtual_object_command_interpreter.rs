@@ -235,11 +235,12 @@ pub(crate) async fn get_results(
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_object("VirtualObjectCommandInterpreter")
-        .handler(interpret_commands)
-        .handler(resolve_awakeable)
-        .handler(reject_awakeable)
-        .handler(has_awakeable)
-        .handler(get_results)
-        .build()
+    object!(
+        "VirtualObjectCommandInterpreter",
+        interpret_commands,
+        resolve_awakeable,
+        reject_awakeable,
+        has_awakeable,
+        get_results
+    )
 }

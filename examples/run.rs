@@ -27,7 +27,7 @@ async fn do_run(ctx: Context<'_>) -> Result<Json<HashMap<String, String>>, Handl
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let run_example = define_service("RunExample")
+    let run_example = service("RunExample")
         .state(reqwest::Client::new())
         .handler(do_run)
         .build();

@@ -44,9 +44,5 @@ pub(crate) async fn clear_all(ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_object("MapObject")
-        .handler(set)
-        .handler(get)
-        .handler(clear_all)
-        .build()
+    object!("MapObject", set, get, clear_all)
 }

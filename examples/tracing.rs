@@ -23,7 +23,7 @@ async fn main() {
                 .with_filter(replay_filter),
         )
         .init();
-    let greeter = define_service("Greeter").handler(greet).build();
+    let greeter = service!("Greeter", greet);
     HttpServer::new(Endpoint::builder().bind(greeter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;

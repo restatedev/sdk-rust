@@ -35,7 +35,7 @@ async fn main() {
 
     // Conformance-checked: `greet` must match the interface's `greet(String) -> String`.
     let greeter = Greeter::from_handlers(GreeterHandlers { greet });
-    let proxy_svc = define_service("Proxy").handler(proxy).build();
+    let proxy_svc = service!("Proxy", proxy);
 
     HttpServer::new(Endpoint::builder().bind(greeter).bind(proxy_svc).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())

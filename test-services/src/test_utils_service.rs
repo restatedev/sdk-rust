@@ -80,13 +80,14 @@ pub(crate) async fn cancel_invocation(
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_service("TestUtilsService")
-        .handler(echo)
-        .handler(uppercase_echo)
-        .handler(raw_echo)
-        .handler(echo_headers)
-        .handler(sleep_concurrently)
-        .handler(count_executed_side_effects)
-        .handler(cancel_invocation)
-        .build()
+    service!(
+        "TestUtilsService",
+        echo,
+        uppercase_echo,
+        raw_echo,
+        echo_headers,
+        sleep_concurrently,
+        count_executed_side_effects,
+        cancel_invocation
+    )
 }

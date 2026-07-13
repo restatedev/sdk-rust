@@ -81,7 +81,7 @@ pub(crate) async fn set_different_key(ctx: ObjectContext<'_>) -> HandlerResult<(
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_object("NonDeterministic")
+    object("NonDeterministic")
         .state(NonDetState::default())
         .handler(either_sleep_or_call)
         .handler(call_different_method)

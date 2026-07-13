@@ -31,9 +31,5 @@ pub(crate) async fn get_state(
 }
 
 pub(crate) fn definition() -> ServiceDefinition {
-    define_workflow("BlockAndWaitWorkflow")
-        .handler(run)
-        .handler(unblock)
-        .handler(get_state)
-        .build()
+    workflow!("BlockAndWaitWorkflow", run, unblock, get_state)
 }

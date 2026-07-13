@@ -57,7 +57,7 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     // Compose handlers into a service, then bind it to an endpoint.
-//!     let my_service = define_service("MyService").handler(my_handler).build();
+//!     let my_service = service!("MyService", my_handler);
 //!     HttpServer::new(Endpoint::builder().bind(my_service).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
@@ -71,7 +71,7 @@
 //!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/my_handler`. You can optionally override the handler name via `#[restate_sdk::handler(name = "myHandler")]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
 //! - The first parameter of a handler is always a [`Context`](crate::context::Context) to interact with Restate.
 //!   The SDK stores the actions you do on the context in the Restate journal to make them durable.
-//! - Compose handlers into a service with [`define_service()`](crate::define_service()), then create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
+//! - Compose handlers into a service with the `service!` macro (or the [`service()`](crate::service()) builder when you need `.state(..)`), then create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
 //! - Dependencies (an HTTP client, a database pool, ...) are injected as ambient state: register them with `.state(..)` on the [service](crate::service::ServiceBuilder::state) or [endpoint](crate::endpoint::Builder::state) builder, and read them via [`ctx.state::<T>()`](crate::context::ContextState::state). To call this service from another one, generate a typed client with [`interface!`](macro@crate::interface).
 //!
 //! ## Virtual Objects
@@ -94,17 +94,14 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let obj = define_object("MyVirtualObject")
-//!         .handler(my_handler)
-//!         .handler(my_concurrent_handler)
-//!         .build();
+//!     let obj = object!("MyVirtualObject", my_handler, my_concurrent_handler);
 //!     HttpServer::new(Endpoint::builder().bind(obj).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
 //! ```
 //!
-//! - Compose handlers into a Virtual Object with [`define_object()`](crate::define_object()).
+//! - Compose handlers into a Virtual Object with the `object!` macro (or the [`object()`](crate::object()) builder).
 //! - Exclusive handlers take an [`ObjectContext`](crate::context::ObjectContext) and can write to the K/V state store. Only one exclusive handler can be active at a time per object key, to ensure consistency.
 //! - You can retrieve the key of the object you are in via [`ObjectContext::key`](crate::context::ObjectContext::key).
 //! - A handler that takes a [`SharedObjectContext`](crate::context::SharedObjectContext) executes concurrently with the others and has read-only access to the K/V state — no `#[shared]` annotation needed, it is inferred from the context type.
@@ -134,17 +131,14 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let wf = define_workflow("MyWorkflow")
-//!         .handler(run)
-//!         .handler(interact_with_workflow)
-//!         .build();
+//!     let wf = workflow!("MyWorkflow", run, interact_with_workflow);
 //!     HttpServer::new(Endpoint::builder().bind(wf).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
 //! ```
 //!
-//! - Compose handlers into a Workflow with [`define_workflow()`](crate::define_workflow()).
+//! - Compose handlers into a Workflow with the `workflow!` macro (or the [`workflow()`](crate::workflow()) builder).
 //! - The workflow needs a `run` handler whose first argument is a [`WorkflowContext`](crate::context::WorkflowContext).
 //!   The `run` handler executes exactly once per workflow instance.
 //! - The other handlers of the workflow are used to interact with it: either query it, or signal it.
@@ -201,7 +195,7 @@ pub mod serde;
 ///
 /// **Deprecated.** Prefer the function-first API: annotate handlers with
 /// [`#[restate_sdk::handler]`](macro@crate::handler) and compose them with
-/// [`define_service()`](crate::define_service())/[`define_object()`](crate::define_object())/[`define_workflow()`](crate::define_workflow()),
+/// `service!`/`object!`/`workflow!`,
 /// generating clients with [`interface!`](macro@crate::interface). This trait-based macro still
 /// works for backwards compatibility.
 ///
@@ -310,7 +304,7 @@ pub use restate_sdk_macros::service;
 /// <div class="warning">
 ///
 /// **Deprecated.** Prefer [`#[restate_sdk::handler]`](macro@crate::handler) +
-/// [`define_object()`](crate::define_object()). Kept for backwards compatibility.
+/// [`object()`](crate::object()). Kept for backwards compatibility.
 ///
 /// </div>
 ///
@@ -340,7 +334,7 @@ pub use restate_sdk_macros::object;
 /// <div class="warning">
 ///
 /// **Deprecated.** Prefer [`#[restate_sdk::handler]`](macro@crate::handler) +
-/// [`define_workflow()`](crate::define_workflow()). Kept for backwards compatibility.
+/// [`workflow()`](crate::workflow()). Kept for backwards compatibility.
 ///
 /// </div>
 ///
@@ -518,7 +512,7 @@ pub use restate_sdk_macros::workflow;
 /// }
 ///
 /// # async fn example() {
-/// let greeter = define_service("Greeter").handler(greet).build();
+/// let greeter = service!("Greeter", greet);
 /// HttpServer::new(Endpoint::builder().bind(greeter).build())
 ///     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 ///     .await;
@@ -526,7 +520,7 @@ pub use restate_sdk_macros::workflow;
 /// ```
 ///
 /// The annotated function becomes a zero-sized handler *value* (named after the function) that you
-/// compose with [`define_service()`](crate::define_service())/[`define_object()`](crate::define_object())/[`define_workflow()`](crate::define_workflow()).
+/// compose with `service!`/`object!`/`workflow!`.
 /// The original body remains callable for unit tests via `greet::call(ctx, input)`.
 ///
 /// Override the Restate handler name with `#[restate_sdk::handler(name = "myGreet")]`.
@@ -557,9 +551,37 @@ pub use restate_sdk_macros::handler;
 /// Use `service`, `object` or `workflow` as the leading keyword to match the service kind.
 pub use restate_sdk_macros::interface;
 
-/// Entry points to compose [`#[handler]`](macro@crate::handler) functions into a bindable service.
-/// Also available via the [`prelude`](crate::prelude).
-pub use crate::service::{define_object, define_service, define_workflow};
+/// Builder entry points to compose [`#[handler]`](macro@crate::handler) functions into a bindable
+/// service. Use these when you need `.state(..)` or to build a service dynamically; otherwise prefer
+/// the `service!` / `object!` / `workflow!` macros exported by the [`prelude`](crate::prelude).
+pub use crate::service::{object, service, workflow};
+
+// Composition macros. These are `#[macro_export]`ed at the crate root under `define_*` names (which
+// don't clash with the deprecated `#[service]`/`#[object]`/`#[workflow]` attribute macros), and
+// re-exported by the `prelude` under the ergonomic names `service!`/`object!`/`workflow!`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! define_service {
+    ($name:expr $(, $handler:expr)* $(,)?) => {
+        $crate::service($name)$(.handler($handler))*.build()
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! define_object {
+    ($name:expr $(, $handler:expr)* $(,)?) => {
+        $crate::object($name)$(.handler($handler))*.build()
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! define_workflow {
+    ($name:expr $(, $handler:expr)* $(,)?) => {
+        $crate::workflow($name)$(.handler($handler))*.build()
+    };
+}
 
 /// Prelude contains all the useful imports you need to get started with Restate.
 pub mod prelude {
@@ -580,5 +602,14 @@ pub mod prelude {
     };
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
-    pub use crate::service::{define_object, define_service, define_workflow};
+
+    // Builder entry-point functions (value namespace).
+    pub use crate::service::{object, service, workflow};
+
+    /// Compose [`#[handler]`](macro@crate::handler) functions into a service, virtual object or
+    /// workflow in one line — e.g. `service!("Greeter", greet, other)`, `object!("Counter", get, add)`.
+    ///
+    /// This is sugar over the [`service()`](crate::service())/[`object()`](crate::object())/[`workflow()`](crate::workflow())
+    /// builders; use the builders directly when you need `.state(..)`.
+    pub use crate::{define_object as object, define_service as service, define_workflow as workflow};
 }

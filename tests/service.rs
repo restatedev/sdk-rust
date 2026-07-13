@@ -122,7 +122,7 @@ fn fn_handlers_meta_and_composition() {
     let _call = fn_no_input_no_output::call;
 
     // Composition into the three service kinds compiles; mixing kinds would not.
-    let _service = define_service("MyService")
+    let _service = service("MyService")
         .state(0u32)
         .handler(fn_my_handler)
         .handler(fn_no_input)
@@ -133,15 +133,10 @@ fn fn_handlers_meta_and_composition() {
         .handler(fn_renamed)
         .build();
 
-    let _object = define_object("MyObject")
-        .handler(obj_exclusive)
-        .handler(obj_shared)
-        .build();
+    // The macros are sugar over the builder (used here for the state-free cases).
+    let _object = object!("MyObject", obj_exclusive, obj_shared);
 
-    let _workflow = define_workflow("MyWorkflow")
-        .handler(wf_run)
-        .handler(wf_shared)
-        .build();
+    let _workflow = workflow!("MyWorkflow", wf_run, wf_shared);
 }
 
 // interface! generates a client + a conformance-checked server builder.
