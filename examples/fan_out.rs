@@ -12,38 +12,31 @@ use std::time::Duration;
 /// ```shell
 /// $ curl -v http://localhost:8080/FanOut/fan_out
 /// ```
-#[restate_sdk::service]
-trait FanOut {
-    async fn fan_out() -> Result<String, TerminalError>;
-}
+#[restate_sdk::handler]
+async fn fan_out(ctx: Context<'_>) -> Result<String, TerminalError> {
+    let labels = ["fast", "medium", "slow"];
 
-struct FanOutImpl;
+    // Fan out: create a dynamic number of durable futures
+    let mut futures = DurableFuturesUnordered::new();
+    futures.push(ctx.sleep(Duration::from_secs(1)));
+    futures.push(ctx.sleep(Duration::from_secs(2)));
+    futures.push(ctx.sleep(Duration::from_secs(3)));
 
-impl FanOut for FanOutImpl {
-    async fn fan_out(&self, ctx: Context<'_>) -> Result<String, TerminalError> {
-        let labels = ["fast", "medium", "slow"];
-
-        // Fan out: create a dynamic number of durable futures
-        let mut futures = DurableFuturesUnordered::new();
-        futures.push(ctx.sleep(Duration::from_secs(1)));
-        futures.push(ctx.sleep(Duration::from_secs(2)));
-        futures.push(ctx.sleep(Duration::from_secs(3)));
-
-        // Process results as they complete — index tells you which future finished
-        let mut completion_order = Vec::new();
-        while let Some((index, result)) = futures.next().await? {
-            result?;
-            completion_order.push(labels[index]);
-        }
-
-        Ok(format!("Completed in order: {completion_order:?}"))
+    // Process results as they complete — index tells you which future finished
+    let mut completion_order = Vec::new();
+    while let Some((index, result)) = futures.next().await? {
+        result?;
+        completion_order.push(labels[index]);
     }
+
+    Ok(format!("Completed in order: {completion_order:?}"))
 }
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(FanOutImpl.serve()).build())
+    let fan_out_svc = define_service("FanOut").handler(fan_out).build();
+    HttpServer::new(Endpoint::builder().bind(fan_out_svc).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

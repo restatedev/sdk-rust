@@ -9,6 +9,7 @@ use crate::endpoint::futures::handler_state_aware::HandlerStateAwareFuture;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::service::Service;
+use crate::state::StateMap;
 use ::futures::future::BoxFuture;
 use ::futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use bytes::Bytes;
@@ -137,18 +138,24 @@ impl From<CoreError> for Error {
     }
 }
 
-struct BoxedService(
+pub(crate) struct BoxedService(
     Box<dyn Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync + 'static>,
 );
 
 impl BoxedService {
-    pub fn new<
+    pub(crate) fn new<
         S: Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync + 'static,
     >(
         service: S,
     ) -> Self {
         Self(Box::new(service))
     }
+}
+
+/// A service bound to an endpoint: its dispatcher plus the merged (endpoint + service) DI state.
+pub(crate) struct BoundService {
+    pub(crate) dispatcher: BoxedService,
+    pub(crate) state: Arc<StateMap>,
 }
 
 impl Service for BoxedService {
@@ -174,7 +181,7 @@ impl Endpoint {
 }
 
 struct EndpointInner {
-    svcs: HashMap<String, BoxedService>,
+    svcs: HashMap<String, BoundService>,
     discovery_services: Vec<crate::discovery::Service>,
     identity_verifier: IdentityVerifier,
 }
@@ -562,7 +569,7 @@ async fn handle_invocation(
     output_tx: OutputSender,
 ) -> Result<(), Error> {
     // Retrieve the service from the Arc
-    let svc = endpoint
+    let bound = endpoint
         .svcs
         .get(&svc_name)
         .expect("service must exist at this point");
@@ -583,13 +590,15 @@ async fn handle_invocation(
             vm,
             svc_name,
             handler_name,
+            Arc::clone(&bound.state),
             input_rx,
             output_tx,
             handler_state_tx,
         );
 
         // Start user code
-        let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
+        let user_code_fut =
+            InterceptErrorFuture::new(ctx.clone(), bound.dispatcher.handle(ctx.clone()));
 
         // Wrap it in handler state aware future
         let result =

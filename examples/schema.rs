@@ -16,50 +16,38 @@ struct Product {
     price_cents: u32,
 }
 
-#[restate_sdk::service]
-trait CatalogService {
-    async fn get_product_by_id(product_id: String) -> Result<Json<Product>, HandlerError>;
-    async fn save_product(product: Json<Product>) -> Result<String, HandlerError>;
-    async fn is_in_stock(product_id: String) -> Result<bool, HandlerError>;
+#[restate_sdk::handler]
+async fn get_product_by_id(
+    ctx: Context<'_>,
+    product_id: String,
+) -> Result<Json<Product>, HandlerError> {
+    ctx.sleep(Duration::from_millis(50)).await?;
+    Ok(Json(Product {
+        id: product_id,
+        name: "Sample Product".to_string(),
+        price_cents: 1995,
+    }))
 }
 
-struct CatalogServiceImpl;
+#[restate_sdk::handler]
+async fn save_product(_ctx: Context<'_>, product: Json<Product>) -> Result<String, HandlerError> {
+    Ok(product.0.id)
+}
 
-impl CatalogService for CatalogServiceImpl {
-    async fn get_product_by_id(
-        &self,
-        ctx: Context<'_>,
-        product_id: String,
-    ) -> Result<Json<Product>, HandlerError> {
-        ctx.sleep(Duration::from_millis(50)).await?;
-        Ok(Json(Product {
-            id: product_id,
-            name: "Sample Product".to_string(),
-            price_cents: 1995,
-        }))
-    }
-
-    async fn save_product(
-        &self,
-        _ctx: Context<'_>,
-        product: Json<Product>,
-    ) -> Result<String, HandlerError> {
-        Ok(product.0.id)
-    }
-
-    async fn is_in_stock(
-        &self,
-        _ctx: Context<'_>,
-        product_id: String,
-    ) -> Result<bool, HandlerError> {
-        Ok(!product_id.contains("out-of-stock"))
-    }
+#[restate_sdk::handler]
+async fn is_in_stock(_ctx: Context<'_>, product_id: String) -> Result<bool, HandlerError> {
+    Ok(!product_id.contains("out-of-stock"))
 }
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(CatalogServiceImpl.serve()).build())
+    let catalog = define_service("CatalogService")
+        .handler(get_product_by_id)
+        .handler(save_product)
+        .handler(is_in_stock)
+        .build();
+    HttpServer::new(Endpoint::builder().bind(catalog).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

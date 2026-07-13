@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
+use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,134 +16,139 @@ pub(crate) struct FailureToPropagate {
     metadata: HashMap<String, String>,
 }
 
-#[restate_sdk::object]
-#[name = "Failing"]
-pub(crate) trait Failing {
-    #[name = "terminallyFailingCall"]
-    async fn terminally_failing_call(failure: Json<FailureToPropagate>) -> HandlerResult<()>;
-    #[name = "callTerminallyFailingCall"]
-    async fn call_terminally_failing_call(
-        failure: Json<FailureToPropagate>,
-    ) -> HandlerResult<String>;
-    #[name = "failingCallWithEventualSuccess"]
-    async fn failing_call_with_eventual_success() -> HandlerResult<i32>;
-    #[name = "terminallyFailingSideEffect"]
-    async fn terminally_failing_side_effect(failure: Json<FailureToPropagate>)
-    -> HandlerResult<()>;
-    #[name = "sideEffectSucceedsAfterGivenAttempts"]
-    async fn side_effect_succeeds_after_given_attempts(minimum_attempts: i32)
-    -> HandlerResult<i32>;
-    #[name = "sideEffectFailsAfterGivenAttempts"]
-    async fn side_effect_fails_after_given_attempts(
-        retry_policy_max_retry_count: i32,
-    ) -> HandlerResult<i32>;
+restate_sdk::interface! {
+    object Failing {
+        #[name = "terminallyFailingCall"]
+        terminally_failing_call(Json<FailureToPropagate>) -> ();
+        #[name = "callTerminallyFailingCall"]
+        call_terminally_failing_call(Json<FailureToPropagate>) -> String;
+        #[name = "failingCallWithEventualSuccess"]
+        failing_call_with_eventual_success() -> i32;
+        #[name = "terminallyFailingSideEffect"]
+        terminally_failing_side_effect(Json<FailureToPropagate>) -> ();
+        #[name = "sideEffectSucceedsAfterGivenAttempts"]
+        side_effect_succeeds_after_given_attempts(i32) -> i32;
+        #[name = "sideEffectFailsAfterGivenAttempts"]
+        side_effect_fails_after_given_attempts(i32) -> i32;
+    }
 }
 
+/// Process-wide counters, injected as ambient state (registered on the endpoint in `main`).
 #[derive(Clone, Default)]
-pub(crate) struct FailingImpl {
+pub(crate) struct FailingState {
     eventual_success_calls: Arc<AtomicI32>,
     eventual_success_side_effects: Arc<AtomicI32>,
     eventual_failure_side_effects: Arc<AtomicI32>,
 }
 
-impl Failing for FailingImpl {
-    async fn terminally_failing_call(
-        &self,
-        _: ObjectContext<'_>,
-        Json(failure): Json<FailureToPropagate>,
-    ) -> HandlerResult<()> {
-        Err(TerminalError::new(failure.error_message).into())
+#[restate_sdk::handler]
+pub(crate) async fn terminally_failing_call(
+    _ctx: ObjectContext<'_>,
+    Json(failure): Json<FailureToPropagate>,
+) -> HandlerResult<()> {
+    Err(TerminalError::new(failure.error_message).into())
+}
+
+#[restate_sdk::handler]
+pub(crate) async fn call_terminally_failing_call(
+    mut ctx: ObjectContext<'_>,
+    Json(failure): Json<FailureToPropagate>,
+) -> HandlerResult<String> {
+    let uuid = ctx.rand_uuid().to_string();
+    ctx.object_client::<FailingClient>(uuid)
+        .terminally_failing_call(Json(failure))
+        .call()
+        .await?;
+
+    unreachable!("This should be unreachable")
+}
+
+#[restate_sdk::handler]
+pub(crate) async fn failing_call_with_eventual_success(ctx: ObjectContext<'_>) -> HandlerResult<i32> {
+    let calls = &ctx.state::<FailingState>().eventual_success_calls;
+    let current_attempt = calls.fetch_add(1, Ordering::SeqCst) + 1;
+
+    if current_attempt >= 4 {
+        calls.store(0, Ordering::SeqCst);
+        Ok(current_attempt)
+    } else {
+        Err(anyhow!("Failed at attempt ${current_attempt}").into())
     }
+}
 
-    async fn call_terminally_failing_call(
-        &self,
-        mut context: ObjectContext<'_>,
-        Json(failure): Json<FailureToPropagate>,
-    ) -> HandlerResult<String> {
-        let uuid = context.rand_uuid().to_string();
-        context
-            .object_client::<FailingClient>(uuid)
-            .terminally_failing_call(Json(failure))
-            .call()
-            .await?;
+#[restate_sdk::handler]
+pub(crate) async fn terminally_failing_side_effect(
+    ctx: ObjectContext<'_>,
+    Json(failure): Json<FailureToPropagate>,
+) -> HandlerResult<()> {
+    ctx.run::<_, _, ()>(|| async move { Err(TerminalError::new(failure.error_message))? })
+        .await?;
 
-        unreachable!("This should be unreachable")
+    unreachable!("This should be unreachable")
+}
+
+#[restate_sdk::handler]
+pub(crate) async fn side_effect_succeeds_after_given_attempts(
+    ctx: ObjectContext<'_>,
+    minimum_attempts: i32,
+) -> HandlerResult<i32> {
+    let cloned_counter = Arc::clone(&ctx.state::<FailingState>().eventual_success_side_effects);
+    let success_attempt = ctx
+        .run(|| async move {
+            let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+            if current_attempt >= minimum_attempts {
+                cloned_counter.store(0, Ordering::SeqCst);
+                Ok(current_attempt)
+            } else {
+                Err(anyhow!("Failed at attempt {current_attempt}"))?
+            }
+        })
+        .retry_policy(
+            RunRetryPolicy::new()
+                .initial_delay(Duration::from_millis(10))
+                .exponentiation_factor(1.0),
+        )
+        .name("failing_side_effect")
+        .await?;
+
+    Ok(success_attempt)
+}
+
+#[restate_sdk::handler]
+pub(crate) async fn side_effect_fails_after_given_attempts(
+    ctx: ObjectContext<'_>,
+    retry_policy_max_retry_count: i32,
+) -> HandlerResult<i32> {
+    let counter = Arc::clone(&ctx.state::<FailingState>().eventual_failure_side_effects);
+    let cloned_counter = Arc::clone(&counter);
+    if ctx
+        .run(|| async move {
+            let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
+            Err::<(), _>(anyhow!("Failed at attempt {current_attempt}").into())
+        })
+        .retry_policy(
+            RunRetryPolicy::new()
+                .initial_delay(Duration::from_millis(10))
+                .exponentiation_factor(1.0)
+                .max_attempts(retry_policy_max_retry_count as u32),
+        )
+        .await
+        .is_err()
+    {
+        Ok(counter.load(Ordering::SeqCst))
+    } else {
+        Err(TerminalError::new("Expecting the side effect to fail!"))?
     }
+}
 
-    async fn failing_call_with_eventual_success(&self, _: ObjectContext<'_>) -> HandlerResult<i32> {
-        let current_attempt = self.eventual_success_calls.fetch_add(1, Ordering::SeqCst) + 1;
-
-        if current_attempt >= 4 {
-            self.eventual_success_calls.store(0, Ordering::SeqCst);
-            Ok(current_attempt)
-        } else {
-            Err(anyhow!("Failed at attempt ${current_attempt}").into())
-        }
-    }
-
-    async fn terminally_failing_side_effect(
-        &self,
-        context: ObjectContext<'_>,
-        Json(failure): Json<FailureToPropagate>,
-    ) -> HandlerResult<()> {
-        context
-            .run::<_, _, ()>(|| async move { Err(TerminalError::new(failure.error_message))? })
-            .await?;
-
-        unreachable!("This should be unreachable")
-    }
-
-    async fn side_effect_succeeds_after_given_attempts(
-        &self,
-        context: ObjectContext<'_>,
-        minimum_attempts: i32,
-    ) -> HandlerResult<i32> {
-        let cloned_counter = Arc::clone(&self.eventual_success_side_effects);
-        let success_attempt = context
-            .run(|| async move {
-                let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
-
-                if current_attempt >= minimum_attempts {
-                    cloned_counter.store(0, Ordering::SeqCst);
-                    Ok(current_attempt)
-                } else {
-                    Err(anyhow!("Failed at attempt {current_attempt}"))?
-                }
-            })
-            .retry_policy(
-                RunRetryPolicy::new()
-                    .initial_delay(Duration::from_millis(10))
-                    .exponentiation_factor(1.0),
-            )
-            .name("failing_side_effect")
-            .await?;
-
-        Ok(success_attempt)
-    }
-
-    async fn side_effect_fails_after_given_attempts(
-        &self,
-        context: ObjectContext<'_>,
-        retry_policy_max_retry_count: i32,
-    ) -> HandlerResult<i32> {
-        let cloned_counter = Arc::clone(&self.eventual_failure_side_effects);
-        if context
-            .run(|| async move {
-                let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
-                Err::<(), _>(anyhow!("Failed at attempt {current_attempt}").into())
-            })
-            .retry_policy(
-                RunRetryPolicy::new()
-                    .initial_delay(Duration::from_millis(10))
-                    .exponentiation_factor(1.0)
-                    .max_attempts(retry_policy_max_retry_count as u32),
-            )
-            .await
-            .is_err()
-        {
-            Ok(self.eventual_failure_side_effects.load(Ordering::SeqCst))
-        } else {
-            Err(TerminalError::new("Expecting the side effect to fail!"))?
-        }
-    }
+pub(crate) fn definition() -> ServiceDefinition {
+    Failing::from_handlers(FailingHandlers {
+        terminally_failing_call,
+        call_terminally_failing_call,
+        failing_call_with_eventual_success,
+        terminally_failing_side_effect,
+        side_effect_succeeds_after_given_attempts,
+        side_effect_fails_after_given_attempts,
+    })
 }

@@ -55,3 +55,118 @@ fn renamed_service_handler() {
     assert_eq!(discovery.name.to_string(), "myRenamedService");
     assert_eq!(discovery.handlers[0].name.to_string(), "myRenamedHandler");
 }
+
+// ============================ New function-first API ============================
+
+// Service handlers, covering all the input/output/error shapes.
+#[restate_sdk::handler]
+async fn fn_my_handler(ctx: Context<'_>, input: String) -> HandlerResult<String> {
+    let _ = ctx.state::<u32>(); // ambient DI compiles on all context types
+    Ok(input)
+}
+#[restate_sdk::handler]
+async fn fn_no_input(_ctx: Context<'_>) -> HandlerResult<String> {
+    Ok("x".to_owned())
+}
+#[restate_sdk::handler]
+async fn fn_no_output(_ctx: Context<'_>, _input: String) -> HandlerResult<()> {
+    Ok(())
+}
+#[restate_sdk::handler]
+async fn fn_no_input_no_output(_ctx: Context<'_>) -> HandlerResult<()> {
+    Ok(())
+}
+#[restate_sdk::handler]
+async fn fn_std_result(_ctx: Context<'_>) -> Result<(), std::io::Error> {
+    Ok(())
+}
+#[restate_sdk::handler]
+async fn fn_terminal(_ctx: Context<'_>) -> Result<(), TerminalError> {
+    Ok(())
+}
+#[restate_sdk::handler(name = "myRenamedFnHandler")]
+async fn fn_renamed(_ctx: Context<'_>) -> HandlerResult<()> {
+    Ok(())
+}
+
+// Object handlers: exclusive + shared (shared inferred from the context type).
+#[restate_sdk::handler]
+async fn obj_exclusive(_ctx: ObjectContext<'_>, input: String) -> HandlerResult<String> {
+    Ok(input)
+}
+#[restate_sdk::handler]
+async fn obj_shared(_ctx: SharedObjectContext<'_>, input: String) -> HandlerResult<String> {
+    Ok(input)
+}
+
+// Workflow handlers: run + shared.
+#[restate_sdk::handler]
+async fn wf_run(_ctx: WorkflowContext<'_>, input: String) -> HandlerResult<String> {
+    Ok(input)
+}
+#[restate_sdk::handler]
+async fn wf_shared(_ctx: SharedWorkflowContext<'_>, input: String) -> HandlerResult<String> {
+    Ok(input)
+}
+
+#[test]
+fn fn_handlers_meta_and_composition() {
+    use restate_sdk::service::Handler;
+
+    // meta() is generated correctly, including name override.
+    assert_eq!(fn_my_handler.meta().name.as_ref(), "fn_my_handler");
+    assert_eq!(fn_renamed.meta().name.as_ref(), "myRenamedFnHandler");
+
+    // The body remains directly callable for unit tests.
+    // (compile-only: we don't have a Context here)
+    let _call = fn_no_input_no_output::call;
+
+    // Composition into the three service kinds compiles; mixing kinds would not.
+    let _service = define_service("MyService")
+        .state(0u32)
+        .handler(fn_my_handler)
+        .handler(fn_no_input)
+        .handler(fn_no_output)
+        .handler(fn_no_input_no_output)
+        .handler(fn_std_result)
+        .handler(fn_terminal)
+        .handler(fn_renamed)
+        .build();
+
+    let _object = define_object("MyObject")
+        .handler(obj_exclusive)
+        .handler(obj_shared)
+        .build();
+
+    let _workflow = define_workflow("MyWorkflow")
+        .handler(wf_run)
+        .handler(wf_shared)
+        .build();
+}
+
+// interface! generates a client + a conformance-checked server builder.
+restate_sdk::interface! {
+    service GreeterIface {
+        greet(String) -> String;
+        ping() -> ();
+    }
+}
+
+#[test]
+fn interface_server_build() {
+    // Conformance is checked at compile time: fn_my_handler must be
+    // TypedHandler<ServiceKind, Input = String, Output = String>, and
+    // fn_no_input_no_output must be Input = (), Output = ().
+    let _def = GreeterIface::from_handlers(GreeterIfaceHandlers {
+        greet: fn_my_handler,
+        ping: fn_no_input_no_output,
+    });
+}
+
+// The generated client exposes typed methods (compile-only; a real client needs a live context).
+#[allow(dead_code)]
+fn interface_client_compiles<'ctx>(
+    client: &GreeterIfaceClient<'ctx>,
+) -> Request<'ctx, String, String> {
+    client.greet("hi".to_string())
+}

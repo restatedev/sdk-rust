@@ -20,69 +20,50 @@ async fn main() {
     let port = env::var("PORT").ok().unwrap_or("9080".to_string());
     let services = env::var("SERVICES").ok().unwrap_or("*".to_string());
 
-    let mut builder = Endpoint::builder();
+    // Ambient state used by the Failing service (process-wide counters).
+    let mut builder = Endpoint::builder().state(failing::FailingState::default());
 
     if services == "*" || services.contains("Counter") {
-        builder = builder.bind(counter::Counter::serve(counter::CounterImpl))
+        builder = builder.bind(counter::definition())
     }
     if services == "*" || services.contains("Proxy") {
-        builder = builder.bind(proxy::Proxy::serve(proxy::ProxyImpl))
+        builder = builder.bind(proxy::definition())
     }
     if services == "*" || services.contains("MapObject") {
-        builder = builder.bind(map_object::MapObject::serve(map_object::MapObjectImpl))
+        builder = builder.bind(map_object::definition())
     }
     if services == "*" || services.contains("ListObject") {
-        builder = builder.bind(list_object::ListObject::serve(list_object::ListObjectImpl))
+        builder = builder.bind(list_object::definition())
     }
     if services == "*" || services.contains("AwakeableHolder") {
-        builder = builder.bind(awakeable_holder::AwakeableHolder::serve(
-            awakeable_holder::AwakeableHolderImpl,
-        ))
+        builder = builder.bind(awakeable_holder::definition())
     }
     if services == "*" || services.contains("BlockAndWaitWorkflow") {
-        builder = builder.bind(block_and_wait_workflow::BlockAndWaitWorkflow::serve(
-            block_and_wait_workflow::BlockAndWaitWorkflowImpl,
-        ))
+        builder = builder.bind(block_and_wait_workflow::definition())
     }
     if services == "*" || services.contains("CancelTestRunner") {
-        builder = builder.bind(cancel_test::CancelTestRunner::serve(
-            cancel_test::CancelTestRunnerImpl,
-        ))
+        builder = builder.bind(cancel_test::runner_definition())
     }
     if services == "*" || services.contains("CancelTestBlockingService") {
-        builder = builder.bind(cancel_test::CancelTestBlockingService::serve(
-            cancel_test::CancelTestBlockingServiceImpl,
-        ))
+        builder = builder.bind(cancel_test::blocking_definition())
     }
     if services == "*" || services.contains("Failing") {
-        builder = builder.bind(failing::Failing::serve(failing::FailingImpl::default()))
+        builder = builder.bind(failing::definition())
     }
     if services == "*" || services.contains("KillTestRunner") {
-        builder = builder.bind(kill_test::KillTestRunner::serve(
-            kill_test::KillTestRunnerImpl,
-        ))
+        builder = builder.bind(kill_test::runner_definition())
     }
     if services == "*" || services.contains("KillTestSingleton") {
-        builder = builder.bind(kill_test::KillTestSingleton::serve(
-            kill_test::KillTestSingletonImpl,
-        ))
+        builder = builder.bind(kill_test::singleton_definition())
     }
     if services == "*" || services.contains("NonDeterministic") {
-        builder = builder.bind(non_deterministic::NonDeterministic::serve(
-            non_deterministic::NonDeterministicImpl::default(),
-        ))
+        builder = builder.bind(non_deterministic::definition())
     }
     if services == "*" || services.contains("TestUtilsService") {
-        builder = builder.bind(test_utils_service::TestUtilsService::serve(
-            test_utils_service::TestUtilsServiceImpl,
-        ))
+        builder = builder.bind(test_utils_service::definition())
     }
     if services == "*" || services.contains("VirtualObjectCommandInterpreter") {
-        builder = builder.bind(
-            virtual_object_command_interpreter::VirtualObjectCommandInterpreter::serve(
-                virtual_object_command_interpreter::VirtualObjectCommandInterpreterImpl,
-            ),
-        )
+        builder = builder.bind(virtual_object_command_interpreter::definition())
     }
 
     if let Ok(key) = env::var("E2E_REQUEST_SIGNING_ENV") {

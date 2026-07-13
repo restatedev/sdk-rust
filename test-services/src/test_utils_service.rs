@@ -1,105 +1,92 @@
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use restate_sdk::prelude::*;
+use restate_sdk::service::ServiceDefinition;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
-#[restate_sdk::service]
-#[name = "TestUtilsService"]
-pub(crate) trait TestUtilsService {
-    #[name = "echo"]
-    async fn echo(input: String) -> HandlerResult<String>;
-    #[name = "uppercaseEcho"]
-    async fn uppercase_echo(input: String) -> HandlerResult<String>;
-    #[name = "rawEcho"]
-    async fn raw_echo(input: bytes::Bytes) -> Result<Vec<u8>, Infallible>;
-    #[name = "echoHeaders"]
-    async fn echo_headers() -> HandlerResult<Json<HashMap<String, String>>>;
-    #[name = "sleepConcurrently"]
-    async fn sleep_concurrently(millis_durations: Json<Vec<u64>>) -> HandlerResult<()>;
-    #[name = "countExecutedSideEffects"]
-    async fn count_executed_side_effects(increments: u32) -> HandlerResult<u32>;
-    #[name = "cancelInvocation"]
-    async fn cancel_invocation(invocation_id: String) -> Result<(), TerminalError>;
+#[restate_sdk::handler]
+pub(crate) async fn echo(_ctx: Context<'_>, input: String) -> HandlerResult<String> {
+    Ok(input)
 }
 
-pub(crate) struct TestUtilsServiceImpl;
+#[restate_sdk::handler(name = "uppercaseEcho")]
+pub(crate) async fn uppercase_echo(_ctx: Context<'_>, input: String) -> HandlerResult<String> {
+    Ok(input.to_ascii_uppercase())
+}
 
-impl TestUtilsService for TestUtilsServiceImpl {
-    async fn echo(&self, _: Context<'_>, input: String) -> HandlerResult<String> {
-        Ok(input)
+#[restate_sdk::handler(name = "rawEcho")]
+pub(crate) async fn raw_echo(_ctx: Context<'_>, input: bytes::Bytes) -> Result<Vec<u8>, Infallible> {
+    Ok(input.to_vec())
+}
+
+#[restate_sdk::handler(name = "echoHeaders")]
+pub(crate) async fn echo_headers(ctx: Context<'_>) -> HandlerResult<Json<HashMap<String, String>>> {
+    let mut headers = HashMap::new();
+    for k in ctx.headers().keys() {
+        headers.insert(k.as_str().to_owned(), ctx.headers().get(k).unwrap().clone());
     }
 
-    async fn uppercase_echo(&self, _: Context<'_>, input: String) -> HandlerResult<String> {
-        Ok(input.to_ascii_uppercase())
+    Ok(headers.into())
+}
+
+#[restate_sdk::handler(name = "sleepConcurrently")]
+pub(crate) async fn sleep_concurrently(
+    ctx: Context<'_>,
+    millis_durations: Json<Vec<u64>>,
+) -> HandlerResult<()> {
+    let mut futures: Vec<BoxFuture<'_, Result<(), TerminalError>>> = vec![];
+
+    for duration in millis_durations.into_inner() {
+        futures.push(ctx.sleep(Duration::from_millis(duration)).boxed());
     }
 
-    async fn raw_echo(&self, _: Context<'_>, input: bytes::Bytes) -> Result<Vec<u8>, Infallible> {
-        Ok(input.to_vec())
+    for fut in futures {
+        fut.await?;
     }
 
-    async fn echo_headers(
-        &self,
-        context: Context<'_>,
-    ) -> HandlerResult<Json<HashMap<String, String>>> {
-        let mut headers = HashMap::new();
-        for k in context.headers().keys() {
-            headers.insert(
-                k.as_str().to_owned(),
-                context.headers().get(k).unwrap().clone(),
-            );
-        }
+    Ok(())
+}
 
-        Ok(headers.into())
+#[restate_sdk::handler(name = "countExecutedSideEffects")]
+pub(crate) async fn count_executed_side_effects(
+    ctx: Context<'_>,
+    increments: u32,
+) -> HandlerResult<u32> {
+    let counter: Arc<AtomicU8> = Default::default();
+
+    for _ in 0..increments {
+        let counter_clone = Arc::clone(&counter);
+        ctx.run(|| async {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+        .await?;
     }
 
-    async fn sleep_concurrently(
-        &self,
-        context: Context<'_>,
-        millis_durations: Json<Vec<u64>>,
-    ) -> HandlerResult<()> {
-        let mut futures: Vec<BoxFuture<'_, Result<(), TerminalError>>> = vec![];
+    Ok(counter.load(Ordering::SeqCst) as u32)
+}
 
-        for duration in millis_durations.into_inner() {
-            futures.push(context.sleep(Duration::from_millis(duration)).boxed());
-        }
+#[restate_sdk::handler(name = "cancelInvocation")]
+pub(crate) async fn cancel_invocation(
+    ctx: Context<'_>,
+    invocation_id: String,
+) -> Result<(), TerminalError> {
+    ctx.invocation_handle(invocation_id).cancel().await?;
+    Ok(())
+}
 
-        for fut in futures {
-            fut.await?;
-        }
-
-        Ok(())
-    }
-
-    async fn count_executed_side_effects(
-        &self,
-        context: Context<'_>,
-        increments: u32,
-    ) -> HandlerResult<u32> {
-        let counter: Arc<AtomicU8> = Default::default();
-
-        for _ in 0..increments {
-            let counter_clone = Arc::clone(&counter);
-            context
-                .run(|| async {
-                    counter_clone.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                })
-                .await?;
-        }
-
-        Ok(counter.load(Ordering::SeqCst) as u32)
-    }
-
-    async fn cancel_invocation(
-        &self,
-        ctx: Context<'_>,
-        invocation_id: String,
-    ) -> Result<(), TerminalError> {
-        ctx.invocation_handle(invocation_id).cancel().await?;
-        Ok(())
-    }
+pub(crate) fn definition() -> ServiceDefinition {
+    define_service("TestUtilsService")
+        .handler(echo)
+        .handler(uppercase_echo)
+        .handler(raw_echo)
+        .handler(echo_headers)
+        .handler(sleep_concurrently)
+        .handler(count_executed_side_effects)
+        .handler(cancel_invocation)
+        .build()
 }

@@ -1,23 +1,17 @@
 use restate_sdk::prelude::*;
 use std::convert::Infallible;
 
-#[restate_sdk::service]
-trait Greeter {
-    async fn greet(name: String) -> Result<String, Infallible>;
-}
-
-struct GreeterImpl;
-
-impl Greeter for GreeterImpl {
-    async fn greet(&self, _: Context<'_>, name: String) -> Result<String, Infallible> {
-        Ok(format!("Greetings {name}"))
-    }
+#[restate_sdk::handler]
+async fn greet(_ctx: Context<'_>, name: String) -> Result<String, Infallible> {
+    Ok(format!("Greetings {name}"))
 }
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(GreeterImpl.serve()).build())
+    // To enable logging/tracing
+    // tracing_subscriber::fmt::init();
+    let greeter = define_service("Greeter").handler(greet).build();
+    HttpServer::new(Endpoint::builder().bind(greeter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

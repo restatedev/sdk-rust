@@ -1,22 +1,13 @@
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
-pub trait MyService {
-    async fn my_handler(greeting: String) -> Result<String, HandlerError>;
-}
-
-pub struct MyServiceImpl;
-
-impl MyService for MyServiceImpl {
-    async fn my_handler(&self, _ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
-        Ok(format!("{greeting}!"))
+// Generates `MyServiceClient` (to call this service) and the `MyService::server` builder.
+restate_sdk::interface! {
+    service MyService {
+        my_handler(String) -> String;
     }
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(MyServiceImpl.serve()).build())
-        .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-        .await;
+#[restate_sdk::handler]
+pub async fn my_handler(_ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
+    Ok(format!("{greeting}!"))
 }

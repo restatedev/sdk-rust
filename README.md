@@ -31,31 +31,38 @@ Then you're ready to develop your Restate service using Rust:
 ```rust
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
-trait Greeter {
-    async fn greet(name: String) -> HandlerResult<String>;
-}
-
-struct GreeterImpl;
-
-impl Greeter for GreeterImpl {
-    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
-        Ok(format!("Greetings {name}"))
-    }
+// Handlers are plain async functions. The context type (here `Context`) determines
+// whether this is a service, virtual object or workflow handler.
+#[restate_sdk::handler]
+async fn greet(_ctx: Context<'_>, name: String) -> HandlerResult<String> {
+    Ok(format!("Greetings {name}"))
 }
 
 #[tokio::main]
 async fn main() {
     // To enable logging/tracing
     // tracing_subscriber::fmt::init();
-    HttpServer::new(
-        Endpoint::builder()
-            .with_service(GreeterImpl.serve())
-            .build(),
-    )
-    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-    .await;
+
+    // Compose handlers into a service and bind it to the endpoint.
+    let greeter = define_service("Greeter").handler(greet).build();
+    HttpServer::new(Endpoint::builder().bind(greeter).build())
+        .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+        .await;
 }
+```
+
+To call a service from another service, generate a typed client with `interface!` (it can live in
+a crate shared with callers, without importing the implementation):
+
+```rust
+restate_sdk::interface! {
+    service Greeter {
+        greet(String) -> String;
+    }
+}
+
+// Server side: `Greeter::from_handlers(..)` type-checks each handler against the interface.
+// Caller side: `ctx.service_client::<GreeterClient>().greet(name).call().await?`.
 ```
 
 ## Running on Lambda

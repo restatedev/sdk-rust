@@ -1,96 +1,91 @@
 use crate::counter::CounterClient;
 use restate_sdk::prelude::*;
+use restate_sdk::service::ServiceDefinition;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-#[restate_sdk::object]
-#[name = "NonDeterministic"]
-pub(crate) trait NonDeterministic {
-    #[name = "eitherSleepOrCall"]
-    async fn either_sleep_or_call() -> HandlerResult<()>;
-    #[name = "callDifferentMethod"]
-    async fn call_different_method() -> HandlerResult<()>;
-    #[name = "backgroundInvokeWithDifferentTargets"]
-    async fn background_invoke_with_different_targets() -> HandlerResult<()>;
-    #[name = "setDifferentKey"]
-    async fn set_different_key() -> HandlerResult<()>;
-}
-
+/// Per-service invocation counter, injected as ambient state.
 #[derive(Clone, Default)]
-pub(crate) struct NonDeterministicImpl(Arc<Mutex<HashMap<String, i32>>>);
+pub(crate) struct NonDetState(Arc<Mutex<HashMap<String, i32>>>);
 
 const STATE_A: &str = "a";
 const STATE_B: &str = "b";
 
-impl NonDeterministic for NonDeterministicImpl {
-    async fn either_sleep_or_call(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
-        if self.do_left_action(&context).await {
-            context.sleep(Duration::from_millis(100)).await?;
-        } else {
-            context
-                .object_client::<CounterClient>("abc")
-                .get()
-                .call()
-                .await?;
-        }
-        Self::sleep_then_increment_counter(&context).await
-    }
-
-    async fn call_different_method(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
-        if self.do_left_action(&context).await {
-            context
-                .object_client::<CounterClient>("abc")
-                .get()
-                .call()
-                .await?;
-        } else {
-            context
-                .object_client::<CounterClient>("abc")
-                .reset()
-                .call()
-                .await?;
-        }
-        Self::sleep_then_increment_counter(&context).await
-    }
-
-    async fn background_invoke_with_different_targets(
-        &self,
-        context: ObjectContext<'_>,
-    ) -> HandlerResult<()> {
-        if self.do_left_action(&context).await {
-            context.object_client::<CounterClient>("abc").get().send();
-        } else {
-            context.object_client::<CounterClient>("abc").reset().send();
-        }
-        Self::sleep_then_increment_counter(&context).await
-    }
-
-    async fn set_different_key(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
-        if self.do_left_action(&context).await {
-            context.set(STATE_A, "my-state".to_owned());
-        } else {
-            context.set(STATE_B, "my-state".to_owned());
-        }
-        Self::sleep_then_increment_counter(&context).await
-    }
+async fn do_left_action(state: &NonDetState, ctx: &ObjectContext<'_>) -> bool {
+    let mut counts = state.0.lock().await;
+    *(counts
+        .entry(ctx.key().to_owned())
+        .and_modify(|i| *i += 1)
+        .or_default())
+        % 2
+        == 1
 }
 
-impl NonDeterministicImpl {
-    async fn do_left_action(&self, ctx: &ObjectContext<'_>) -> bool {
-        let mut counts = self.0.lock().await;
-        *(counts
-            .entry(ctx.key().to_owned())
-            .and_modify(|i| *i += 1)
-            .or_default())
-            % 2
-            == 1
-    }
+async fn sleep_then_increment_counter(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
+    ctx.sleep(Duration::from_millis(100)).await?;
+    ctx.object_client::<CounterClient>(ctx.key()).add(1).send();
+    Ok(())
+}
 
-    async fn sleep_then_increment_counter(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
+#[restate_sdk::handler(name = "eitherSleepOrCall")]
+pub(crate) async fn either_sleep_or_call(ctx: ObjectContext<'_>) -> HandlerResult<()> {
+    if do_left_action(ctx.state::<NonDetState>(), &ctx).await {
         ctx.sleep(Duration::from_millis(100)).await?;
-        ctx.object_client::<CounterClient>(ctx.key()).add(1).send();
-        Ok(())
+    } else {
+        ctx.object_client::<CounterClient>("abc")
+            .get()
+            .call()
+            .await?;
     }
+    sleep_then_increment_counter(&ctx).await
+}
+
+#[restate_sdk::handler(name = "callDifferentMethod")]
+pub(crate) async fn call_different_method(ctx: ObjectContext<'_>) -> HandlerResult<()> {
+    if do_left_action(ctx.state::<NonDetState>(), &ctx).await {
+        ctx.object_client::<CounterClient>("abc")
+            .get()
+            .call()
+            .await?;
+    } else {
+        ctx.object_client::<CounterClient>("abc")
+            .reset()
+            .call()
+            .await?;
+    }
+    sleep_then_increment_counter(&ctx).await
+}
+
+#[restate_sdk::handler(name = "backgroundInvokeWithDifferentTargets")]
+pub(crate) async fn background_invoke_with_different_targets(
+    ctx: ObjectContext<'_>,
+) -> HandlerResult<()> {
+    if do_left_action(ctx.state::<NonDetState>(), &ctx).await {
+        ctx.object_client::<CounterClient>("abc").get().send();
+    } else {
+        ctx.object_client::<CounterClient>("abc").reset().send();
+    }
+    sleep_then_increment_counter(&ctx).await
+}
+
+#[restate_sdk::handler(name = "setDifferentKey")]
+pub(crate) async fn set_different_key(ctx: ObjectContext<'_>) -> HandlerResult<()> {
+    if do_left_action(ctx.state::<NonDetState>(), &ctx).await {
+        ctx.set(STATE_A, "my-state".to_owned());
+    } else {
+        ctx.set(STATE_B, "my-state".to_owned());
+    }
+    sleep_then_increment_counter(&ctx).await
+}
+
+pub(crate) fn definition() -> ServiceDefinition {
+    define_object("NonDeterministic")
+        .state(NonDetState::default())
+        .handler(either_sleep_or_call)
+        .handler(call_different_method)
+        .handler(background_invoke_with_different_targets)
+        .handler(set_different_key)
+        .build()
 }

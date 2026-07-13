@@ -1,6 +1,6 @@
-use crate::endpoint::{BoxedService, Endpoint, EndpointInner, Error};
-use crate::service::{Discoverable, Service};
-use futures::future::BoxFuture;
+use crate::endpoint::{BoundService, BoxedService, Endpoint, EndpointInner};
+use crate::service::{IntoServiceDefinition, ServiceDefinition};
+use crate::state::StateMap;
 use restate_sdk_shared_core::{IdentityVerifier, KeyError};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -293,12 +293,20 @@ impl HandlerOptions {
     }
 }
 
+/// A service pending binding: its dispatcher plus its service-scoped DI state. The endpoint-level
+/// state is merged in at [`Builder::build`] time (service state wins on conflict).
+struct PendingService {
+    dispatcher: BoxedService,
+    state: StateMap,
+}
+
 /// Builder for [`Endpoint`]
 #[derive(Default)]
 pub struct Builder {
-    svcs: HashMap<String, BoxedService>,
+    svcs: HashMap<String, PendingService>,
     discovery_services: Vec<crate::discovery::Service>,
     identity_verifier: IdentityVerifier,
+    endpoint_state: StateMap,
 }
 
 impl Builder {
@@ -307,43 +315,40 @@ impl Builder {
         Self::default()
     }
 
-    /// Add a [`Service`] to this endpoint.
+    /// Add a service to this endpoint.
     ///
-    /// When using the [`service`](macro@crate::service), [`object`](macro@crate::object) or [`workflow`](macro@crate::workflow) macros,
-    /// you need to pass the result of the `serve` method.
-    pub fn bind<
-        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
-            + Discoverable
-            + Send
-            + Sync
-            + 'static,
-    >(
-        self,
-        s: S,
-    ) -> Self {
-        self.bind_with_options(s, ServiceOptions::default())
+    /// Pass the result of [`service()`](crate::service())/[`object()`](crate::object())/[`workflow()`](crate::workflow())`.build()`.
+    /// The deprecated trait macros' `.serve()` values are also accepted.
+    pub fn bind(self, definition: impl IntoServiceDefinition) -> Self {
+        self.bind_with_options(definition, ServiceOptions::default())
     }
 
-    /// Like [`bind`], but providing options
-    pub fn bind_with_options<
-        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
-            + Discoverable
-            + Send
-            + Sync
-            + 'static,
-    >(
+    /// Like [`bind`](Self::bind), but providing options.
+    pub fn bind_with_options(
         mut self,
-        s: S,
+        definition: impl IntoServiceDefinition,
         service_options: ServiceOptions,
     ) -> Self {
-        // Discover and apply options
-        let mut service_metadata = S::discover();
-        service_metadata.apply_options(service_options);
+        let ServiceDefinition {
+            mut discovery,
+            dispatcher,
+            state,
+        } = definition.into_service_definition();
+        discovery.apply_options(service_options);
 
-        let boxed_service = BoxedService::new(s);
-        self.svcs
-            .insert(service_metadata.name.to_string(), boxed_service);
-        self.discovery_services.push(service_metadata);
+        let name = discovery.name.to_string();
+        self.svcs.insert(name, PendingService { dispatcher, state });
+        self.discovery_services.push(discovery);
+        self
+    }
+
+    /// Register an endpoint-wide dependency (state), retrievable inside any handler via
+    /// [`ContextState::state`](crate::context::ContextState::state).
+    ///
+    /// Service-level state (set via the service builder's `.state(..)`) overrides endpoint-level
+    /// state of the same type.
+    pub fn state<T: std::any::Any + Send + Sync>(mut self, value: T) -> Self {
+        self.endpoint_state.insert(value);
         self
     }
 
@@ -355,8 +360,26 @@ impl Builder {
 
     /// Build the [`Endpoint`].
     pub fn build(self) -> Endpoint {
+        let endpoint_state = self.endpoint_state;
+        let svcs = self
+            .svcs
+            .into_iter()
+            .map(|(name, pending)| {
+                // Merge endpoint-level state with the service-level state (service wins).
+                let mut merged = endpoint_state.clone();
+                merged.overlay(&pending.state);
+                (
+                    name,
+                    BoundService {
+                        dispatcher: pending.dispatcher,
+                        state: Arc::new(merged),
+                    },
+                )
+            })
+            .collect();
+
         Endpoint(Arc::new(EndpointInner {
-            svcs: self.svcs,
+            svcs,
             discovery_services: self.discovery_services,
             identity_verifier: self.identity_verifier,
         }))

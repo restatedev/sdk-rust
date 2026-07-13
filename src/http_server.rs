@@ -9,19 +9,26 @@
 //! ```rust,no_run
 //! # #[path = "../examples/services/mod.rs"]
 //! # mod services;
-//! # use services::my_service::{MyService, MyServiceImpl};
-//! # use services::my_virtual_object::{MyVirtualObject, MyVirtualObjectImpl};
-//! # use services::my_workflow::{MyWorkflow, MyWorkflowImpl};
-//! use restate_sdk::endpoint::Endpoint;
-//! use restate_sdk::http_server::HttpServer;
+//! # use services::{my_service, my_virtual_object, my_workflow};
+//! use restate_sdk::prelude::*;
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(MyServiceImpl.serve())
-//!             .bind(MyVirtualObjectImpl.serve())
-//!             .bind(MyWorkflowImpl.serve())
+//!             .bind(define_service("MyService").handler(my_service::my_handler).build())
+//!             .bind(
+//!                 define_object("MyVirtualObject")
+//!                     .handler(my_virtual_object::my_handler)
+//!                     .handler(my_virtual_object::my_concurrent_handler)
+//!                     .build(),
+//!             )
+//!             .bind(
+//!                 define_workflow("MyWorkflow")
+//!                     .handler(my_workflow::run)
+//!                     .handler(my_workflow::interact_with_workflow)
+//!                     .build(),
+//!             )
 //!             .build(),
 //!     )
 //!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
@@ -39,15 +46,14 @@
 //! ```rust,no_run
 //! # #[path = "../examples/services/mod.rs"]
 //! # mod services;
-//! # use services::my_service::{MyService, MyServiceImpl};
-//! # use restate_sdk::endpoint::Endpoint;
-//! # use restate_sdk::http_server::HttpServer;
+//! # use services::my_service;
+//! # use restate_sdk::prelude::*;
 //! #
 //! # #[tokio::main]
 //! # async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(MyServiceImpl.serve())
+//!             .bind(define_service("MyService").handler(my_service::my_handler).build())
 //!             .identity_key("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
 //!             .unwrap()
 //!             .build(),

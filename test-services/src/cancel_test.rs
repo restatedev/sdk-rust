@@ -1,6 +1,7 @@
 use crate::awakeable_holder;
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
+use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -13,87 +14,86 @@ pub(crate) enum BlockingOperation {
     Awakeable,
 }
 
-#[restate_sdk::object]
-#[name = "CancelTestRunner"]
-pub(crate) trait CancelTestRunner {
-    #[name = "startTest"]
-    async fn start_test(op: Json<BlockingOperation>) -> HandlerResult<()>;
-    #[name = "verifyTest"]
-    async fn verify_test() -> HandlerResult<bool>;
-}
-
-pub(crate) struct CancelTestRunnerImpl;
-
 const CANCELED: &str = "canceled";
 
-impl CancelTestRunner for CancelTestRunnerImpl {
-    async fn start_test(
-        &self,
-        context: ObjectContext<'_>,
-        op: Json<BlockingOperation>,
-    ) -> HandlerResult<()> {
-        let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
+// ---- CancelTestRunner ----
 
-        match this.block(op).call().await {
-            Ok(_) => Err(anyhow!("Block succeeded, this is unexpected").into()),
-            Err(e) if e.code() == 409 => {
-                context.set(CANCELED, true);
-                Ok(())
-            }
-            Err(e) => Err(e.into()),
+#[restate_sdk::handler(name = "startTest")]
+pub(crate) async fn start_test(
+    context: ObjectContext<'_>,
+    op: Json<BlockingOperation>,
+) -> HandlerResult<()> {
+    let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
+
+    match this.block(op).call().await {
+        Ok(_) => Err(anyhow!("Block succeeded, this is unexpected").into()),
+        Err(e) if e.code() == 409 => {
+            context.set(CANCELED, true);
+            Ok(())
         }
-    }
-
-    async fn verify_test(&self, context: ObjectContext<'_>) -> HandlerResult<bool> {
-        Ok(context.get::<bool>(CANCELED).await?.unwrap_or(false))
+        Err(e) => Err(e.into()),
     }
 }
 
-#[restate_sdk::object]
-#[name = "CancelTestBlockingService"]
-pub(crate) trait CancelTestBlockingService {
-    #[name = "block"]
-    async fn block(op: Json<BlockingOperation>) -> HandlerResult<()>;
-    #[name = "isUnlocked"]
-    async fn is_unlocked() -> HandlerResult<()>;
+#[restate_sdk::handler(name = "verifyTest")]
+pub(crate) async fn verify_test(context: ObjectContext<'_>) -> HandlerResult<bool> {
+    Ok(context.get::<bool>(CANCELED).await?.unwrap_or(false))
 }
 
-pub(crate) struct CancelTestBlockingServiceImpl;
+// ---- CancelTestBlockingService ----
 
-impl CancelTestBlockingService for CancelTestBlockingServiceImpl {
-    async fn block(
-        &self,
-        context: ObjectContext<'_>,
-        op: Json<BlockingOperation>,
-    ) -> HandlerResult<()> {
-        let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
-        let awakeable_holder_client =
-            context.object_client::<awakeable_holder::AwakeableHolderClient>(context.key());
+restate_sdk::interface! {
+    object CancelTestBlockingService {
+        block(Json<BlockingOperation>) -> ();
+        #[name = "isUnlocked"]
+        is_unlocked() -> ();
+    }
+}
 
-        let (awk_id, awakeable) = context.awakeable::<String>();
-        awakeable_holder_client.hold(awk_id).call().await?;
-        awakeable.await?;
+#[restate_sdk::handler]
+pub(crate) async fn block(
+    context: ObjectContext<'_>,
+    op: Json<BlockingOperation>,
+) -> HandlerResult<()> {
+    let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
+    let awakeable_holder_client =
+        context.object_client::<awakeable_holder::AwakeableHolderClient>(context.key());
 
-        match &op.0 {
-            BlockingOperation::Call => {
-                this.block(op).call().await?;
-            }
-            BlockingOperation::Sleep => {
-                context
-                    .sleep(Duration::from_secs(60 * 60 * 24 * 1024))
-                    .await?;
-            }
-            BlockingOperation::Awakeable => {
-                let (_, uncompletable) = context.awakeable::<String>();
-                uncompletable.await?;
-            }
+    let (awk_id, awakeable) = context.awakeable::<String>();
+    awakeable_holder_client.hold(awk_id).call().await?;
+    awakeable.await?;
+
+    match &op.0 {
+        BlockingOperation::Call => {
+            this.block(op).call().await?;
         }
-
-        Ok(())
+        BlockingOperation::Sleep => {
+            context
+                .sleep(Duration::from_secs(60 * 60 * 24 * 1024))
+                .await?;
+        }
+        BlockingOperation::Awakeable => {
+            let (_, uncompletable) = context.awakeable::<String>();
+            uncompletable.await?;
+        }
     }
 
-    async fn is_unlocked(&self, _: ObjectContext<'_>) -> HandlerResult<()> {
-        // no-op
-        Ok(())
-    }
+    Ok(())
+}
+
+#[restate_sdk::handler]
+pub(crate) async fn is_unlocked(_context: ObjectContext<'_>) -> HandlerResult<()> {
+    // no-op
+    Ok(())
+}
+
+pub(crate) fn runner_definition() -> ServiceDefinition {
+    define_object("CancelTestRunner")
+        .handler(start_test)
+        .handler(verify_test)
+        .build()
+}
+
+pub(crate) fn blocking_definition() -> ServiceDefinition {
+    CancelTestBlockingService::from_handlers(CancelTestBlockingServiceHandlers { block, is_unlocked })
 }

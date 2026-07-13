@@ -11,6 +11,7 @@ use crate::endpoint::handler_state::HandlerStateNotifier;
 use crate::endpoint::{Error, ErrorInner, InputReceiver, OutputSender};
 use crate::errors::{HandlerErrorInner, HandlerResult, TerminalError};
 use crate::serde::{Deserialize, Serialize};
+use crate::state::StateMap;
 use futures::future::{BoxFuture, Either, Shared};
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
@@ -158,6 +159,7 @@ impl From<RequestTarget> for Target {
 pub struct ContextInternal {
     svc_name: String,
     handler_name: String,
+    state: Arc<StateMap>,
     inner: Arc<Mutex<ContextInternalInner>>,
 }
 
@@ -166,6 +168,7 @@ impl ContextInternal {
         vm: CoreVM,
         svc_name: String,
         handler_name: String,
+        state: Arc<StateMap>,
         read: InputReceiver,
         write: OutputSender,
         handler_state: HandlerStateNotifier,
@@ -173,6 +176,7 @@ impl ContextInternal {
         Self {
             svc_name,
             handler_name,
+            state,
             inner: Arc::new(Mutex::new(ContextInternalInner::new(
                 vm,
                 read,
@@ -188,6 +192,11 @@ impl ContextInternal {
 
     pub fn handler_name(&self) -> &str {
         &self.handler_name
+    }
+
+    /// Retrieve an ambient state value of type `T` (dependency injection), if registered.
+    pub(crate) fn get_state<T: std::any::Any + Send + Sync>(&self) -> Option<&T> {
+        self.state.get::<T>()
     }
 
     pub fn input<T: Deserialize>(&self) -> impl Future<Output = (T, InputMetadata)> {

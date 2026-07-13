@@ -15,6 +15,8 @@ extern crate proc_macro;
 
 mod ast;
 mod generator;
+mod handler;
+mod interface;
 
 use crate::ast::{Object, Service, Workflow};
 use crate::generator::ServiceGenerator;
@@ -46,5 +48,25 @@ pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
 
     ServiceGenerator::new_workflow(&svc)
         .into_token_stream()
+        .into()
+}
+
+/// Turn a free `async fn` into a Restate handler value.
+///
+/// See [`restate_sdk::handler`](../restate_sdk/attr.handler.html) for documentation.
+#[proc_macro_attribute]
+pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
+    handler::expand(attr.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Generate a typed client and a conformance-checked server builder for a service interface.
+///
+/// See [`restate_sdk::interface`](../restate_sdk/macro.interface.html) for documentation.
+#[proc_macro]
+pub fn interface(input: TokenStream) -> TokenStream {
+    interface::expand(input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

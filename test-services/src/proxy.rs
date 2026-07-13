@@ -2,6 +2,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use restate_sdk::context::RequestTarget;
 use restate_sdk::prelude::*;
+use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -42,85 +43,78 @@ pub(crate) struct ManyCallRequest {
     await_at_the_end: bool,
 }
 
-#[restate_sdk::service]
-#[name = "Proxy"]
-pub(crate) trait Proxy {
-    #[name = "call"]
-    async fn call(req: Json<ProxyRequest>) -> HandlerResult<Json<Vec<u8>>>;
-    #[name = "oneWayCall"]
-    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<String>;
-    #[name = "manyCalls"]
-    async fn many_calls(req: Json<Vec<ManyCallRequest>>) -> HandlerResult<()>;
+#[restate_sdk::handler]
+pub(crate) async fn call(
+    ctx: Context<'_>,
+    Json(req): Json<ProxyRequest>,
+) -> HandlerResult<Json<Vec<u8>>> {
+    let mut request = ctx.request::<Vec<u8>, Vec<u8>>(req.to_target(), req.message);
+    if let Some(idempotency_key) = req.idempotency_key {
+        request = request.idempotency_key(idempotency_key);
+    }
+    Ok(request.call().await?.into())
 }
 
-pub(crate) struct ProxyImpl;
-
-impl Proxy for ProxyImpl {
-    async fn call(
-        &self,
-        ctx: Context<'_>,
-        Json(req): Json<ProxyRequest>,
-    ) -> HandlerResult<Json<Vec<u8>>> {
-        let mut request = ctx.request::<Vec<u8>, Vec<u8>>(req.to_target(), req.message);
-        if let Some(idempotency_key) = req.idempotency_key {
-            request = request.idempotency_key(idempotency_key);
-        }
-        Ok(request.call().await?.into())
+#[restate_sdk::handler(name = "oneWayCall")]
+pub(crate) async fn one_way_call(
+    ctx: Context<'_>,
+    Json(req): Json<ProxyRequest>,
+) -> HandlerResult<String> {
+    let mut request = ctx.request::<_, ()>(req.to_target(), req.message);
+    if let Some(idempotency_key) = req.idempotency_key {
+        request = request.idempotency_key(idempotency_key);
     }
 
-    async fn one_way_call(
-        &self,
-        ctx: Context<'_>,
-        Json(req): Json<ProxyRequest>,
-    ) -> HandlerResult<String> {
-        let mut request = ctx.request::<_, ()>(req.to_target(), req.message);
-        if let Some(idempotency_key) = req.idempotency_key {
-            request = request.idempotency_key(idempotency_key);
+    let invocation_id = if let Some(delay_millis) = req.delay_millis {
+        request
+            .send_after(Duration::from_millis(delay_millis))
+            .invocation_id()
+            .await?
+    } else {
+        request.send().invocation_id().await?
+    };
+
+    Ok(invocation_id)
+}
+
+#[restate_sdk::handler(name = "manyCalls")]
+pub(crate) async fn many_calls(
+    ctx: Context<'_>,
+    Json(requests): Json<Vec<ManyCallRequest>>,
+) -> HandlerResult<()> {
+    let mut futures: Vec<BoxFuture<'_, Result<Vec<u8>, TerminalError>>> = vec![];
+
+    for req in requests {
+        let mut restate_req =
+            ctx.request::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
+        if let Some(idempotency_key) = req.proxy_request.idempotency_key {
+            restate_req = restate_req.idempotency_key(idempotency_key);
         }
-
-        let invocation_id = if let Some(delay_millis) = req.delay_millis {
-            request
-                .send_after(Duration::from_millis(delay_millis))
-                .invocation_id()
-                .await?
-        } else {
-            request.send().invocation_id().await?
-        };
-
-        Ok(invocation_id)
-    }
-
-    async fn many_calls(
-        &self,
-        ctx: Context<'_>,
-        Json(requests): Json<Vec<ManyCallRequest>>,
-    ) -> HandlerResult<()> {
-        let mut futures: Vec<BoxFuture<'_, Result<Vec<u8>, TerminalError>>> = vec![];
-
-        for req in requests {
-            let mut restate_req =
-                ctx.request::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
-            if let Some(idempotency_key) = req.proxy_request.idempotency_key {
-                restate_req = restate_req.idempotency_key(idempotency_key);
-            }
-            if req.one_way_call {
-                if let Some(delay_millis) = req.proxy_request.delay_millis {
-                    restate_req.send_after(Duration::from_millis(delay_millis));
-                } else {
-                    restate_req.send();
-                }
+        if req.one_way_call {
+            if let Some(delay_millis) = req.proxy_request.delay_millis {
+                restate_req.send_after(Duration::from_millis(delay_millis));
             } else {
-                let fut = restate_req.call();
-                if req.await_at_the_end {
-                    futures.push(fut.boxed())
-                }
+                restate_req.send();
+            }
+        } else {
+            let fut = restate_req.call();
+            if req.await_at_the_end {
+                futures.push(fut.boxed())
             }
         }
-
-        for fut in futures {
-            fut.await?;
-        }
-
-        Ok(())
     }
+
+    for fut in futures {
+        fut.await?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn definition() -> ServiceDefinition {
+    define_service("Proxy")
+        .handler(call)
+        .handler(one_way_call)
+        .handler(many_calls)
+        .build()
 }

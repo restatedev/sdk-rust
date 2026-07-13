@@ -1,38 +1,29 @@
 use rand::Rng;
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
-trait FailureExample {
-    #[name = "doRun"]
-    async fn do_run() -> Result<(), TerminalError>;
-}
-
-struct FailureExampleImpl;
-
 #[derive(Debug, thiserror::Error)]
 #[error("I'm very bad, retry me")]
 struct MyError;
 
-impl FailureExample for FailureExampleImpl {
-    async fn do_run(&self, context: Context<'_>) -> Result<(), TerminalError> {
-        context
-            .run::<_, _, ()>(|| async move {
-                if rand::rng().next_u32().is_multiple_of(4) {
-                    Err(TerminalError::new("Failed!!!"))?
-                }
+#[restate_sdk::handler(name = "doRun")]
+async fn do_run(ctx: Context<'_>) -> Result<(), TerminalError> {
+    ctx.run::<_, _, ()>(|| async move {
+        if rand::rng().next_u32().is_multiple_of(4) {
+            Err(TerminalError::new("Failed!!!"))?
+        }
 
-                Err(MyError)?
-            })
-            .await?;
+        Err(MyError)?
+    })
+    .await?;
 
-        Ok(())
-    }
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(FailureExampleImpl.serve()).build())
+    let failure_example = define_service("FailureExample").handler(do_run).build();
+    HttpServer::new(Endpoint::builder().bind(failure_example).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

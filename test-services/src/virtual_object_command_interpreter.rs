@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use futures::TryFutureExt;
 use restate_sdk::prelude::*;
+use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -66,198 +67,179 @@ pub(crate) struct RejectAwakeable {
     reason: String,
 }
 
-#[restate_sdk::object]
-#[name = "VirtualObjectCommandInterpreter"]
-pub(crate) trait VirtualObjectCommandInterpreter {
-    #[name = "interpretCommands"]
-    async fn interpret_commands(req: Json<InterpretRequest>) -> HandlerResult<String>;
+#[restate_sdk::handler(name = "interpretCommands")]
+pub(crate) async fn interpret_commands(
+    context: ObjectContext<'_>,
+    Json(req): Json<InterpretRequest>,
+) -> HandlerResult<String> {
+    let mut last_result: String = Default::default();
 
-    #[name = "resolveAwakeable"]
-    #[shared]
-    async fn resolve_awakeable(req: Json<ResolveAwakeable>) -> HandlerResult<()>;
+    for cmd in req.commands {
+        match cmd {
+            Command::AwaitAny { .. } => {
+                Err(anyhow!("AwaitAny is currently unsupported in the Rust SDK"))?
+            }
+            Command::AwaitAnySuccessful { .. } => Err(anyhow!(
+                "AwaitAnySuccessful is currently unsupported in the Rust SDK"
+            ))?,
+            Command::AwaitAwakeableOrTimeout {
+                awakeable_key,
+                timeout_millis,
+            } => {
+                let (awakeable_id, awk_fut) = context.awakeable::<String>();
+                context.set::<String>(&format!("awk-{awakeable_key}"), awakeable_id);
 
-    #[name = "rejectAwakeable"]
-    #[shared]
-    async fn reject_awakeable(req: Json<RejectAwakeable>) -> HandlerResult<()>;
-
-    #[name = "hasAwakeable"]
-    #[shared]
-    async fn has_awakeable(awakeable_key: String) -> HandlerResult<bool>;
-
-    #[name = "getResults"]
-    #[shared]
-    async fn get_results() -> HandlerResult<Json<Vec<String>>>;
-}
-
-pub(crate) struct VirtualObjectCommandInterpreterImpl;
-
-impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
-    async fn interpret_commands(
-        &self,
-        context: ObjectContext<'_>,
-        Json(req): Json<InterpretRequest>,
-    ) -> HandlerResult<String> {
-        let mut last_result: String = Default::default();
-
-        for cmd in req.commands {
-            match cmd {
-                Command::AwaitAny { .. } => {
-                    Err(anyhow!("AwaitAny is currently unsupported in the Rust SDK"))?
-                }
-                Command::AwaitAnySuccessful { .. } => Err(anyhow!(
-                    "AwaitAnySuccessful is currently unsupported in the Rust SDK"
-                ))?,
-                Command::AwaitAwakeableOrTimeout {
-                    awakeable_key,
-                    timeout_millis,
-                } => {
-                    let (awakeable_id, awk_fut) = context.awakeable::<String>();
-                    context.set::<String>(&format!("awk-{awakeable_key}"), awakeable_id);
-
-                    last_result = restate_sdk::select! {
-                        res = awk_fut => {
-                            res
-                        },
-                        _ = context.sleep(Duration::from_millis(timeout_millis)) => {
-                            Err(TerminalError::new("await-timeout"))
-                        }
-                    }?;
-                }
-                Command::AwaitOne { command } => {
-                    last_result = match command {
-                        AwaitableCommand::CreateAwakeable { awakeable_key } => {
-                            let (awakeable_id, fut) = context.awakeable::<String>();
-                            context.set::<String>(&format!("awk-{awakeable_key}"), awakeable_id);
-                            fut.await?
-                        }
-                        AwaitableCommand::Sleep { timeout_millis } => {
-                            context
-                                .sleep(Duration::from_millis(timeout_millis))
-                                .map_ok(|_| "sleep".to_string())
-                                .await?
-                        }
-                        AwaitableCommand::RunThrowTerminalException { reason } => {
-                            context
-                                .run::<_, _, String>(
-                                    || async move { Err(TerminalError::new(reason))? },
-                                )
-                                .await?
-                        }
+                last_result = restate_sdk::select! {
+                    res = awk_fut => {
+                        res
+                    },
+                    _ = context.sleep(Duration::from_millis(timeout_millis)) => {
+                        Err(TerminalError::new("await-timeout"))
+                    }
+                }?;
+            }
+            Command::AwaitOne { command } => {
+                last_result = match command {
+                    AwaitableCommand::CreateAwakeable { awakeable_key } => {
+                        let (awakeable_id, fut) = context.awakeable::<String>();
+                        context.set::<String>(&format!("awk-{awakeable_key}"), awakeable_id);
+                        fut.await?
+                    }
+                    AwaitableCommand::Sleep { timeout_millis } => {
+                        context
+                            .sleep(Duration::from_millis(timeout_millis))
+                            .map_ok(|_| "sleep".to_string())
+                            .await?
+                    }
+                    AwaitableCommand::RunThrowTerminalException { reason } => {
+                        context
+                            .run::<_, _, String>(|| async move { Err(TerminalError::new(reason))? })
+                            .await?
                     }
                 }
-                Command::GetEnvVariable { env_name } => {
-                    last_result = std::env::var(env_name).ok().unwrap_or_default();
-                }
-                Command::ResolveAwakeable {
-                    awakeable_key,
-                    value,
-                } => {
-                    let Some(awakeable_id) = context
-                        .get::<String>(&format!("awk-{awakeable_key}"))
-                        .await?
-                    else {
-                        Err(TerminalError::new(
-                            "Awakeable is not registered yet".to_string(),
-                        ))?
-                    };
-
-                    context.resolve_awakeable(&awakeable_id, value);
-                    last_result = Default::default();
-                }
-                Command::RejectAwakeable {
-                    awakeable_key,
-                    reason,
-                } => {
-                    let Some(awakeable_id) = context
-                        .get::<String>(&format!("awk-{awakeable_key}"))
-                        .await?
-                    else {
-                        Err(TerminalError::new(
-                            "Awakeable is not registered yet".to_string(),
-                        ))?
-                    };
-
-                    context.reject_awakeable(&awakeable_id, TerminalError::new(reason));
-                    last_result = Default::default();
-                }
             }
+            Command::GetEnvVariable { env_name } => {
+                last_result = std::env::var(env_name).ok().unwrap_or_default();
+            }
+            Command::ResolveAwakeable {
+                awakeable_key,
+                value,
+            } => {
+                let Some(awakeable_id) = context
+                    .get::<String>(&format!("awk-{awakeable_key}"))
+                    .await?
+                else {
+                    Err(TerminalError::new(
+                        "Awakeable is not registered yet".to_string(),
+                    ))?
+                };
 
-            let mut old_results = context
-                .get::<Json<Vec<String>>>("results")
-                .await?
-                .unwrap_or_default()
-                .into_inner();
-            old_results.push(last_result.clone());
-            context.set("results", Json(old_results));
+                context.resolve_awakeable(&awakeable_id, value);
+                last_result = Default::default();
+            }
+            Command::RejectAwakeable {
+                awakeable_key,
+                reason,
+            } => {
+                let Some(awakeable_id) = context
+                    .get::<String>(&format!("awk-{awakeable_key}"))
+                    .await?
+                else {
+                    Err(TerminalError::new(
+                        "Awakeable is not registered yet".to_string(),
+                    ))?
+                };
+
+                context.reject_awakeable(&awakeable_id, TerminalError::new(reason));
+                last_result = Default::default();
+            }
         }
 
-        Ok(last_result)
-    }
-
-    async fn resolve_awakeable(
-        &self,
-        context: SharedObjectContext<'_>,
-        req: Json<ResolveAwakeable>,
-    ) -> Result<(), HandlerError> {
-        let ResolveAwakeable {
-            awakeable_key,
-            value,
-        } = req.into_inner();
-        let Some(awakeable_id) = context
-            .get::<String>(&format!("awk-{awakeable_key}"))
-            .await?
-        else {
-            Err(TerminalError::new(
-                "Awakeable is not registered yet".to_string(),
-            ))?
-        };
-
-        context.resolve_awakeable(&awakeable_id, value);
-
-        Ok(())
-    }
-
-    async fn reject_awakeable(
-        &self,
-        context: SharedObjectContext<'_>,
-        req: Json<RejectAwakeable>,
-    ) -> Result<(), HandlerError> {
-        let RejectAwakeable {
-            awakeable_key,
-            reason,
-        } = req.into_inner();
-        let Some(awakeable_id) = context
-            .get::<String>(&format!("awk-{awakeable_key}"))
-            .await?
-        else {
-            Err(TerminalError::new(
-                "Awakeable is not registered yet".to_string(),
-            ))?
-        };
-
-        context.reject_awakeable(&awakeable_id, TerminalError::new(reason));
-
-        Ok(())
-    }
-
-    async fn has_awakeable(
-        &self,
-        context: SharedObjectContext<'_>,
-        awakeable_key: String,
-    ) -> Result<bool, HandlerError> {
-        Ok(context
-            .get::<String>(&format!("awk-{awakeable_key}"))
-            .await?
-            .is_some())
-    }
-
-    async fn get_results(
-        &self,
-        context: SharedObjectContext<'_>,
-    ) -> Result<Json<Vec<String>>, HandlerError> {
-        Ok(context
+        let mut old_results = context
             .get::<Json<Vec<String>>>("results")
             .await?
-            .unwrap_or_default())
+            .unwrap_or_default()
+            .into_inner();
+        old_results.push(last_result.clone());
+        context.set("results", Json(old_results));
     }
+
+    Ok(last_result)
+}
+
+#[restate_sdk::handler(name = "resolveAwakeable")]
+pub(crate) async fn resolve_awakeable(
+    context: SharedObjectContext<'_>,
+    req: Json<ResolveAwakeable>,
+) -> Result<(), HandlerError> {
+    let ResolveAwakeable {
+        awakeable_key,
+        value,
+    } = req.into_inner();
+    let Some(awakeable_id) = context
+        .get::<String>(&format!("awk-{awakeable_key}"))
+        .await?
+    else {
+        Err(TerminalError::new(
+            "Awakeable is not registered yet".to_string(),
+        ))?
+    };
+
+    context.resolve_awakeable(&awakeable_id, value);
+
+    Ok(())
+}
+
+#[restate_sdk::handler(name = "rejectAwakeable")]
+pub(crate) async fn reject_awakeable(
+    context: SharedObjectContext<'_>,
+    req: Json<RejectAwakeable>,
+) -> Result<(), HandlerError> {
+    let RejectAwakeable {
+        awakeable_key,
+        reason,
+    } = req.into_inner();
+    let Some(awakeable_id) = context
+        .get::<String>(&format!("awk-{awakeable_key}"))
+        .await?
+    else {
+        Err(TerminalError::new(
+            "Awakeable is not registered yet".to_string(),
+        ))?
+    };
+
+    context.reject_awakeable(&awakeable_id, TerminalError::new(reason));
+
+    Ok(())
+}
+
+#[restate_sdk::handler(name = "hasAwakeable")]
+pub(crate) async fn has_awakeable(
+    context: SharedObjectContext<'_>,
+    awakeable_key: String,
+) -> Result<bool, HandlerError> {
+    Ok(context
+        .get::<String>(&format!("awk-{awakeable_key}"))
+        .await?
+        .is_some())
+}
+
+#[restate_sdk::handler(name = "getResults")]
+pub(crate) async fn get_results(
+    context: SharedObjectContext<'_>,
+) -> Result<Json<Vec<String>>, HandlerError> {
+    Ok(context
+        .get::<Json<Vec<String>>>("results")
+        .await?
+        .unwrap_or_default())
+}
+
+pub(crate) fn definition() -> ServiceDefinition {
+    define_object("VirtualObjectCommandInterpreter")
+        .handler(interpret_commands)
+        .handler(resolve_awakeable)
+        .handler(reject_awakeable)
+        .handler(has_awakeable)
+        .handler(get_results)
+        .build()
 }
