@@ -16,7 +16,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{braced, parenthesized, parse_quote, Error, Ident, LitStr, Token, Type};
+use syn::{Error, Ident, LitStr, Token, Type, braced, parenthesized, parse_quote};
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -94,7 +94,10 @@ impl Parse for IfaceHandler {
                     ));
                 }
             } else {
-                return Err(Error::new_spanned(attr, "unsupported attribute; only `#[name = \"...\"]` is allowed"));
+                return Err(Error::new_spanned(
+                    attr,
+                    "unsupported attribute; only `#[name = \"...\"]` is allowed",
+                ));
             }
         }
 
@@ -257,7 +260,10 @@ fn generate_server(iface: &Interface) -> TokenStream {
         }
     });
 
-    let handlers_doc = format!("Handlers required to serve the `{}` service.", iface.restate_name);
+    let handlers_doc = format!(
+        "Handlers required to serve the `{}` service.",
+        iface.restate_name
+    );
     let server_doc = format!(
         "Build a conformance-checked [`ServiceDefinition`] for the `{}` service.",
         iface.restate_name

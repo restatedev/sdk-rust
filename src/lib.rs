@@ -178,7 +178,6 @@ pub mod service;
 pub mod context;
 pub mod discovery;
 pub mod errors;
-pub(crate) mod state;
 #[cfg(feature = "tracing-span-filter")]
 pub mod filter;
 #[cfg(feature = "http_server")]
@@ -188,6 +187,7 @@ pub mod hyper;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod serde;
+pub(crate) mod state;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
 ///
@@ -593,9 +593,9 @@ pub mod prelude {
 
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
-        ContextSideEffects, ContextState, ContextTimers, ContextWriteState, DurableFuturesUnordered,
-        HeaderMap, InvocationHandle, ObjectContext, Request, RunFuture, RunRetryPolicy,
-        SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+        ContextSideEffects, ContextState, ContextTimers, ContextWriteState,
+        DurableFuturesUnordered, HeaderMap, InvocationHandle, ObjectContext, Request, RunFuture,
+        RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
     };
     pub use crate::endpoint::{
         Endpoint, HandleOptions, HandlerOptions, ProtocolMode, ServiceOptions,
@@ -611,5 +611,7 @@ pub mod prelude {
     ///
     /// This is sugar over the [`service()`](crate::service())/[`object()`](crate::object())/[`workflow()`](crate::workflow())
     /// builders; use the builders directly when you need `.state(..)`.
-    pub use crate::{define_object as object, define_service as service, define_workflow as workflow};
+    pub use crate::{
+        define_object as object, define_service as service, define_workflow as workflow,
+    };
 }

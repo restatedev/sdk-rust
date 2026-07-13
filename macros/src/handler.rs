@@ -19,7 +19,10 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{Error, FnArg, GenericArgument, ItemFn, Lit, Meta, PatType, PathArguments, ReturnType, Token, Type};
+use syn::{
+    Error, FnArg, GenericArgument, ItemFn, Lit, Meta, PatType, PathArguments, ReturnType, Token,
+    Type,
+};
 
 /// The service kind + shared-ness, inferred from the first parameter's context type.
 enum CtxKind {
@@ -65,10 +68,14 @@ impl CtxKind {
         match self {
             CtxKind::Service | CtxKind::ObjectExclusive => quote!(::core::option::Option::None),
             CtxKind::ObjectShared | CtxKind::WorkflowShared => {
-                quote!(::core::option::Option::Some(::restate_sdk::discovery::HandlerType::Shared))
+                quote!(::core::option::Option::Some(
+                    ::restate_sdk::discovery::HandlerType::Shared
+                ))
             }
             CtxKind::WorkflowRun => {
-                quote!(::core::option::Option::Some(::restate_sdk::discovery::HandlerType::Workflow))
+                quote!(::core::option::Option::Some(
+                    ::restate_sdk::discovery::HandlerType::Workflow
+                ))
             }
         }
     }

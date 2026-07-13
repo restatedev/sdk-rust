@@ -92,5 +92,8 @@ pub(crate) fn runner_definition() -> ServiceDefinition {
 }
 
 pub(crate) fn blocking_definition() -> ServiceDefinition {
-    CancelTestBlockingService::from_handlers(CancelTestBlockingServiceHandlers { block, is_unlocked })
+    CancelTestBlockingService::from_handlers(CancelTestBlockingServiceHandlers {
+        block,
+        is_unlocked,
+    })
 }

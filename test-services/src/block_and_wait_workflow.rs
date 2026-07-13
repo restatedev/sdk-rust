@@ -18,7 +18,10 @@ pub(crate) async fn run(context: WorkflowContext<'_>, input: String) -> HandlerR
 }
 
 #[restate_sdk::handler]
-pub(crate) async fn unblock(context: SharedWorkflowContext<'_>, output: String) -> HandlerResult<()> {
+pub(crate) async fn unblock(
+    context: SharedWorkflowContext<'_>,
+    output: String,
+) -> HandlerResult<()> {
     context.resolve_promise(MY_PROMISE, output);
     Ok(())
 }

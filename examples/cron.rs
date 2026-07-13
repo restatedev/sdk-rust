@@ -35,7 +35,11 @@ fn schedule_next(ctx: &ObjectContext<'_>) {
 /// Schedules the periodic task to start
 #[restate_sdk::handler]
 async fn start(ctx: ObjectContext<'_>) -> Result<(), TerminalError> {
-    if ctx.get::<bool>(ACTIVE).await?.is_some_and(|enabled| enabled) {
+    if ctx
+        .get::<bool>(ACTIVE)
+        .await?
+        .is_some_and(|enabled| enabled)
+    {
         // If it's already activated, just do nothing
         return Ok(());
     }

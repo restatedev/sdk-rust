@@ -19,7 +19,10 @@ pub(crate) async fn uppercase_echo(_ctx: Context<'_>, input: String) -> HandlerR
 }
 
 #[restate_sdk::handler(name = "rawEcho")]
-pub(crate) async fn raw_echo(_ctx: Context<'_>, input: bytes::Bytes) -> Result<Vec<u8>, Infallible> {
+pub(crate) async fn raw_echo(
+    _ctx: Context<'_>,
+    input: bytes::Bytes,
+) -> Result<Vec<u8>, Infallible> {
     Ok(input.to_vec())
 }
 

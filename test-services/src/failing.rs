@@ -64,7 +64,9 @@ pub(crate) async fn call_terminally_failing_call(
 }
 
 #[restate_sdk::handler]
-pub(crate) async fn failing_call_with_eventual_success(ctx: ObjectContext<'_>) -> HandlerResult<i32> {
+pub(crate) async fn failing_call_with_eventual_success(
+    ctx: ObjectContext<'_>,
+) -> HandlerResult<i32> {
     let calls = &ctx.state::<FailingState>().eventual_success_calls;
     let current_attempt = calls.fetch_add(1, Ordering::SeqCst) + 1;
 

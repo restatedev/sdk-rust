@@ -142,8 +142,7 @@ impl<Kind: 'static> Service for HandlerMap<Kind> {
         match self.handlers.get(ctx.handler_name()) {
             Some(handler) => handler.handle(ctx),
             None => {
-                let err =
-                    endpoint::Error::unknown_handler(ctx.service_name(), ctx.handler_name());
+                let err = endpoint::Error::unknown_handler(ctx.service_name(), ctx.handler_name());
                 Box::pin(async move { Err(err) })
             }
         }
