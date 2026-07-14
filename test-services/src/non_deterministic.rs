@@ -35,7 +35,7 @@ pub(crate) async fn either_sleep_or_call(ctx: ObjectContext<'_>) -> HandlerResul
         ctx.sleep(Duration::from_millis(100)).await?;
     } else {
         ctx.object_client::<CounterClient>("abc")
-            .get()
+            .get(())
             .call()
             .await?;
     }
@@ -46,12 +46,12 @@ pub(crate) async fn either_sleep_or_call(ctx: ObjectContext<'_>) -> HandlerResul
 pub(crate) async fn call_different_method(ctx: ObjectContext<'_>) -> HandlerResult<()> {
     if do_left_action(ctx.extension::<NonDetState>(), &ctx).await {
         ctx.object_client::<CounterClient>("abc")
-            .get()
+            .get(())
             .call()
             .await?;
     } else {
         ctx.object_client::<CounterClient>("abc")
-            .reset()
+            .reset(())
             .call()
             .await?;
     }
@@ -63,9 +63,9 @@ pub(crate) async fn background_invoke_with_different_targets(
     ctx: ObjectContext<'_>,
 ) -> HandlerResult<()> {
     if do_left_action(ctx.extension::<NonDetState>(), &ctx).await {
-        ctx.object_client::<CounterClient>("abc").get().send();
+        ctx.object_client::<CounterClient>("abc").get(()).send();
     } else {
-        ctx.object_client::<CounterClient>("abc").reset().send();
+        ctx.object_client::<CounterClient>("abc").reset(()).send();
     }
     sleep_then_increment_counter(&ctx).await
 }

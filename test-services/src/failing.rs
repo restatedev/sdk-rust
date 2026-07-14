@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,24 +15,7 @@ pub(crate) struct FailureToPropagate {
     metadata: HashMap<String, String>,
 }
 
-restate_sdk::interface! {
-    object Failing {
-        #[name = "terminallyFailingCall"]
-        terminally_failing_call(Json<FailureToPropagate>) -> ();
-        #[name = "callTerminallyFailingCall"]
-        call_terminally_failing_call(Json<FailureToPropagate>) -> String;
-        #[name = "failingCallWithEventualSuccess"]
-        failing_call_with_eventual_success() -> i32;
-        #[name = "terminallyFailingSideEffect"]
-        terminally_failing_side_effect(Json<FailureToPropagate>) -> ();
-        #[name = "sideEffectSucceedsAfterGivenAttempts"]
-        side_effect_succeeds_after_given_attempts(i32) -> i32;
-        #[name = "sideEffectFailsAfterGivenAttempts"]
-        side_effect_fails_after_given_attempts(i32) -> i32;
-    }
-}
-
-/// Process-wide counters, injected as ambient state (registered on the endpoint in `main`).
+/// Process-wide counters, injected as an extension (registered on the endpoint in `main`).
 #[derive(Clone, Default)]
 pub(crate) struct FailingState {
     eventual_success_calls: Arc<AtomicI32>,
@@ -41,7 +23,7 @@ pub(crate) struct FailingState {
     eventual_failure_side_effects: Arc<AtomicI32>,
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "terminallyFailingCall")]
 pub(crate) async fn terminally_failing_call(
     _ctx: ObjectContext<'_>,
     Json(failure): Json<FailureToPropagate>,
@@ -49,7 +31,7 @@ pub(crate) async fn terminally_failing_call(
     Err(TerminalError::new(failure.error_message).into())
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "callTerminallyFailingCall")]
 pub(crate) async fn call_terminally_failing_call(
     mut ctx: ObjectContext<'_>,
     Json(failure): Json<FailureToPropagate>,
@@ -63,7 +45,7 @@ pub(crate) async fn call_terminally_failing_call(
     unreachable!("This should be unreachable")
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "failingCallWithEventualSuccess")]
 pub(crate) async fn failing_call_with_eventual_success(
     ctx: ObjectContext<'_>,
 ) -> HandlerResult<i32> {
@@ -78,7 +60,7 @@ pub(crate) async fn failing_call_with_eventual_success(
     }
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "terminallyFailingSideEffect")]
 pub(crate) async fn terminally_failing_side_effect(
     ctx: ObjectContext<'_>,
     Json(failure): Json<FailureToPropagate>,
@@ -89,7 +71,7 @@ pub(crate) async fn terminally_failing_side_effect(
     unreachable!("This should be unreachable")
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "sideEffectSucceedsAfterGivenAttempts")]
 pub(crate) async fn side_effect_succeeds_after_given_attempts(
     ctx: ObjectContext<'_>,
     minimum_attempts: i32,
@@ -120,7 +102,7 @@ pub(crate) async fn side_effect_succeeds_after_given_attempts(
     Ok(success_attempt)
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "sideEffectFailsAfterGivenAttempts")]
 pub(crate) async fn side_effect_fails_after_given_attempts(
     ctx: ObjectContext<'_>,
     retry_policy_max_retry_count: i32,
@@ -150,13 +132,11 @@ pub(crate) async fn side_effect_fails_after_given_attempts(
     }
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    Failing::from_handlers(FailingHandlers {
-        terminally_failing_call,
-        call_terminally_failing_call,
-        failing_call_with_eventual_success,
-        terminally_failing_side_effect,
-        side_effect_succeeds_after_given_attempts,
-        side_effect_fails_after_given_attempts,
-    })
-}
+object!(Failing: {
+    terminally_failing_call,
+    call_terminally_failing_call,
+    failing_call_with_eventual_success,
+    terminally_failing_side_effect,
+    side_effect_succeeds_after_given_attempts,
+    side_effect_fails_after_given_attempts,
+});

@@ -271,6 +271,9 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
         #vis struct #ident;
 
         impl #ident {
+            /// The Restate wire name of this handler (respects `#[handler(name = "...")]`).
+            #vis const NAME: &'static str = #name_lit;
+
             /// Invoke the handler body directly (e.g. for unit tests).
             #vis async fn call(#inputs) #output #block
         }

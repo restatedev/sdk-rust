@@ -24,46 +24,46 @@ async fn main() {
     let mut builder = Endpoint::builder().extension(failing::FailingState::default());
 
     if services == "*" || services.contains("Counter") {
-        builder = builder.bind(counter::definition())
+        builder = builder.bind(counter::Counter)
     }
     if services == "*" || services.contains("Proxy") {
-        builder = builder.bind(proxy::definition())
+        builder = builder.bind(proxy::Proxy)
     }
     if services == "*" || services.contains("MapObject") {
-        builder = builder.bind(map_object::definition())
+        builder = builder.bind(map_object::MapObject)
     }
     if services == "*" || services.contains("ListObject") {
-        builder = builder.bind(list_object::definition())
+        builder = builder.bind(list_object::ListObject)
     }
     if services == "*" || services.contains("AwakeableHolder") {
-        builder = builder.bind(awakeable_holder::definition())
+        builder = builder.bind(awakeable_holder::AwakeableHolder)
     }
     if services == "*" || services.contains("BlockAndWaitWorkflow") {
-        builder = builder.bind(block_and_wait_workflow::definition())
+        builder = builder.bind(block_and_wait_workflow::BlockAndWaitWorkflow)
     }
     if services == "*" || services.contains("CancelTestRunner") {
-        builder = builder.bind(cancel_test::runner_definition())
+        builder = builder.bind(cancel_test::CancelTestRunner)
     }
     if services == "*" || services.contains("CancelTestBlockingService") {
-        builder = builder.bind(cancel_test::blocking_definition())
+        builder = builder.bind(cancel_test::CancelTestBlockingService)
     }
     if services == "*" || services.contains("Failing") {
-        builder = builder.bind(failing::definition())
+        builder = builder.bind(failing::Failing)
     }
     if services == "*" || services.contains("KillTestRunner") {
-        builder = builder.bind(kill_test::runner_definition())
+        builder = builder.bind(kill_test::KillTestRunner)
     }
     if services == "*" || services.contains("KillTestSingleton") {
-        builder = builder.bind(kill_test::singleton_definition())
+        builder = builder.bind(kill_test::KillTestSingleton)
     }
     if services == "*" || services.contains("NonDeterministic") {
         builder = builder.bind(non_deterministic::definition())
     }
     if services == "*" || services.contains("TestUtilsService") {
-        builder = builder.bind(test_utils_service::definition())
+        builder = builder.bind(test_utils_service::TestUtilsService)
     }
     if services == "*" || services.contains("VirtualObjectCommandInterpreter") {
-        builder = builder.bind(virtual_object_command_interpreter::definition())
+        builder = builder.bind(virtual_object_command_interpreter::VirtualObjectCommandInterpreter)
     }
 
     if let Ok(key) = env::var("E2E_REQUEST_SIGNING_ENV") {

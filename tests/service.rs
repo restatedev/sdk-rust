@@ -109,6 +109,11 @@ async fn wf_shared(_ctx: SharedWorkflowContext<'_>, input: String) -> HandlerRes
     Ok(input)
 }
 
+// Declarative item macros define the service types (+ clients). Distinct names from the
+// deprecated trait-based `MyObject`/`MyWorkflow` above.
+object!(FnObject: { obj_exclusive, obj_shared });
+workflow!(FnWorkflow: { wf_run, wf_shared });
+
 #[test]
 fn fn_handlers_meta_and_composition() {
     use restate_sdk::service::Handler;
@@ -121,7 +126,7 @@ fn fn_handlers_meta_and_composition() {
     // (compile-only: we don't have a Context here)
     let _call = fn_no_input_no_output::call;
 
-    // Composition into the three service kinds compiles; mixing kinds would not.
+    // The builder is for dynamic composition / per-service extensions.
     let _service = service("MyService")
         .extension(0u32)
         .handler(fn_my_handler)
@@ -133,10 +138,8 @@ fn fn_handlers_meta_and_composition() {
         .handler(fn_renamed)
         .build();
 
-    // The macros are sugar over the builder (used here for the state-free cases).
-    let _object = object!("MyObject", obj_exclusive, obj_shared);
-
-    let _workflow = workflow!("MyWorkflow", wf_run, wf_shared);
+    // The declarative macros define bindable service types (+ clients).
+    let _kinds = (FnObject, FnWorkflow);
 }
 
 // interface! generates a client + a conformance-checked server builder.

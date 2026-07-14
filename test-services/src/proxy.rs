@@ -2,7 +2,6 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use restate_sdk::context::RequestTarget;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -111,6 +110,4 @@ pub(crate) async fn many_calls(
     Ok(())
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    service!("Proxy", call, one_way_call, many_calls)
-}
+service!(Proxy: { call, one_way_call, many_calls });

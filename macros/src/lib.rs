@@ -17,6 +17,7 @@ mod ast;
 mod generator;
 mod handler;
 mod interface;
+mod service_def;
 
 use crate::ast::{Object, Service, Workflow};
 use crate::generator::ServiceGenerator;
@@ -67,6 +68,31 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn interface(input: TokenStream) -> TokenStream {
     interface::expand(input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Declaratively define a service (exposed as `service!` via the prelude). See
+/// [`restate_sdk::service`](../restate_sdk/macro.service.html).
+#[proc_macro]
+pub fn define_service(input: TokenStream) -> TokenStream {
+    service_def::expand(service_def::Kind::Service, input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Declaratively define a virtual object (exposed as `object!` via the prelude).
+#[proc_macro]
+pub fn define_object(input: TokenStream) -> TokenStream {
+    service_def::expand(service_def::Kind::Object, input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Declaratively define a workflow (exposed as `workflow!` via the prelude).
+#[proc_macro]
+pub fn define_workflow(input: TokenStream) -> TokenStream {
+    service_def::expand(service_def::Kind::Workflow, input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

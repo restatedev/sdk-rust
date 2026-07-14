@@ -1,7 +1,6 @@
 use crate::awakeable_holder;
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -40,15 +39,9 @@ pub(crate) async fn verify_test(context: ObjectContext<'_>) -> HandlerResult<boo
     Ok(context.get::<bool>(CANCELED).await?.unwrap_or(false))
 }
 
-// ---- CancelTestBlockingService ----
+object!(CancelTestRunner: { start_test, verify_test });
 
-restate_sdk::interface! {
-    object CancelTestBlockingService {
-        block(Json<BlockingOperation>) -> ();
-        #[name = "isUnlocked"]
-        is_unlocked() -> ();
-    }
-}
+// ---- CancelTestBlockingService ----
 
 #[restate_sdk::handler]
 pub(crate) async fn block(
@@ -81,19 +74,10 @@ pub(crate) async fn block(
     Ok(())
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "isUnlocked")]
 pub(crate) async fn is_unlocked(_context: ObjectContext<'_>) -> HandlerResult<()> {
     // no-op
     Ok(())
 }
 
-pub(crate) fn runner_definition() -> ServiceDefinition {
-    object!("CancelTestRunner", start_test, verify_test)
-}
-
-pub(crate) fn blocking_definition() -> ServiceDefinition {
-    CancelTestBlockingService::from_handlers(CancelTestBlockingServiceHandlers {
-        block,
-        is_unlocked,
-    })
-}
+object!(CancelTestBlockingService: { block, is_unlocked });

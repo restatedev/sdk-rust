@@ -1,5 +1,4 @@
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -9,16 +8,6 @@ use tracing::info;
 pub(crate) struct CounterUpdateResponse {
     old_value: u64,
     new_value: u64,
-}
-
-restate_sdk::interface! {
-    object Counter {
-        add(u64) -> Json<CounterUpdateResponse>;
-        #[name = "addThenFail"]
-        add_then_fail(u64) -> ();
-        get() -> u64;
-        reset() -> ();
-    }
 }
 
 const COUNT: &str = "counter";
@@ -52,7 +41,7 @@ pub(crate) async fn reset(ctx: ObjectContext<'_>) -> HandlerResult<()> {
     Ok(())
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "addThenFail")]
 pub(crate) async fn add_then_fail(ctx: ObjectContext<'_>, val: u64) -> HandlerResult<()> {
     let current = ctx.get::<u64>(COUNT).await?.unwrap_or(0);
     let new = current + val;
@@ -63,11 +52,5 @@ pub(crate) async fn add_then_fail(ctx: ObjectContext<'_>, val: u64) -> HandlerRe
     Err(TerminalError::new(ctx.key()).into())
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    Counter::from_handlers(CounterHandlers {
-        add,
-        add_then_fail,
-        get,
-        reset,
-    })
-}
+// Defines the `Counter` service type + `CounterClient` (used by the NonDeterministic service).
+object!(Counter: { add, add_then_fail, get, reset });

@@ -1,14 +1,4 @@
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
-
-restate_sdk::interface! {
-    object AwakeableHolder {
-        hold(String) -> ();
-        #[name = "hasAwakeable"]
-        has_awakeable() -> bool;
-        unlock(String) -> ();
-    }
-}
 
 const ID: &str = "id";
 
@@ -18,7 +8,7 @@ pub(crate) async fn hold(context: ObjectContext<'_>, id: String) -> HandlerResul
     Ok(())
 }
 
-#[restate_sdk::handler]
+#[restate_sdk::handler(name = "hasAwakeable")]
 pub(crate) async fn has_awakeable(context: SharedObjectContext<'_>) -> HandlerResult<bool> {
     Ok(context.get::<String>(ID).await?.is_some())
 }
@@ -35,10 +25,5 @@ pub(crate) async fn unlock(context: ObjectContext<'_>, payload: String) -> Handl
     Ok(())
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    AwakeableHolder::from_handlers(AwakeableHolderHandlers {
-        hold,
-        has_awakeable,
-        unlock,
-    })
-}
+// Defines `AwakeableHolder` + `AwakeableHolderClient` (used by the cancel/kill test services).
+object!(AwakeableHolder: { hold, has_awakeable, unlock });

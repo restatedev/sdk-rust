@@ -38,14 +38,15 @@ async fn greet(_ctx: Context<'_>, name: String) -> HandlerResult<String> {
     Ok(format!("Greetings {name}"))
 }
 
+// Declaratively define the `Greeter` service (and a `GreeterClient`) from the handler(s).
+service!(Greeter: { greet });
+
 #[tokio::main]
 async fn main() {
     // To enable logging/tracing
     // tracing_subscriber::fmt::init();
 
-    // Compose handlers into a service and bind it to the endpoint.
-    let greeter = service!("Greeter", greet);
-    HttpServer::new(Endpoint::builder().bind(greeter).build())
+    HttpServer::new(Endpoint::builder().bind(Greeter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }
@@ -91,19 +92,17 @@ async fn greet(_ctx: Context<'_>, name: String) -> HandlerResult<String> {
     Ok(format!("Greetings {name}"))
 }
 
+service!(Greeter: { greet });
+
 #[tokio::main]
 async fn main() {
     // To enable logging/tracing
     // check https://docs.aws.amazon.com/lambda/latest/dg/rust-logging.html#rust-logging-tracing
 
     // Build and run the Lambda endpoint
-    LambdaEndpoint::run(
-        Endpoint::builder()
-            .bind(service!("Greeter", greet))
-            .build(),
-    )
-    .await
-    .unwrap();
+    LambdaEndpoint::run(Endpoint::builder().bind(Greeter).build())
+        .await
+        .unwrap();
 }
 ```
 

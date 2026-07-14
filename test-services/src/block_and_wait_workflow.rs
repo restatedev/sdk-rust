@@ -1,5 +1,4 @@
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 
 const MY_PROMISE: &str = "my-promise";
 const MY_STATE: &str = "my-state";
@@ -33,6 +32,4 @@ pub(crate) async fn get_state(
     Ok(Json(context.get::<String>(MY_STATE).await?))
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    workflow!("BlockAndWaitWorkflow", run, unblock, get_state)
-}
+workflow!(BlockAndWaitWorkflow: { run, unblock, get_state });

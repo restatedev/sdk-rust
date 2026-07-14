@@ -29,15 +29,17 @@ async fn proxy(ctx: Context<'_>, name: String) -> HandlerResult<String> {
     Ok(greeting)
 }
 
+// The proxy is a plain single-crate service defined with the declarative macro.
+service!(Proxy: { proxy });
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     // Conformance-checked: `greet` must match the interface's `greet(String) -> String`.
     let greeter = Greeter::from_handlers(GreeterHandlers { greet });
-    let proxy_svc = service!("Proxy", proxy);
 
-    HttpServer::new(Endpoint::builder().bind(greeter).bind(proxy_svc).build())
+    HttpServer::new(Endpoint::builder().bind(greeter).bind(Proxy).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

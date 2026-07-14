@@ -1,7 +1,6 @@
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -82,15 +81,12 @@ pub(crate) async fn cancel_invocation(
     Ok(())
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    service!(
-        "TestUtilsService",
-        echo,
-        uppercase_echo,
-        raw_echo,
-        echo_headers,
-        sleep_concurrently,
-        count_executed_side_effects,
-        cancel_invocation
-    )
-}
+service!(TestUtilsService: {
+    echo,
+    uppercase_echo,
+    raw_echo,
+    echo_headers,
+    sleep_concurrently,
+    count_executed_side_effects,
+    cancel_invocation,
+});

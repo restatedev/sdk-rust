@@ -1,5 +1,4 @@
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 
 const LIST: &str = "list";
 
@@ -33,6 +32,4 @@ pub(crate) async fn clear(ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<Stri
     Ok(current)
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    object!("ListObject", append, get, clear)
-}
+object!(ListObject: { append, get, clear });

@@ -1,7 +1,6 @@
 use anyhow::anyhow;
 use futures::TryFutureExt;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -234,13 +233,10 @@ pub(crate) async fn get_results(
         .unwrap_or_default())
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    object!(
-        "VirtualObjectCommandInterpreter",
-        interpret_commands,
-        resolve_awakeable,
-        reject_awakeable,
-        has_awakeable,
-        get_results
-    )
-}
+object!(VirtualObjectCommandInterpreter: {
+    interpret_commands,
+    resolve_awakeable,
+    reject_awakeable,
+    has_awakeable,
+    get_results,
+});

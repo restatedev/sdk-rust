@@ -16,17 +16,21 @@
 //! async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(service!("MyService", my_service::my_handler))
-//!             .bind(object!(
-//!                 "MyVirtualObject",
-//!                 my_virtual_object::my_handler,
-//!                 my_virtual_object::my_concurrent_handler
-//!             ))
-//!             .bind(workflow!(
-//!                 "MyWorkflow",
-//!                 my_workflow::run,
-//!                 my_workflow::interact_with_workflow
-//!             ))
+//!             // Handlers defined in other modules are composed with the builder functions
+//!             // (the `service!`/`object!`/`workflow!` macros take bare handler idents).
+//!             .bind(service("MyService").handler(my_service::my_handler).build())
+//!             .bind(
+//!                 object("MyVirtualObject")
+//!                     .handler(my_virtual_object::my_handler)
+//!                     .handler(my_virtual_object::my_concurrent_handler)
+//!                     .build(),
+//!             )
+//!             .bind(
+//!                 workflow("MyWorkflow")
+//!                     .handler(my_workflow::run)
+//!                     .handler(my_workflow::interact_with_workflow)
+//!                     .build(),
+//!             )
 //!             .build(),
 //!     )
 //!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
@@ -51,7 +55,7 @@
 //! # async fn main() {
 //!     HttpServer::new(
 //!         Endpoint::builder()
-//!             .bind(service!("MyService", my_service::my_handler))
+//!             .bind(service("MyService").handler(my_service::my_handler).build())
 //!             .identity_key("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
 //!             .unwrap()
 //!             .build(),

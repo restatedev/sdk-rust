@@ -39,16 +39,12 @@ async fn is_in_stock(_ctx: Context<'_>, product_id: String) -> Result<bool, Hand
     Ok(!product_id.contains("out-of-stock"))
 }
 
+service!(CatalogService: { get_product_by_id, save_product, is_in_stock });
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let catalog = service!(
-        "CatalogService",
-        get_product_by_id,
-        save_product,
-        is_in_stock
-    );
-    HttpServer::new(Endpoint::builder().bind(catalog).build())
+    HttpServer::new(Endpoint::builder().bind(CatalogService).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

@@ -27,11 +27,12 @@ async fn reset(ctx: ObjectContext<'_>) -> Result<(), TerminalError> {
     Ok(())
 }
 
+object!(Counter: { get, add, increment, reset });
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let counter = object!("Counter", get, add, increment, reset);
-    HttpServer::new(Endpoint::builder().bind(counter).build())
+    HttpServer::new(Endpoint::builder().bind(Counter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

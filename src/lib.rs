@@ -53,12 +53,13 @@
 //!     Ok(format!("{greeting}!"))
 //! }
 //!
+//! // Declaratively define the `MyService` service (and a `MyServiceClient`) from the handler(s).
+//! service!(MyService: { my_handler });
+//!
 //! // Start the HTTP server to expose services
 //! #[tokio::main]
 //! async fn main() {
-//!     // Compose handlers into a service, then bind it to an endpoint.
-//!     let my_service = service!("MyService", my_handler);
-//!     HttpServer::new(Endpoint::builder().bind(my_service).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyService).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
@@ -92,10 +93,11 @@
 //!     Ok(format!("{} {}", greeting, ctx.key()))
 //! }
 //!
+//! object!(MyVirtualObject: { my_handler, my_concurrent_handler });
+//!
 //! #[tokio::main]
 //! async fn main() {
-//!     let obj = object!("MyVirtualObject", my_handler, my_concurrent_handler);
-//!     HttpServer::new(Endpoint::builder().bind(obj).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyVirtualObject).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
@@ -129,10 +131,11 @@
 //!     Ok(())
 //! }
 //!
+//! workflow!(MyWorkflow: { run, interact_with_workflow });
+//!
 //! #[tokio::main]
 //! async fn main() {
-//!     let wf = workflow!("MyWorkflow", run, interact_with_workflow);
-//!     HttpServer::new(Endpoint::builder().bind(wf).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyWorkflow).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
@@ -511,9 +514,10 @@ pub use restate_sdk_macros::workflow;
 ///     Ok(format!("Hi {name}"))
 /// }
 ///
+/// service!(Greeter: { greet });
+///
 /// # async fn example() {
-/// let greeter = service!("Greeter", greet);
-/// HttpServer::new(Endpoint::builder().bind(greeter).build())
+/// HttpServer::new(Endpoint::builder().bind(Greeter).build())
 ///     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 ///     .await;
 /// # }
@@ -556,32 +560,11 @@ pub use restate_sdk_macros::interface;
 /// the `service!` / `object!` / `workflow!` macros exported by the [`prelude`](crate::prelude).
 pub use crate::service::{object, service, workflow};
 
-// Composition macros. These are `#[macro_export]`ed at the crate root under `define_*` names (which
-// don't clash with the deprecated `#[service]`/`#[object]`/`#[workflow]` attribute macros), and
-// re-exported by the `prelude` under the ergonomic names `service!`/`object!`/`workflow!`.
+// Declarative composition macros. They are exported from the macros crate under `define_*` names
+// (which don't clash with the deprecated `#[service]`/`#[object]`/`#[workflow]` attribute macros)
+// and re-exported by the `prelude` under the ergonomic names `service!`/`object!`/`workflow!`.
 #[doc(hidden)]
-#[macro_export]
-macro_rules! define_service {
-    ($name:expr $(, $handler:expr)* $(,)?) => {
-        $crate::service($name)$(.handler($handler))*.build()
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! define_object {
-    ($name:expr $(, $handler:expr)* $(,)?) => {
-        $crate::object($name)$(.handler($handler))*.build()
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! define_workflow {
-    ($name:expr $(, $handler:expr)* $(,)?) => {
-        $crate::workflow($name)$(.handler($handler))*.build()
-    };
-}
+pub use restate_sdk_macros::{define_object, define_service, define_workflow};
 
 /// Prelude contains all the useful imports you need to get started with Restate.
 pub mod prelude {
@@ -606,11 +589,11 @@ pub mod prelude {
     // Builder entry-point functions (value namespace).
     pub use crate::service::{object, service, workflow};
 
-    /// Compose [`#[handler]`](macro@crate::handler) functions into a service, virtual object or
-    /// workflow in one line — e.g. `service!("Greeter", greet, other)`, `object!("Counter", get, add)`.
+    /// Declaratively define a service/object/workflow — e.g. `service!(Greeter: { greet, other });`
+    /// defines a `Greeter` type + `GreeterClient`. See [`macro@crate::service`].
     ///
-    /// This is sugar over the [`service()`](crate::service())/[`object()`](crate::object())/[`workflow()`](crate::workflow())
-    /// builders; use the builders directly when you need `.extension(..)`.
+    /// The same-named builder functions ([`service()`](crate::service()), ...) remain for dynamic
+    /// composition and `.extension(..)`.
     pub use crate::{
         define_object as object, define_service as service, define_workflow as workflow,
     };

@@ -11,6 +11,8 @@ async fn greet(ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
     Ok(format!("Greetings {name}"))
 }
 
+service!(Greeter: { greet });
+
 #[tokio::main]
 async fn main() {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -23,8 +25,7 @@ async fn main() {
                 .with_filter(replay_filter),
         )
         .init();
-    let greeter = service!("Greeter", greet);
-    HttpServer::new(Endpoint::builder().bind(greeter).build())
+    HttpServer::new(Endpoint::builder().bind(Greeter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

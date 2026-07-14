@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +42,4 @@ pub(crate) async fn clear_all(ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<
     Ok(entries.into())
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    object!("MapObject", set, get, clear_all)
-}
+object!(MapObject: { set, get, clear_all });
