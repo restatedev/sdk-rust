@@ -1,8 +1,8 @@
-//! Ambient, endpoint-lifetime shared state (dependency injection).
+//! Endpoint-lifetime injected dependencies (extensions).
 //!
-//! Values registered with `.state(...)` on the service or endpoint builder are stored here,
+//! Values registered with `.extension(...)` on the service or endpoint builder are stored here,
 //! keyed by their type, and retrieved inside handlers via
-//! [`ContextState::state`](crate::context::ContextState::state).
+//! [`ContextExtensions::extension`](crate::context::ContextExtensions::extension).
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -13,11 +13,11 @@ use std::sync::Arc;
 /// Used for dependency injection: a value of type `T` is stored under `TypeId::of::<T>()` and
 /// retrieved by type. Cloning is cheap (values are behind [`Arc`]).
 #[derive(Default, Clone)]
-pub(crate) struct StateMap {
+pub(crate) struct ExtensionMap {
     inner: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
 }
 
-impl StateMap {
+impl ExtensionMap {
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -34,8 +34,8 @@ impl StateMap {
 
     /// Overlay `higher` on top of `self`: entries present in `higher` override those in `self`.
     ///
-    /// Used to layer service-level state over endpoint-level state, with the service winning.
-    pub(crate) fn overlay(&mut self, higher: &StateMap) {
+    /// Used to layer service-level extensions over endpoint-level ones, with the service winning.
+    pub(crate) fn overlay(&mut self, higher: &ExtensionMap) {
         self.inner
             .extend(higher.inner.iter().map(|(k, v)| (*k, Arc::clone(v))));
     }

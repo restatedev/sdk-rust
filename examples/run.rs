@@ -4,7 +4,7 @@ use std::collections::HashMap;
 #[restate_sdk::handler]
 async fn do_run(ctx: Context<'_>) -> Result<Json<HashMap<String, String>>, HandlerError> {
     // The HTTP client is injected as ambient state (see `main`), instead of living on a struct.
-    let client = ctx.state::<reqwest::Client>().clone();
+    let client = ctx.extension::<reqwest::Client>().clone();
     let res = ctx
         .run(|| async move {
             let req = client.get("https://httpbin.org/ip").build()?;
@@ -28,7 +28,7 @@ async fn do_run(ctx: Context<'_>) -> Result<Json<HashMap<String, String>>, Handl
 async fn main() {
     tracing_subscriber::fmt::init();
     let run_example = service("RunExample")
-        .state(reqwest::Client::new())
+        .extension(reqwest::Client::new())
         .handler(do_run)
         .build();
     HttpServer::new(Endpoint::builder().bind(run_example).build())

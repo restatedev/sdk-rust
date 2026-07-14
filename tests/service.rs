@@ -61,7 +61,7 @@ fn renamed_service_handler() {
 // Service handlers, covering all the input/output/error shapes.
 #[restate_sdk::handler]
 async fn fn_my_handler(ctx: Context<'_>, input: String) -> HandlerResult<String> {
-    let _ = ctx.state::<u32>(); // ambient DI compiles on all context types
+    let _ = ctx.extension::<u32>(); // ambient DI compiles on all context types
     Ok(input)
 }
 #[restate_sdk::handler]
@@ -123,7 +123,7 @@ fn fn_handlers_meta_and_composition() {
 
     // Composition into the three service kinds compiles; mixing kinds would not.
     let _service = service("MyService")
-        .state(0u32)
+        .extension(0u32)
         .handler(fn_my_handler)
         .handler(fn_no_input)
         .handler(fn_no_output)

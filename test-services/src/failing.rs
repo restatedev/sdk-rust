@@ -67,7 +67,7 @@ pub(crate) async fn call_terminally_failing_call(
 pub(crate) async fn failing_call_with_eventual_success(
     ctx: ObjectContext<'_>,
 ) -> HandlerResult<i32> {
-    let calls = &ctx.state::<FailingState>().eventual_success_calls;
+    let calls = &ctx.extension::<FailingState>().eventual_success_calls;
     let current_attempt = calls.fetch_add(1, Ordering::SeqCst) + 1;
 
     if current_attempt >= 4 {
@@ -94,7 +94,10 @@ pub(crate) async fn side_effect_succeeds_after_given_attempts(
     ctx: ObjectContext<'_>,
     minimum_attempts: i32,
 ) -> HandlerResult<i32> {
-    let cloned_counter = Arc::clone(&ctx.state::<FailingState>().eventual_success_side_effects);
+    let cloned_counter = Arc::clone(
+        &ctx.extension::<FailingState>()
+            .eventual_success_side_effects,
+    );
     let success_attempt = ctx
         .run(|| async move {
             let current_attempt = cloned_counter.fetch_add(1, Ordering::SeqCst) + 1;
@@ -122,7 +125,10 @@ pub(crate) async fn side_effect_fails_after_given_attempts(
     ctx: ObjectContext<'_>,
     retry_policy_max_retry_count: i32,
 ) -> HandlerResult<i32> {
-    let counter = Arc::clone(&ctx.state::<FailingState>().eventual_failure_side_effects);
+    let counter = Arc::clone(
+        &ctx.extension::<FailingState>()
+            .eventual_failure_side_effects,
+    );
     let cloned_counter = Arc::clone(&counter);
     if ctx
         .run(|| async move {

@@ -8,8 +8,8 @@ pub use builder::{Builder, HandlerOptions, ServiceOptions};
 use crate::endpoint::futures::handler_state_aware::HandlerStateAwareFuture;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
+use crate::extensions::ExtensionMap;
 use crate::service::Service;
-use crate::state::StateMap;
 use ::futures::future::BoxFuture;
 use ::futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use bytes::Bytes;
@@ -152,10 +152,10 @@ impl BoxedService {
     }
 }
 
-/// A service bound to an endpoint: its dispatcher plus the merged (endpoint + service) DI state.
+/// A service bound to an endpoint: its dispatcher plus the merged (endpoint + service) extensions.
 pub(crate) struct BoundService {
     pub(crate) dispatcher: BoxedService,
-    pub(crate) state: Arc<StateMap>,
+    pub(crate) extensions: Arc<ExtensionMap>,
 }
 
 impl Service for BoxedService {
@@ -590,7 +590,7 @@ async fn handle_invocation(
             vm,
             svc_name,
             handler_name,
-            Arc::clone(&bound.state),
+            Arc::clone(&bound.extensions),
             input_rx,
             output_tx,
             handler_state_tx,

@@ -299,48 +299,53 @@ pub trait ContextTimers<'ctx>: private::SealedContext<'ctx> {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 
-/// # Dependency injection / ambient state
+/// # Dependency injection (extensions)
 ///
 /// Handlers are plain functions, so they don't have a `self` to hold dependencies (an HTTP client,
-/// a database pool, configuration, ...). Instead, register such endpoint-lifetime singletons with
-/// `.state(..)` on the [service builder](crate::service()) or the
-/// [endpoint builder](crate::endpoint::Builder::state), and retrieve them by type inside any handler:
+/// a database pool, configuration, ...). Instead, register such endpoint-lifetime singletons as
+/// *extensions* with `.extension(..)` on the [service builder](crate::service::ServiceBuilder::extension)
+/// or the [endpoint builder](crate::endpoint::Builder::extension), and retrieve them by type inside
+/// any handler:
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
 /// # struct HttpClient;
 /// # impl HttpClient { async fn get(&self, _: &str) -> Result<String, HandlerError> { Ok(String::new()) } }
 /// async fn my_handler(ctx: Context<'_>, url: String) -> Result<String, HandlerError> {
-///     let client = ctx.state::<HttpClient>();
+///     let client = ctx.extension::<HttpClient>();
 ///     client.get(&url).await
 /// }
 /// ```
 ///
-/// State is resolved at runtime: [`state`](ContextState::state) panics if the requested type wasn't
-/// registered; use [`try_state`](ContextState::try_state) for optional dependencies.
-pub trait ContextState<'ctx>: private::SealedContext<'ctx> {
-    /// Retrieve a registered ambient state value of type `T`.
+/// Extensions are resolved at runtime: [`extension`](ContextExtensions::extension) panics if the
+/// requested type wasn't registered; use [`try_extension`](ContextExtensions::try_extension) for
+/// optional dependencies.
+///
+/// This is distinct from a Virtual Object's durable K/V [state](ContextReadState) — extensions are
+/// in-memory, process-lifetime dependencies, not persisted per-key state.
+pub trait ContextExtensions<'ctx>: private::SealedContext<'ctx> {
+    /// Retrieve a registered extension of type `T`.
     ///
     /// # Panics
-    /// Panics if no value of type `T` was registered on the service or endpoint builder.
-    fn state<T: Send + Sync + 'static>(&self) -> &'ctx T {
-        self.try_state::<T>().unwrap_or_else(|| {
+    /// Panics if no extension of type `T` was registered on the service or endpoint builder.
+    fn extension<T: Send + Sync + 'static>(&self) -> &'ctx T {
+        self.try_extension::<T>().unwrap_or_else(|| {
             panic!(
-                "Handler `{}` requested ambient state of type `{}`, but it was not registered. \
-                 Register it with `.state(..)` on the service or endpoint builder.",
+                "Handler `{}` requested extension of type `{}`, but it was not registered. \
+                 Register it with `.extension(..)` on the service or endpoint builder.",
                 self.inner_context().handler_name(),
                 std::any::type_name::<T>(),
             )
         })
     }
 
-    /// Retrieve a registered ambient state value of type `T`, or `None` if it wasn't registered.
-    fn try_state<T: Send + Sync + 'static>(&self) -> Option<&'ctx T> {
-        self.inner_context().get_state::<T>()
+    /// Retrieve a registered extension of type `T`, or `None` if it wasn't registered.
+    fn try_extension<T: Send + Sync + 'static>(&self) -> Option<&'ctx T> {
+        self.inner_context().get_extension::<T>()
     }
 }
 
-impl<'ctx, CTX: private::SealedContext<'ctx>> ContextState<'ctx> for CTX {}
+impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
 
 /// # Service Communication
 ///

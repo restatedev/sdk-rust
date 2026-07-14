@@ -71,8 +71,8 @@
 //!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/my_handler`. You can optionally override the handler name via `#[restate_sdk::handler(name = "myHandler")]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
 //! - The first parameter of a handler is always a [`Context`](crate::context::Context) to interact with Restate.
 //!   The SDK stores the actions you do on the context in the Restate journal to make them durable.
-//! - Compose handlers into a service with the `service!` macro (or the [`service()`](crate::service()) builder when you need `.state(..)`), then create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
-//! - Dependencies (an HTTP client, a database pool, ...) are injected as ambient state: register them with `.state(..)` on the [service](crate::service::ServiceBuilder::state) or [endpoint](crate::endpoint::Builder::state) builder, and read them via [`ctx.state::<T>()`](crate::context::ContextState::state). To call this service from another one, generate a typed client with [`interface!`](macro@crate::interface).
+//! - Compose handlers into a service with the `service!` macro (or the [`service()`](crate::service()) builder when you need `.extension(..)`), then create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
+//! - Dependencies (an HTTP client, a database pool, ...) are injected as *extensions*: register them with `.extension(..)` on the [service](crate::service::ServiceBuilder::extension) or [endpoint](crate::endpoint::Builder::extension) builder, and read them via [`ctx.extension::<T>()`](crate::context::ContextExtensions::extension). To call this service from another one, generate a typed client with [`interface!`](macro@crate::interface).
 //!
 //! ## Virtual Objects
 //! [Virtual Objects](https://docs.restate.dev/concepts/services/#virtual-objects) and their handlers are defined similarly to services, with the following differences:
@@ -178,6 +178,7 @@ pub mod service;
 pub mod context;
 pub mod discovery;
 pub mod errors;
+pub(crate) mod extensions;
 #[cfg(feature = "tracing-span-filter")]
 pub mod filter;
 #[cfg(feature = "http_server")]
@@ -187,7 +188,6 @@ pub mod hyper;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod serde;
-pub(crate) mod state;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
 ///
@@ -552,7 +552,7 @@ pub use restate_sdk_macros::handler;
 pub use restate_sdk_macros::interface;
 
 /// Builder entry points to compose [`#[handler]`](macro@crate::handler) functions into a bindable
-/// service. Use these when you need `.state(..)` or to build a service dynamically; otherwise prefer
+/// service. Use these when you need `.extension(..)` or to build a service dynamically; otherwise prefer
 /// the `service!` / `object!` / `workflow!` macros exported by the [`prelude`](crate::prelude).
 pub use crate::service::{object, service, workflow};
 
@@ -592,8 +592,8 @@ pub mod prelude {
     pub use crate::lambda::LambdaEndpoint;
 
     pub use crate::context::{
-        CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
-        ContextSideEffects, ContextState, ContextTimers, ContextWriteState,
+        CallFuture, Context, ContextAwakeables, ContextClient, ContextExtensions, ContextPromises,
+        ContextReadState, ContextSideEffects, ContextTimers, ContextWriteState,
         DurableFuturesUnordered, HeaderMap, InvocationHandle, ObjectContext, Request, RunFuture,
         RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
     };
@@ -610,7 +610,7 @@ pub mod prelude {
     /// workflow in one line — e.g. `service!("Greeter", greet, other)`, `object!("Counter", get, add)`.
     ///
     /// This is sugar over the [`service()`](crate::service())/[`object()`](crate::object())/[`workflow()`](crate::workflow())
-    /// builders; use the builders directly when you need `.state(..)`.
+    /// builders; use the builders directly when you need `.extension(..)`.
     pub use crate::{
         define_object as object, define_service as service, define_workflow as workflow,
     };

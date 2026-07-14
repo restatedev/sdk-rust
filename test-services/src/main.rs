@@ -21,7 +21,7 @@ async fn main() {
     let services = env::var("SERVICES").ok().unwrap_or("*".to_string());
 
     // Ambient state used by the Failing service (process-wide counters).
-    let mut builder = Endpoint::builder().state(failing::FailingState::default());
+    let mut builder = Endpoint::builder().extension(failing::FailingState::default());
 
     if services == "*" || services.contains("Counter") {
         builder = builder.bind(counter::definition())

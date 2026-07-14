@@ -1,6 +1,6 @@
 use crate::endpoint::{BoundService, BoxedService, Endpoint, EndpointInner};
+use crate::extensions::ExtensionMap;
 use crate::service::{IntoServiceDefinition, ServiceDefinition};
-use crate::state::StateMap;
 use restate_sdk_shared_core::{IdentityVerifier, KeyError};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -293,11 +293,11 @@ impl HandlerOptions {
     }
 }
 
-/// A service pending binding: its dispatcher plus its service-scoped DI state. The endpoint-level
-/// state is merged in at [`Builder::build`] time (service state wins on conflict).
+/// A service pending binding: its dispatcher plus its service-scoped extensions (DI). The
+/// endpoint-level extensions are merged in at [`Builder::build`] time (service wins on conflict).
 struct PendingService {
     dispatcher: BoxedService,
-    state: StateMap,
+    extensions: ExtensionMap,
 }
 
 /// Builder for [`Endpoint`]
@@ -306,7 +306,7 @@ pub struct Builder {
     svcs: HashMap<String, PendingService>,
     discovery_services: Vec<crate::discovery::Service>,
     identity_verifier: IdentityVerifier,
-    endpoint_state: StateMap,
+    endpoint_extensions: ExtensionMap,
 }
 
 impl Builder {
@@ -332,23 +332,29 @@ impl Builder {
         let ServiceDefinition {
             mut discovery,
             dispatcher,
-            state,
+            extensions,
         } = definition.into_service_definition();
         discovery.apply_options(service_options);
 
         let name = discovery.name.to_string();
-        self.svcs.insert(name, PendingService { dispatcher, state });
+        self.svcs.insert(
+            name,
+            PendingService {
+                dispatcher,
+                extensions,
+            },
+        );
         self.discovery_services.push(discovery);
         self
     }
 
-    /// Register an endpoint-wide dependency (state), retrievable inside any handler via
-    /// [`ContextState::state`](crate::context::ContextState::state).
+    /// Register an endpoint-wide dependency (extension), retrievable inside any handler via
+    /// [`ContextExtensions::extension`](crate::context::ContextExtensions::extension).
     ///
-    /// Service-level state (set via the service builder's `.state(..)`) overrides endpoint-level
-    /// state of the same type.
-    pub fn state<T: std::any::Any + Send + Sync>(mut self, value: T) -> Self {
-        self.endpoint_state.insert(value);
+    /// Service-level extensions (set via the service builder's `.extension(..)`) override
+    /// endpoint-level extensions of the same type.
+    pub fn extension<T: std::any::Any + Send + Sync>(mut self, value: T) -> Self {
+        self.endpoint_extensions.insert(value);
         self
     }
 
@@ -360,19 +366,19 @@ impl Builder {
 
     /// Build the [`Endpoint`].
     pub fn build(self) -> Endpoint {
-        let endpoint_state = self.endpoint_state;
+        let endpoint_extensions = self.endpoint_extensions;
         let svcs = self
             .svcs
             .into_iter()
             .map(|(name, pending)| {
-                // Merge endpoint-level state with the service-level state (service wins).
-                let mut merged = endpoint_state.clone();
-                merged.overlay(&pending.state);
+                // Merge endpoint-level extensions with the service-level ones (service wins).
+                let mut merged = endpoint_extensions.clone();
+                merged.overlay(&pending.extensions);
                 (
                     name,
                     BoundService {
                         dispatcher: pending.dispatcher,
-                        state: Arc::new(merged),
+                        extensions: Arc::new(merged),
                     },
                 )
             })

@@ -1,6 +1,6 @@
 use crate::endpoint;
 use crate::endpoint::{BoxedService, ContextInternal};
-use crate::state::StateMap;
+use crate::extensions::ExtensionMap;
 use futures::future::BoxFuture;
 use std::any::Any;
 use std::borrow::Cow;
@@ -156,7 +156,7 @@ pub struct ServiceBuilder<Kind> {
     name: String,
     service_type: crate::discovery::ServiceType,
     handlers: Vec<Box<dyn Handler<Kind>>>,
-    state: StateMap,
+    extensions: ExtensionMap,
 }
 
 impl<Kind: 'static> ServiceBuilder<Kind> {
@@ -165,7 +165,7 @@ impl<Kind: 'static> ServiceBuilder<Kind> {
             name,
             service_type,
             handlers: Vec::new(),
-            state: StateMap::new(),
+            extensions: ExtensionMap::new(),
         }
     }
 
@@ -175,11 +175,11 @@ impl<Kind: 'static> ServiceBuilder<Kind> {
         self
     }
 
-    /// Register a service-scoped dependency, retrievable inside handlers via
-    /// [`ContextState::state`](crate::context::ContextState::state). Overrides any endpoint-level
-    /// state of the same type.
-    pub fn state<T: Any + Send + Sync>(mut self, value: T) -> Self {
-        self.state.insert(value);
+    /// Register a service-scoped dependency (extension), retrievable inside handlers via
+    /// [`ContextExtensions::extension`](crate::context::ContextExtensions::extension). Overrides any
+    /// endpoint-level extension of the same type.
+    pub fn extension<T: Any + Send + Sync>(mut self, value: T) -> Self {
+        self.extensions.insert(value);
         self
     }
 
@@ -218,7 +218,7 @@ impl<Kind: 'static> ServiceBuilder<Kind> {
         ServiceDefinition {
             discovery,
             dispatcher: BoxedService::new(HandlerMap { handlers: dispatch }),
-            state: self.state,
+            extensions: self.extensions,
         }
     }
 }
@@ -247,7 +247,7 @@ pub fn workflow(name: impl Into<String>) -> ServiceBuilder<WorkflowKind> {
 pub struct ServiceDefinition {
     pub(crate) discovery: crate::discovery::Service,
     pub(crate) dispatcher: BoxedService,
-    pub(crate) state: StateMap,
+    pub(crate) extensions: ExtensionMap,
 }
 
 impl ServiceDefinition {
@@ -261,7 +261,7 @@ impl ServiceDefinition {
         Self {
             discovery: S::discover(),
             dispatcher: BoxedService::new(s),
-            state: StateMap::new(),
+            extensions: ExtensionMap::new(),
         }
     }
 }
@@ -322,15 +322,15 @@ mod tests {
 
     #[test]
     fn builds_definition_with_discovery_and_state() {
-        let def = service("Greeter").handler(Greet).state(42u32).build();
+        let def = service("Greeter").handler(Greet).extension(42u32).build();
 
         assert!(matches!(def.discovery.ty, ServiceType::Service));
         assert_eq!(def.discovery.name.to_string(), "Greeter");
         assert_eq!(def.discovery.handlers.len(), 1);
         assert_eq!(def.discovery.handlers[0].name.as_str(), "greet");
 
-        // Ambient (service-scoped) state was recorded.
-        assert_eq!(def.state.get::<u32>(), Some(&42));
+        // Ambient (service-scoped) extension was recorded.
+        assert_eq!(def.extensions.get::<u32>(), Some(&42));
 
         slot(Greet); // conformance bound holds for a matching handler
     }
