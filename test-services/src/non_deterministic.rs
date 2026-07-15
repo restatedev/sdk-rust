@@ -1,6 +1,5 @@
 use crate::counter::CounterClient;
 use restate_sdk::prelude::*;
-use restate_sdk::service::ServiceDefinition;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -80,12 +79,9 @@ pub(crate) async fn set_different_key(ctx: ObjectContext<'_>) -> HandlerResult<(
     sleep_then_increment_counter(&ctx).await
 }
 
-pub(crate) fn definition() -> ServiceDefinition {
-    object("NonDeterministic")
-        .extension(NonDetState::default())
-        .handler(either_sleep_or_call)
-        .handler(call_different_method)
-        .handler(background_invoke_with_different_targets)
-        .handler(set_different_key)
-        .build()
-}
+object!(NonDeterministic: {
+    either_sleep_or_call,
+    call_different_method,
+    background_invoke_with_different_targets,
+    set_different_key,
+});

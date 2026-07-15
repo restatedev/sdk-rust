@@ -111,6 +111,15 @@ async fn wf_shared(_ctx: SharedWorkflowContext<'_>, input: String) -> HandlerRes
 
 // Declarative item macros define the service types (+ clients). Distinct names from the
 // deprecated trait-based `MyObject`/`MyWorkflow` above.
+service!(FnService: {
+    fn_my_handler,
+    fn_no_input,
+    fn_no_output,
+    fn_no_input_no_output,
+    fn_std_result,
+    fn_terminal,
+    fn_renamed,
+});
 object!(FnObject: { obj_exclusive, obj_shared });
 workflow!(FnWorkflow: { wf_run, wf_shared });
 
@@ -126,45 +135,14 @@ fn fn_handlers_meta_and_composition() {
     // (compile-only: we don't have a Context here)
     let _call = fn_no_input_no_output::call;
 
-    // The builder is for dynamic composition / per-service extensions.
-    let _service = service("MyService")
-        .extension(0u32)
-        .handler(fn_my_handler)
-        .handler(fn_no_input)
-        .handler(fn_no_output)
-        .handler(fn_no_input_no_output)
-        .handler(fn_std_result)
-        .handler(fn_terminal)
-        .handler(fn_renamed)
-        .build();
-
-    // The declarative macros define bindable service types (+ clients).
+    // The declarative macros define bindable service types; `.with_extension(..)` attaches a
+    // service-scoped dependency.
+    let _def = FnService.with_extension(0u32);
     let _kinds = (FnObject, FnWorkflow);
-}
-
-// interface! generates a client + a conformance-checked server builder.
-restate_sdk::interface! {
-    service GreeterIface {
-        greet(String) -> String;
-        ping() -> ();
-    }
-}
-
-#[test]
-fn interface_server_build() {
-    // Conformance is checked at compile time: fn_my_handler must be
-    // TypedHandler<ServiceKind, Input = String, Output = String>, and
-    // fn_no_input_no_output must be Input = (), Output = ().
-    let _def = GreeterIface::from_handlers(GreeterIfaceHandlers {
-        greet: fn_my_handler,
-        ping: fn_no_input_no_output,
-    });
 }
 
 // The generated client exposes typed methods (compile-only; a real client needs a live context).
 #[allow(dead_code)]
-fn interface_client_compiles<'ctx>(
-    client: &GreeterIfaceClient<'ctx>,
-) -> Request<'ctx, String, String> {
-    client.greet("hi".to_string())
+fn client_compiles<'ctx>(client: &FnServiceClient<'ctx>) -> Request<'ctx, String, String> {
+    client.fn_my_handler("hi".to_string())
 }

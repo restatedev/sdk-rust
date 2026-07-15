@@ -20,8 +20,7 @@ async fn main() {
     let port = env::var("PORT").ok().unwrap_or("9080".to_string());
     let services = env::var("SERVICES").ok().unwrap_or("*".to_string());
 
-    // Ambient state used by the Failing service (process-wide counters).
-    let mut builder = Endpoint::builder().extension(failing::FailingState::default());
+    let mut builder = Endpoint::builder();
 
     if services == "*" || services.contains("Counter") {
         builder = builder.bind(counter::Counter)
@@ -48,7 +47,7 @@ async fn main() {
         builder = builder.bind(cancel_test::CancelTestBlockingService)
     }
     if services == "*" || services.contains("Failing") {
-        builder = builder.bind(failing::Failing)
+        builder = builder.bind(failing::Failing.with_extension(failing::FailingState::default()))
     }
     if services == "*" || services.contains("KillTestRunner") {
         builder = builder.bind(kill_test::KillTestRunner)
@@ -57,7 +56,10 @@ async fn main() {
         builder = builder.bind(kill_test::KillTestSingleton)
     }
     if services == "*" || services.contains("NonDeterministic") {
-        builder = builder.bind(non_deterministic::definition())
+        builder = builder.bind(
+            non_deterministic::NonDeterministic
+                .with_extension(non_deterministic::NonDetState::default()),
+        )
     }
     if services == "*" || services.contains("TestUtilsService") {
         builder = builder.bind(test_utils_service::TestUtilsService)

@@ -72,8 +72,8 @@
 //!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/my_handler`. You can optionally override the handler name via `#[restate_sdk::handler(name = "myHandler")]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
 //! - The first parameter of a handler is always a [`Context`](crate::context::Context) to interact with Restate.
 //!   The SDK stores the actions you do on the context in the Restate journal to make them durable.
-//! - Compose handlers into a service with the `service!` macro (or the [`service()`](crate::service()) builder when you need `.extension(..)`), then create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
-//! - Dependencies (an HTTP client, a database pool, ...) are injected as *extensions*: register them with `.extension(..)` on the [service](crate::service::ServiceBuilder::extension) or [endpoint](crate::endpoint::Builder::extension) builder, and read them via [`ctx.extension::<T>()`](crate::context::ContextExtensions::extension). To call this service from another one, generate a typed client with [`interface!`](macro@crate::interface).
+//! - Compose handlers into a service with the `service!` macro, then create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
+//! - Dependencies (an HTTP client, a database pool, ...) are injected as *extensions*: attach them per-service with [`.with_extension(..)`](crate::service::ServiceDefinition::with_extension) or endpoint-wide with [`Endpoint::builder().extension(..)`](crate::endpoint::Builder::extension), and read them via [`ctx.extension::<T>()`](crate::context::ContextExtensions::extension). To call this service from another one, use the `MyServiceClient` that `service!` generates alongside it.
 //!
 //! ## Virtual Objects
 //! [Virtual Objects](https://docs.restate.dev/concepts/services/#virtual-objects) and their handlers are defined similarly to services, with the following differences:
@@ -103,7 +103,7 @@
 //! }
 //! ```
 //!
-//! - Compose handlers into a Virtual Object with the `object!` macro (or the [`object()`](crate::object()) builder).
+//! - Compose handlers into a Virtual Object with the `object!` macro.
 //! - Exclusive handlers take an [`ObjectContext`](crate::context::ObjectContext) and can write to the K/V state store. Only one exclusive handler can be active at a time per object key, to ensure consistency.
 //! - You can retrieve the key of the object you are in via [`ObjectContext::key`](crate::context::ObjectContext::key).
 //! - A handler that takes a [`SharedObjectContext`](crate::context::SharedObjectContext) executes concurrently with the others and has read-only access to the K/V state — no `#[shared]` annotation needed, it is inferred from the context type.
@@ -141,7 +141,7 @@
 //! }
 //! ```
 //!
-//! - Compose handlers into a Workflow with the `workflow!` macro (or the [`workflow()`](crate::workflow()) builder).
+//! - Compose handlers into a Workflow with the `workflow!` macro.
 //! - The workflow needs a `run` handler whose first argument is a [`WorkflowContext`](crate::context::WorkflowContext).
 //!   The `run` handler executes exactly once per workflow instance.
 //! - The other handlers of the workflow are used to interact with it: either query it, or signal it.
@@ -198,9 +198,8 @@ pub mod serde;
 ///
 /// **Deprecated.** Prefer the function-first API: annotate handlers with
 /// [`#[restate_sdk::handler]`](macro@crate::handler) and compose them with
-/// `service!`/`object!`/`workflow!`,
-/// generating clients with [`interface!`](macro@crate::interface). This trait-based macro still
-/// works for backwards compatibility.
+/// `service!`/`object!`/`workflow!`. This trait-based macro still works for backwards
+/// compatibility.
 ///
 /// </div>
 ///
@@ -306,8 +305,8 @@ pub use restate_sdk_macros::service;
 ///
 /// <div class="warning">
 ///
-/// **Deprecated.** Prefer [`#[restate_sdk::handler]`](macro@crate::handler) +
-/// [`object()`](crate::object()). Kept for backwards compatibility.
+/// **Deprecated.** Prefer [`#[restate_sdk::handler]`](macro@crate::handler) + the `object!` macro.
+/// Kept for backwards compatibility.
 ///
 /// </div>
 ///
@@ -336,8 +335,8 @@ pub use restate_sdk_macros::object;
 ///
 /// <div class="warning">
 ///
-/// **Deprecated.** Prefer [`#[restate_sdk::handler]`](macro@crate::handler) +
-/// [`workflow()`](crate::workflow()). Kept for backwards compatibility.
+/// **Deprecated.** Prefer [`#[restate_sdk::handler]`](macro@crate::handler) + the `workflow!` macro.
+/// Kept for backwards compatibility.
 ///
 /// </div>
 ///
@@ -530,36 +529,6 @@ pub use restate_sdk_macros::workflow;
 /// Override the Restate handler name with `#[restate_sdk::handler(name = "myGreet")]`.
 pub use restate_sdk_macros::handler;
 
-/// Generate a typed client (and a conformance-checked server builder) for a service interface.
-///
-/// This is the opt-in way to call a service from another service, and to keep that client
-/// *separable* from the implementation: place the `interface!` (and the shared request/response
-/// types) in a crate that callers depend on, without importing the handler bodies.
-///
-/// ```rust,no_run
-/// restate_sdk::interface! {
-///     service Greeter {
-///         greet(String) -> String;
-///     }
-/// }
-/// ```
-///
-/// This generates:
-/// * `GreeterClient` — used from another handler via
-///   [`ctx.service_client::<GreeterClient>()`](crate::context::ContextClient::service_client);
-/// * `Greeter::from_handlers(GreeterHandlers { greet })` — builds a
-///   [`ServiceDefinition`](crate::service::ServiceDefinition) where each handler slot is
-///   type-checked against the interface (a mismatched input/output type is a compile error), and
-///   handlers are registered under the interface's declared names.
-///
-/// Use `service`, `object` or `workflow` as the leading keyword to match the service kind.
-pub use restate_sdk_macros::interface;
-
-/// Builder entry points to compose [`#[handler]`](macro@crate::handler) functions into a bindable
-/// service. Use these when you need `.extension(..)` or to build a service dynamically; otherwise prefer
-/// the `service!` / `object!` / `workflow!` macros exported by the [`prelude`](crate::prelude).
-pub use crate::service::{object, service, workflow};
-
 // Declarative composition macros. They are exported from the macros crate under `define_*` names
 // (which don't clash with the deprecated `#[service]`/`#[object]`/`#[workflow]` attribute macros)
 // and re-exported by the `prelude` under the ergonomic names `service!`/`object!`/`workflow!`.
@@ -586,14 +555,8 @@ pub mod prelude {
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
 
-    // Builder entry-point functions (value namespace).
-    pub use crate::service::{object, service, workflow};
-
     /// Declaratively define a service/object/workflow — e.g. `service!(Greeter: { greet, other });`
-    /// defines a `Greeter` type + `GreeterClient`. See [`macro@crate::service`].
-    ///
-    /// The same-named builder functions ([`service()`](crate::service()), ...) remain for dynamic
-    /// composition and `.extension(..)`.
+    /// defines a `Greeter` type (+ a `GreeterClient`) you bind with `Endpoint::builder().bind(Greeter)`.
     pub use crate::{
         define_object as object, define_service as service, define_workflow as workflow,
     };

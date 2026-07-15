@@ -16,7 +16,6 @@ extern crate proc_macro;
 mod ast;
 mod generator;
 mod handler;
-mod interface;
 mod service_def;
 
 use crate::ast::{Object, Service, Workflow};
@@ -58,16 +57,6 @@ pub fn workflow(_: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     handler::expand(attr.into(), item.into())
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
-}
-
-/// Generate a typed client and a conformance-checked server builder for a service interface.
-///
-/// See [`restate_sdk::interface`](../restate_sdk/macro.interface.html) for documentation.
-#[proc_macro]
-pub fn interface(input: TokenStream) -> TokenStream {
-    interface::expand(input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

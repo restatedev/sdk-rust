@@ -303,9 +303,9 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 ///
 /// Handlers are plain functions, so they don't have a `self` to hold dependencies (an HTTP client,
 /// a database pool, configuration, ...). Instead, register such endpoint-lifetime singletons as
-/// *extensions* with `.extension(..)` on the [service builder](crate::service::ServiceBuilder::extension)
-/// or the [endpoint builder](crate::endpoint::Builder::extension), and retrieve them by type inside
-/// any handler:
+/// *extensions* — per-service with [`.with_extension(..)`](crate::service::ServiceDefinition::with_extension)
+/// or endpoint-wide with the [endpoint builder](crate::endpoint::Builder::extension) — and retrieve
+/// them by type inside any handler:
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
@@ -387,7 +387,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
 ///         .call()
 ///         .await?;
 ///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
-///         .interact_with_workflow()
+///         .interact_with_workflow(())
 ///         .call()
 ///         .await?;
 ///  #    Ok(())
@@ -432,7 +432,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
 ///         .run(String::from("Hi!"))
 ///         .send();
 ///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
-///         .interact_with_workflow()
+///         .interact_with_workflow(())
 ///         .send();
 ///  #    Ok(())
 ///  # }
@@ -473,7 +473,7 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
 ///         .run(String::from("Hi!"))
 ///         .send_after(Duration::from_millis(5000));
 ///     ctx.workflow_client::<MyWorkflowClient>("my-workflow-id")
-///         .interact_with_workflow()
+///         .interact_with_workflow(())
 ///         .send_after(Duration::from_millis(5000));
 ///  #    Ok(())
 ///  # }

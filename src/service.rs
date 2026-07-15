@@ -4,14 +4,13 @@ use crate::extensions::ExtensionMap;
 use futures::future::BoxFuture;
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::future::Future;
 
 /// Trait representing a Restate service.
 ///
-/// This is the low-level runtime trait the SDK dispatches to. It is implemented by codegen
-/// (the [`service`](crate::service()) builder and the deprecated trait macros) and can be
-/// implemented by hand for advanced use cases (see [`ServiceDefinition::from_service`]).
+/// This is the low-level runtime trait the SDK dispatches to. It is implemented by codegen (the
+/// `service!`/`object!`/`workflow!` macros and the deprecated trait macros) and can be implemented
+/// by hand for advanced use cases (see [`ServiceDefinition::from_service`]).
 pub trait Service {
     type Future: Future<Output = Result<(), endpoint::Error>> + Send + 'static;
 
@@ -88,8 +87,15 @@ impl HandlerMeta {
 ///
 /// This is the "well-defined trait" that codegen (the [`macro@crate::handler`] attribute macro)
 /// implements for you. `Kind` is a compile-time marker ([`ServiceKind`], [`ObjectKind`],
-/// [`WorkflowKind`]) that prevents mixing handlers of different service kinds in one builder.
+/// [`WorkflowKind`]) that prevents mixing handlers of different service kinds in one service. The
+/// `Input`/`Output` associated types type the generated clients and back the compile-time
+/// conformance check performed by [`macro@crate::interface`].
 pub trait Handler<Kind>: Send + Sync + 'static {
+    /// The handler's deserialized input type.
+    type Input;
+    /// The handler's success output type.
+    type Output;
+
     /// Static metadata for discovery.
     fn meta(&self) -> HandlerMeta;
 
@@ -98,161 +104,11 @@ pub trait Handler<Kind>: Send + Sync + 'static {
     fn handle(&self, ctx: ContextInternal) -> ServiceBoxFuture;
 }
 
-/// A [`Handler`] that additionally exposes its input/output types, used for compile-time
-/// conformance checking by [`macro@crate::interface`].
-pub trait TypedHandler<Kind>: Handler<Kind> {
-    type Input;
-    type Output;
-}
-
-/// Codegen support: wraps a handler to override its discovery/dispatch name.
-///
-/// Used by [`macro@crate::interface`] so that a handler bound to an interface slot is always
-/// registered under the interface's declared name (keeping the generated client and server in sync).
-#[doc(hidden)]
-pub struct Named<H> {
-    pub handler: H,
-    pub name: &'static str,
-}
-
-impl<Kind, H: Handler<Kind>> Handler<Kind> for Named<H> {
-    fn meta(&self) -> HandlerMeta {
-        HandlerMeta {
-            name: Cow::Borrowed(self.name),
-            ..self.handler.meta()
-        }
-    }
-
-    fn handle(&self, ctx: ContextInternal) -> ServiceBoxFuture {
-        self.handler.handle(ctx)
-    }
-}
-
-// ============================ Composition ============================
-
-/// Internal dispatcher: routes an invocation to the right handler by name.
-struct HandlerMap<Kind> {
-    handlers: HashMap<String, Box<dyn Handler<Kind>>>,
-}
-
-impl<Kind: 'static> Service for HandlerMap<Kind> {
-    type Future = ServiceBoxFuture;
-
-    fn handle(&self, ctx: ContextInternal) -> Self::Future {
-        match self.handlers.get(ctx.handler_name()) {
-            Some(handler) => handler.handle(ctx),
-            None => {
-                let err = endpoint::Error::unknown_handler(ctx.service_name(), ctx.handler_name());
-                Box::pin(async move { Err(err) })
-            }
-        }
-    }
-}
-
-/// Builder to compose [`Handler`]s into a bindable [`ServiceDefinition`].
-///
-/// Obtain one via [`service()`], [`object()`] or [`workflow()`].
-pub struct ServiceBuilder<Kind> {
-    name: String,
-    service_type: crate::discovery::ServiceType,
-    handlers: Vec<Box<dyn Handler<Kind>>>,
-    extensions: ExtensionMap,
-}
-
-impl<Kind: 'static> ServiceBuilder<Kind> {
-    fn new(name: String, service_type: crate::discovery::ServiceType) -> Self {
-        Self {
-            name,
-            service_type,
-            handlers: Vec::new(),
-            extensions: ExtensionMap::new(),
-        }
-    }
-
-    /// Add a handler to this service.
-    pub fn handler(mut self, handler: impl Handler<Kind>) -> Self {
-        self.handlers.push(Box::new(handler));
-        self
-    }
-
-    /// Register a service-scoped dependency (extension), retrievable inside handlers via
-    /// [`ContextExtensions::extension`](crate::context::ContextExtensions::extension). Overrides any
-    /// endpoint-level extension of the same type.
-    pub fn extension<T: Any + Send + Sync>(mut self, value: T) -> Self {
-        self.extensions.insert(value);
-        self
-    }
-
-    /// Finalize into a [`ServiceDefinition`] to pass to
-    /// [`Endpoint::builder().bind(..)`](crate::endpoint::Builder::bind).
-    pub fn build(self) -> ServiceDefinition {
-        let mut dispatch: HashMap<String, Box<dyn Handler<Kind>>> =
-            HashMap::with_capacity(self.handlers.len());
-        let mut metas = Vec::with_capacity(self.handlers.len());
-        for handler in self.handlers {
-            let meta = handler.meta();
-            dispatch.insert(meta.name.clone().into_owned(), handler);
-            metas.push(meta);
-        }
-
-        ServiceDefinition {
-            discovery: build_discovery(&self.name, self.service_type, metas),
-            dispatcher: BoxedService::new(HandlerMap { handlers: dispatch }),
-            extensions: self.extensions,
-        }
-    }
-}
-
-/// Codegen support: build a discovery [`Service`](crate::discovery::Service) from handler metadata.
-#[doc(hidden)]
-pub fn build_discovery(
-    name: &str,
-    service_type: crate::discovery::ServiceType,
-    handlers: Vec<HandlerMeta>,
-) -> crate::discovery::Service {
-    crate::discovery::Service {
-        ty: service_type,
-        name: crate::discovery::ServiceName::try_from(name.to_owned()).expect("Service name valid"),
-        handlers: handlers
-            .into_iter()
-            .map(HandlerMeta::into_discovery)
-            .collect(),
-        documentation: None,
-        metadata: Default::default(),
-        abort_timeout: None,
-        inactivity_timeout: None,
-        journal_retention: None,
-        idempotency_retention: None,
-        enable_lazy_state: None,
-        ingress_private: None,
-        retry_policy_initial_interval: None,
-        retry_policy_max_interval: None,
-        retry_policy_max_attempts: None,
-        retry_policy_exponentiation_factor: None,
-        retry_policy_on_max_attempts: None,
-    }
-}
-
-/// Start building a plain [Service](https://docs.restate.dev/concepts/services#services-1).
-pub fn service(name: impl Into<String>) -> ServiceBuilder<ServiceKind> {
-    ServiceBuilder::new(name.into(), crate::discovery::ServiceType::Service)
-}
-
-/// Start building a [Virtual Object](https://docs.restate.dev/concepts/services#virtual-objects).
-pub fn object(name: impl Into<String>) -> ServiceBuilder<ObjectKind> {
-    ServiceBuilder::new(name.into(), crate::discovery::ServiceType::VirtualObject)
-}
-
-/// Start building a [Workflow](https://docs.restate.dev/concepts/services#workflows).
-pub fn workflow(name: impl Into<String>) -> ServiceBuilder<WorkflowKind> {
-    ServiceBuilder::new(name.into(), crate::discovery::ServiceType::Workflow)
-}
-
 // ============================ ServiceDefinition ============================
 
 /// A fully-composed service, ready to be bound to an [`Endpoint`](crate::endpoint::Endpoint).
 ///
-/// Produced by [`ServiceBuilder::build`], and consumed by
+/// Produced by the `service!`/`object!`/`workflow!` macros, and consumed by
 /// [`Endpoint::builder().bind(..)`](crate::endpoint::Builder::bind).
 pub struct ServiceDefinition {
     pub(crate) discovery: crate::discovery::Service,
@@ -275,24 +131,29 @@ impl ServiceDefinition {
         }
     }
 
-    /// Like [`from_service`](Self::from_service), applying [`ServiceOptions`](crate::endpoint::ServiceOptions).
+    /// Register a service-scoped dependency (extension), retrievable inside handlers via
+    /// [`ContextExtensions::extension`](crate::context::ContextExtensions::extension).
     ///
-    /// Backs the `with_options` method generated by the `service!`/`object!`/`workflow!` macros.
-    pub fn from_service_with_options<S>(s: S, options: crate::endpoint::ServiceOptions) -> Self
-    where
-        S: Service<Future = ServiceBoxFuture> + Discoverable + Send + Sync + 'static,
-    {
-        let mut definition = Self::from_service(s);
-        definition.discovery.apply_options(options);
-        definition
+    /// Overrides any endpoint-level extension of the same type.
+    pub fn with_extension<T: Any + Send + Sync>(mut self, value: T) -> Self {
+        self.extensions.insert(value);
+        self
+    }
+
+    /// Apply [`ServiceOptions`](crate::endpoint::ServiceOptions) (timeouts, retention, per-handler
+    /// options, ...) to this definition.
+    pub fn with_options(mut self, options: crate::endpoint::ServiceOptions) -> Self {
+        self.discovery.apply_options(options);
+        self
     }
 }
 
 /// Anything that can be turned into a [`ServiceDefinition`] for
 /// [`Endpoint::builder().bind(..)`](crate::endpoint::Builder::bind).
 ///
-/// Implemented for [`ServiceDefinition`] itself (the new builder output) and, via a blanket impl,
-/// for any [`Service`] + [`Discoverable`] (the deprecated `.serve()` values).
+/// Implemented for [`ServiceDefinition`], for the service types generated by the
+/// `service!`/`object!`/`workflow!` macros, and, via a blanket impl, for any [`Service`] +
+/// [`Discoverable`] (the deprecated `.serve()` values).
 pub trait IntoServiceDefinition {
     fn into_service_definition(self) -> ServiceDefinition;
 }
@@ -312,14 +173,62 @@ where
     }
 }
 
+/// Codegen support used by the `service!`/`object!`/`workflow!` macros.
+///
+/// Not part of the public API.
+#[doc(hidden)]
+pub mod macro_support {
+    use super::*;
+
+    /// Build the discovery manifest for a service from its handlers' [`HandlerMeta`]. Backs the
+    /// `Discoverable` impl the `service!`/`object!`/`workflow!` macros generate; the dispatch
+    /// `match` itself is hardcoded in the generated [`Service`] impl.
+    pub fn build_discovery(
+        name: &str,
+        service_type: crate::discovery::ServiceType,
+        handlers: Vec<HandlerMeta>,
+    ) -> crate::discovery::Service {
+        crate::discovery::Service {
+            ty: service_type,
+            name: crate::discovery::ServiceName::try_from(name.to_owned())
+                .expect("Service name valid"),
+            handlers: handlers
+                .into_iter()
+                .map(HandlerMeta::into_discovery)
+                .collect(),
+            documentation: None,
+            metadata: Default::default(),
+            abort_timeout: None,
+            inactivity_timeout: None,
+            journal_retention: None,
+            idempotency_retention: None,
+            enable_lazy_state: None,
+            ingress_private: None,
+            retry_policy_initial_interval: None,
+            retry_policy_max_interval: None,
+            retry_policy_max_attempts: None,
+            retry_policy_exponentiation_factor: None,
+            retry_policy_on_max_attempts: None,
+        }
+    }
+
+    /// Dispatcher fallback for when an invocation names a handler this service doesn't define.
+    pub fn unknown_handler(ctx: &ContextInternal) -> ServiceBoxFuture {
+        let err = endpoint::Error::unknown_handler(ctx.service_name(), ctx.handler_name());
+        Box::pin(async move { Err(err) })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::discovery::ServiceType;
 
-    // Hand-written handler, mirroring what `#[restate::handler]` will generate.
+    // Hand-written handler, mirroring what `#[restate::handler]` generates.
     struct Greet;
     impl Handler<ServiceKind> for Greet {
+        type Input = String;
+        type Output = String;
         fn meta(&self) -> HandlerMeta {
             HandlerMeta {
                 name: "greet".into(),
@@ -333,27 +242,39 @@ mod tests {
             Box::pin(async { Ok(()) })
         }
     }
-    impl TypedHandler<ServiceKind> for Greet {
-        type Input = String;
-        type Output = String;
+
+    // Hand-written dispatcher + discovery, mirroring what the `service!` macro generates: a
+    // hardcoded name→handler `match` and a `Discoverable` impl driven by `build_discovery`.
+    struct GreeterSvc;
+    impl Service for GreeterSvc {
+        type Future = ServiceBoxFuture;
+        fn handle(&self, ctx: ContextInternal) -> Self::Future {
+            if ctx.handler_name() == "greet" {
+                return Greet.handle(ctx);
+            }
+            macro_support::unknown_handler(&ctx)
+        }
+    }
+    impl Discoverable for GreeterSvc {
+        fn discover() -> crate::discovery::Service {
+            macro_support::build_discovery("Greeter", ServiceType::Service, vec![Greet.meta()])
+        }
     }
 
-    // Proves the conformance-slot bound compiles: this is what `interface!` will generate for
-    // each declared handler, guaranteeing the impl's input/output types match the interface.
-    fn slot<H: TypedHandler<ServiceKind, Input = String, Output = String>>(_h: H) {}
+    // Proves the client-typing bound compiles: the generated client reads a handler's
+    // input/output through these associated types.
+    fn slot<H: Handler<ServiceKind, Input = String, Output = String>>(_h: H) {}
 
     #[test]
-    fn builds_definition_with_discovery_and_state() {
-        let def = service("Greeter").handler(Greet).extension(42u32).build();
+    fn builds_definition_with_discovery_and_extension() {
+        let def = ServiceDefinition::from_service(GreeterSvc).with_extension(42u32);
 
         assert!(matches!(def.discovery.ty, ServiceType::Service));
         assert_eq!(def.discovery.name.to_string(), "Greeter");
         assert_eq!(def.discovery.handlers.len(), 1);
         assert_eq!(def.discovery.handlers[0].name.as_str(), "greet");
-
-        // Ambient (service-scoped) extension was recorded.
         assert_eq!(def.extensions.get::<u32>(), Some(&42));
 
-        slot(Greet); // conformance bound holds for a matching handler
+        slot(Greet); // input/output bound holds for a matching handler
     }
 }

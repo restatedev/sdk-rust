@@ -11,8 +11,8 @@
 //! Implementation of the `#[restate_sdk::handler]` attribute macro.
 //!
 //! Turns a free `async fn` into a by-value handler value implementing
-//! `restate_sdk::service::Handler` (and `TypedHandler`). The service kind and whether the handler
-//! is shared are inferred from the context-type of the first parameter.
+//! `restate_sdk::service::Handler`. The service kind and whether the handler is shared are
+//! inferred from the context-type of the first parameter.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -279,6 +279,9 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
         }
 
         impl ::restate_sdk::service::Handler<#kind_path> for #ident {
+            type Input = #input_assoc;
+            type Output = #ok_ty;
+
             fn meta(&self) -> ::restate_sdk::service::HandlerMeta {
                 ::restate_sdk::service::HandlerMeta {
                     name: ::std::borrow::Cow::Borrowed(#name_lit),
@@ -301,11 +304,6 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
                     ::core::result::Result::Ok(())
                 })
             }
-        }
-
-        impl ::restate_sdk::service::TypedHandler<#kind_path> for #ident {
-            type Input = #input_assoc;
-            type Output = #ok_ty;
         }
     })
 }

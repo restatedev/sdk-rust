@@ -317,8 +317,8 @@ impl Builder {
 
     /// Add a service to this endpoint.
     ///
-    /// Pass the result of [`service()`](crate::service())/[`object()`](crate::object())/[`workflow()`](crate::workflow())`.build()`.
-    /// The deprecated trait macros' `.serve()` values are also accepted.
+    /// Pass a service type defined with the `service!`/`object!`/`workflow!` macros (optionally
+    /// `.with_options(..)`/`.with_extension(..)`), or (deprecated) a `.serve()` value.
     pub fn bind(self, definition: impl IntoServiceDefinition) -> Self {
         self.bind_with_options(definition, ServiceOptions::default())
     }

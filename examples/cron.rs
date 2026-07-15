@@ -12,22 +12,15 @@ use std::time::Duration;
 //
 //   $ curl -v http://localhost:8080/PeriodicTask/my-periodic-task/start
 //
-// The interface generates `PeriodicTaskClient` (used for the self-call below) and the
-// conformance-checked `PeriodicTask::server` builder.
-restate_sdk::interface! {
-    object PeriodicTask {
-        start() -> ();
-        stop() -> ();
-        run() -> ();
-    }
-}
+// `object!` defines `PeriodicTask` (+ `PeriodicTaskClient`, used for the self-call below).
+object!(PeriodicTask: { start, stop, run });
 
 const ACTIVE: &str = "active";
 
 fn schedule_next(ctx: &ObjectContext<'_>) {
     // To schedule, create a client to the callee handler (in this case, we're calling ourselves)
     ctx.object_client::<PeriodicTaskClient>(ctx.key())
-        .run()
+        .run(())
         // And send with a delay
         .send_after(Duration::from_secs(10));
 }
@@ -82,8 +75,7 @@ async fn run(ctx: ObjectContext<'_>) -> Result<(), TerminalError> {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let task = PeriodicTask::from_handlers(PeriodicTaskHandlers { start, stop, run });
-    HttpServer::new(Endpoint::builder().bind(task).build())
+    HttpServer::new(Endpoint::builder().bind(PeriodicTask).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }
