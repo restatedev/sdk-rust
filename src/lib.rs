@@ -191,6 +191,8 @@ pub mod serde;
 /// [`#[restate_sdk::handler]`](macro@crate::handler) and compose them with
 /// `service!`/`object!`/`workflow!`. **This macro will be removed in the next releases**.
 ///
+/// See the [migration guide](https://github.com/restatedev/sdk-rust/blob/main/MIGRATION.md) to move to the new API.
+///
 /// </div>
 #[deprecated]
 pub use restate_sdk_macros::service;
@@ -202,6 +204,8 @@ pub use restate_sdk_macros::service;
 /// **Deprecated.** Prefer the function-first API: annotate handlers with
 /// [`#[restate_sdk::handler]`](macro@crate::handler) and compose them with
 /// `service!`/`object!`/`workflow!`. **This macro will be removed in the next releases**.
+///
+/// See the [migration guide](https://github.com/restatedev/sdk-rust/blob/main/MIGRATION.md) to move to the new API.
 ///
 /// </div>
 #[deprecated]
@@ -217,6 +221,8 @@ pub use restate_sdk_macros::object;
 /// **Deprecated.** Prefer the function-first API: annotate handlers with
 /// [`#[restate_sdk::handler]`](macro@crate::handler) and compose them with
 /// `service!`/`object!`/`workflow!`. **This macro will be removed in the next releases**.
+///
+/// See the [migration guide](https://github.com/restatedev/sdk-rust/blob/main/MIGRATION.md) to move to the new API.
 ///
 /// </div>
 #[deprecated]
