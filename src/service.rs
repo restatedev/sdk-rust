@@ -92,15 +92,13 @@ where
     }
 }
 
-/// Codegen support used by the `service!`/`object!`/`workflow!` macros.
-///
-/// Not part of the public API.
 #[doc(hidden)]
 pub mod macro_support {
     use super::*;
 
-    /// Boxed future returned by a [`Service`]'s `handle`. Codegen sets `Service::Future` to this.
     pub type ServiceBoxFuture = BoxFuture<'static, Result<(), endpoint::Error>>;
+
+    // --- Markers used for compile time checking of handler compositions.
 
     /// Marker for plain [Services](https://docs.restate.dev/concepts/services#services-1), so
     /// handlers of one kind can't be composed into a service of another kind.
@@ -113,13 +111,7 @@ pub mod macro_support {
     #[derive(Clone, Copy, Debug, Default)]
     pub struct WorkflowKind;
 
-    /// A single Restate handler, as a composable value.
-    ///
-    /// The trait the [`macro@crate::handler`] attribute macro implements for you. `Kind` is a
-    /// compile-time marker ([`ServiceKind`], [`ObjectKind`], [`WorkflowKind`]) that prevents mixing
-    /// handlers of different service kinds in one service. `Input`/`Output` type the generated
-    /// clients and drive the discovery payloads (via their
-    /// [`PayloadMetadata`](crate::serde::PayloadMetadata) impls).
+    /// Handler trait that `handler` macro generates.
     pub trait Handler<Kind>: Send + Sync + 'static {
         /// The handler's input type: the client's argument type, and the source of the discovery
         /// input payload. `()` renders as an empty (no-body) payload.
@@ -142,8 +134,6 @@ pub mod macro_support {
         fn handle(&self, ctx: ContextInternal) -> ServiceBoxFuture;
     }
 
-    /// Build a handler's discovery entry from its [`Handler`] impl: name + kind + the input/output
-    /// payloads (derived from the `Input`/`Output` associated types) + per-handler options.
     pub fn handler_into_discovery<Kind, H>(handler: &H) -> crate::discovery::Handler
     where
         H: Handler<Kind>,
@@ -173,9 +163,6 @@ pub mod macro_support {
         discovery
     }
 
-    /// Assemble the service discovery manifest from its handlers' discovery entries. Backs the
-    /// `Discoverable` impl the `service!`/`object!`/`workflow!` macros generate; the dispatch
-    /// `match` itself is hardcoded in the generated [`Service`] impl.
     pub fn service_into_discovery(
         name: &str,
         service_type: crate::discovery::ServiceType,

@@ -293,9 +293,7 @@ impl HandlerOptions {
     }
 }
 
-/// A service pending binding: its dispatcher plus its service-scoped extensions (DI). The
-/// endpoint-level extensions are merged in at [`Builder::build`] time (service wins on conflict).
-struct PendingService {
+struct BindService {
     dispatcher: BoxedService,
     extensions: ExtensionMap,
 }
@@ -303,7 +301,7 @@ struct PendingService {
 /// Builder for [`Endpoint`]
 #[derive(Default)]
 pub struct Builder {
-    svcs: HashMap<String, PendingService>,
+    svcs: HashMap<String, BindService>,
     discovery_services: Vec<crate::discovery::Service>,
     identity_verifier: IdentityVerifier,
     endpoint_extensions: ExtensionMap,
@@ -350,7 +348,7 @@ impl Builder {
         let name = discovery.name.to_string();
         self.svcs.insert(
             name,
-            PendingService {
+            BindService {
                 dispatcher,
                 extensions,
             },
@@ -381,14 +379,14 @@ impl Builder {
         let svcs = self
             .svcs
             .into_iter()
-            .map(|(name, pending)| {
+            .map(|(name, svc)| {
                 // Merge endpoint-level extensions with the service-level ones (service wins).
                 let mut merged = endpoint_extensions.clone();
-                merged.overlay(&pending.extensions);
+                merged.overlay(&svc.extensions);
                 (
                     name,
                     BoundService {
-                        dispatcher: pending.dispatcher,
+                        dispatcher: svc.dispatcher,
                         extensions: Arc::new(merged),
                     },
                 )

@@ -278,7 +278,7 @@ pub mod prelude {
     ///
     /// `service!(Name: { handler, .. })` takes the service name and the handlers, and generates:
     ///
-    /// * A zero-sized `Greeter` type implementing [`Service`](crate::service::Service), to bind in
+    /// * A `Greeter` type implementing [`Service`](crate::service::Service), to bind in
     ///   the [`Endpoint`](crate::prelude::Endpoint) and expose it:
     ///
     /// ```rust,no_run
