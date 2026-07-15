@@ -13,5 +13,5 @@ pub async fn interact_with_workflow(_ctx: SharedWorkflowContext<'_>) -> Result<(
     Ok(())
 }
 
-// Defines `MyWorkflow` (+ `MyWorkflowClient`).
+// Defines MyWorkflow
 workflow!(MyWorkflow: { run, interact_with_workflow });

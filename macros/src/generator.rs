@@ -142,7 +142,7 @@ impl<'a> ServiceGenerator<'a> {
             impl<S> ::restate_sdk::service::Service for #serve_ident<S>
                 where S: #service_ident + Send + Sync + 'static,
             {
-                type Future = ::restate_sdk::service::ServiceBoxFuture;
+                type Future = ::restate_sdk::service::macro_support::ServiceBoxFuture;
 
                 fn handle(&self, ctx: ::restate_sdk::endpoint::ContextInternal) -> Self::Future {
                     let service_clone = ::std::sync::Arc::clone(&self.service);

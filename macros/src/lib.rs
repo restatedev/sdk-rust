@@ -16,6 +16,7 @@ extern crate proc_macro;
 mod ast;
 mod generator;
 mod handler;
+mod names;
 mod service_def;
 
 use crate::ast::{Object, Service, Workflow};

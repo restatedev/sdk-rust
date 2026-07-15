@@ -47,7 +47,7 @@ async fn main() {
         builder = builder.bind(cancel_test::CancelTestBlockingService)
     }
     if services == "*" || services.contains("Failing") {
-        builder = builder.bind(failing::Failing.with_extension(failing::FailingState::default()))
+        builder = builder.bind(failing::Failing.extension(failing::FailingState::default()))
     }
     if services == "*" || services.contains("KillTestRunner") {
         builder = builder.bind(kill_test::KillTestRunner)
@@ -58,7 +58,7 @@ async fn main() {
     if services == "*" || services.contains("NonDeterministic") {
         builder = builder.bind(
             non_deterministic::NonDeterministic
-                .with_extension(non_deterministic::NonDetState::default()),
+                .extension(non_deterministic::NonDetState::default()),
         )
     }
     if services == "*" || services.contains("TestUtilsService") {

@@ -128,6 +128,7 @@ impl ServiceInner {
                 attrs.push(attr);
             }
         }
+        crate::names::validate_service_name(&restate_name, ident.span())?;
 
         Ok(Self {
             attrs,
@@ -230,6 +231,7 @@ impl Parse for Handler {
                 attrs.push(attr);
             }
         }
+        crate::names::validate_handler_name(&restate_name, ident.span())?;
 
         Ok(Self {
             attrs,

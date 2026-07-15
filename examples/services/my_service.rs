@@ -5,5 +5,5 @@ pub async fn my_handler(_ctx: Context<'_>, greeting: String) -> Result<String, H
     Ok(format!("{greeting}!"))
 }
 
-// Defines `MyService` (+ `MyServiceClient`, used to call this service from another handler).
+// Defines MyService
 service!(MyService: { my_handler });

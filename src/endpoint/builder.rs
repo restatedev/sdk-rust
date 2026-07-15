@@ -318,13 +318,24 @@ impl Builder {
     /// Add a service to this endpoint.
     ///
     /// Pass a service type defined with the `service!`/`object!`/`workflow!` macros (optionally
-    /// `.with_options(..)`/`.with_extension(..)`), or (deprecated) a `.serve()` value.
+    /// `.options(..)`/`.extension(..)`), or (deprecated) a `.serve()` value.
     pub fn bind(self, definition: impl IntoServiceDefinition) -> Self {
-        self.bind_with_options(definition, ServiceOptions::default())
+        self.bind_inner(definition, ServiceOptions::default())
     }
 
     /// Like [`bind`](Self::bind), but providing options.
+    #[deprecated(
+        note = "attach options to the service definition with `.options(..)`, then `bind(..)` it"
+    )]
     pub fn bind_with_options(
+        self,
+        definition: impl IntoServiceDefinition,
+        service_options: ServiceOptions,
+    ) -> Self {
+        self.bind_inner(definition, service_options)
+    }
+
+    fn bind_inner(
         mut self,
         definition: impl IntoServiceDefinition,
         service_options: ServiceOptions,

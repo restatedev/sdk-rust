@@ -13,5 +13,5 @@ pub async fn my_concurrent_handler(
     Ok(format!("Greetings {} {}", greeting, ctx.key()))
 }
 
-// Defines `MyVirtualObject` (+ `MyVirtualObjectClient`).
+// Defines MyVirtualObject
 object!(MyVirtualObject: { my_handler, my_concurrent_handler });

@@ -8,6 +8,7 @@
 //! - have the [`Serialize`] and [`Deserialize`] trait implemented. If you need to use a type for the handler input/output, you'll also need to implement [PayloadMetadata] to reply with correct content type and enable **JSON schema generation**.
 //!
 
+use crate::discovery::{InputPayload, OutputPayload};
 use bytes::Bytes;
 use std::convert::Infallible;
 
@@ -152,6 +153,22 @@ pub trait PayloadMetadata {
     fn output_metadata() -> OutputMetadata {
         OutputMetadata::default()
     }
+
+    #[doc(hidden)]
+    fn input_payload() -> InputPayload
+    where
+        Self: Sized,
+    {
+        InputPayload::from_metadata::<Self>()
+    }
+
+    #[doc(hidden)]
+    fn output_payload() -> OutputPayload
+    where
+        Self: Sized,
+    {
+        OutputPayload::from_metadata::<Self>()
+    }
 }
 
 /// This struct encapsulates input payload metadata used by discovery.
@@ -211,6 +228,16 @@ impl Deserialize for () {
 
     fn deserialize(_: &mut Bytes) -> Result<Self, Self::Error> {
         Ok(())
+    }
+}
+
+impl PayloadMetadata for () {
+    fn input_payload() -> InputPayload {
+        InputPayload::empty()
+    }
+
+    fn output_payload() -> OutputPayload {
+        OutputPayload::empty()
     }
 }
 

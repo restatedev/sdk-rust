@@ -1,0 +1,5 @@
+error: invalid handler name "bad name": character ' ' is not allowed
+ --> tests/ui/invalid_handler_name.rs:7:10
+  |
+7 | async fn greet(_ctx: Context<'_>) -> HandlerResult<()> {
+  |          ^^^^^

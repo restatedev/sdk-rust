@@ -11,8 +11,8 @@
 //! Implementation of the `#[restate_sdk::handler]` attribute macro.
 //!
 //! Turns a free `async fn` into a by-value handler value implementing
-//! `restate_sdk::service::Handler`. The service kind and whether the handler is shared are
-//! inferred from the context-type of the first parameter.
+//! `restate_sdk::service::macro_support::Handler`. The service kind and whether the handler is
+//! shared are inferred from the context-type of the first parameter.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -53,12 +53,12 @@ impl CtxKind {
     /// The marker type path for `Handler<Kind>`.
     fn kind_path(&self) -> TokenStream {
         match self {
-            CtxKind::Service => quote!(::restate_sdk::service::ServiceKind),
+            CtxKind::Service => quote!(::restate_sdk::service::macro_support::ServiceKind),
             CtxKind::ObjectExclusive | CtxKind::ObjectShared => {
-                quote!(::restate_sdk::service::ObjectKind)
+                quote!(::restate_sdk::service::macro_support::ObjectKind)
             }
             CtxKind::WorkflowRun | CtxKind::WorkflowShared => {
-                quote!(::restate_sdk::service::WorkflowKind)
+                quote!(::restate_sdk::service::macro_support::WorkflowKind)
             }
         }
     }
@@ -220,17 +220,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     let ok_ty = extract_ok_type(&func.sig.output)?;
     let input_ty: Option<Type> = input_arg.map(|pt| (*pt.ty).clone());
 
-    // Discovery schemas.
-    let input_schema = match &input_ty {
-        Some(ty) => quote!(::restate_sdk::discovery::InputPayload::from_metadata::<#ty>()),
-        None => quote!(::restate_sdk::discovery::InputPayload::empty()),
-    };
-    let output_schema = match &ok_ty {
-        Type::Tuple(t) if t.elems.is_empty() => {
-            quote!(::restate_sdk::discovery::OutputPayload::empty())
-        }
-        _ => quote!(::restate_sdk::discovery::OutputPayload::from_metadata::<#ok_ty>()),
-    };
+    // Associated `Input`/`Output` types: the real types, or `()` for no input/output. `()` impls
+    // `PayloadMetadata` by rendering as an empty discovery payload, so discovery derives from these.
     let input_assoc = match &input_ty {
         Some(ty) => quote!(#ty),
         None => quote!(()),
@@ -252,10 +243,11 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
 
     let restate_name = attrs.name.unwrap_or_else(|| func.sig.ident.to_string());
     let name_lit = syn::LitStr::new(&restate_name, func.sig.ident.span());
-    let lazy_state = if attrs.lazy_state {
-        quote!(::core::option::Option::Some(true))
+    crate::names::validate_handler_name(&restate_name, name_lit.span())?;
+    let options_expr = if attrs.lazy_state {
+        quote!(::restate_sdk::endpoint::HandlerOptions::default().enable_lazy_state(true))
     } else {
-        quote!(::core::option::Option::None)
+        quote!(::restate_sdk::endpoint::HandlerOptions::default())
     };
 
     let vis = &func.vis;
@@ -274,28 +266,31 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
             /// The Restate wire name of this handler (respects `#[handler(name = "...")]`).
             #vis const NAME: &'static str = #name_lit;
 
-            /// Invoke the handler body directly (e.g. for unit tests).
+            /// The handler body as a plain async fn: reusable from other handlers and invoked by
+            /// the dispatch shim below.
             #vis async fn call(#inputs) #output #block
         }
 
-        impl ::restate_sdk::service::Handler<#kind_path> for #ident {
+        impl ::restate_sdk::service::macro_support::Handler<#kind_path> for #ident {
             type Input = #input_assoc;
             type Output = #ok_ty;
 
-            fn meta(&self) -> ::restate_sdk::service::HandlerMeta {
-                ::restate_sdk::service::HandlerMeta {
-                    name: ::std::borrow::Cow::Borrowed(#name_lit),
-                    ty: #discovery_ty,
-                    input: #input_schema,
-                    output: #output_schema,
-                    enable_lazy_state: #lazy_state,
-                }
+            fn name(&self) -> ::std::borrow::Cow<'static, str> {
+                ::std::borrow::Cow::Borrowed(#name_lit)
+            }
+
+            fn ty(&self) -> ::core::option::Option<::restate_sdk::discovery::HandlerType> {
+                #discovery_ty
+            }
+
+            fn options(&self) -> ::restate_sdk::endpoint::HandlerOptions {
+                #options_expr
             }
 
             fn handle(
                 &self,
                 ctx: ::restate_sdk::endpoint::ContextInternal,
-            ) -> ::restate_sdk::service::ServiceBoxFuture {
+            ) -> ::restate_sdk::service::macro_support::ServiceBoxFuture {
                 ::std::boxed::Box::pin(async move {
                     #get_input_and_call
                     let res = fut.await.map_err(::restate_sdk::errors::HandlerError::from);

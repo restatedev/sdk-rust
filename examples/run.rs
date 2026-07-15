@@ -30,7 +30,7 @@ service!(RunExample: { do_run });
 async fn main() {
     tracing_subscriber::fmt::init();
     // The HTTP client is injected as a service-scoped extension.
-    let run_example = RunExample.with_extension(reqwest::Client::new());
+    let run_example = RunExample.extension(reqwest::Client::new());
     HttpServer::new(Endpoint::builder().bind(run_example).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;

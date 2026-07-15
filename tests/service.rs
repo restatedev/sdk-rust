@@ -56,6 +56,15 @@ fn renamed_service_handler() {
     assert_eq!(discovery.handlers[0].name.to_string(), "myRenamedHandler");
 }
 
+// Smoke test: the deprecated trait API still composes and binds via `.serve()`. Compile-focused —
+// `build()` does no I/O, so this just proves the old `serve()` -> `bind()` path still type-checks.
+#[test]
+fn old_api_serve_and_bind_compiles() {
+    let _ = Endpoint::builder()
+        .bind(MyRenamedServiceImpl.serve())
+        .build();
+}
+
 // ============================ New function-first API ============================
 
 // Service handlers, covering all the input/output/error shapes.
@@ -125,19 +134,15 @@ workflow!(FnWorkflow: { wf_run, wf_shared });
 
 #[test]
 fn fn_handlers_meta_and_composition() {
-    use restate_sdk::service::Handler;
+    use restate_sdk::service::macro_support::Handler;
 
-    // meta() is generated correctly, including name override.
-    assert_eq!(fn_my_handler.meta().name.as_ref(), "fn_my_handler");
-    assert_eq!(fn_renamed.meta().name.as_ref(), "myRenamedFnHandler");
+    // name() is generated correctly, including the `#[handler(name = ..)]` override.
+    assert_eq!(fn_my_handler.name().as_ref(), "fn_my_handler");
+    assert_eq!(fn_renamed.name().as_ref(), "myRenamedFnHandler");
 
-    // The body remains directly callable for unit tests.
-    // (compile-only: we don't have a Context here)
-    let _call = fn_no_input_no_output::call;
-
-    // The declarative macros define bindable service types; `.with_extension(..)` attaches a
+    // The declarative macros define bindable service types; `.extension(..)` attaches a
     // service-scoped dependency.
-    let _def = FnService.with_extension(0u32);
+    let _def = FnService.extension(0u32);
     let _kinds = (FnObject, FnWorkflow);
 }
 

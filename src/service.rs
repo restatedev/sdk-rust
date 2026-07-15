@@ -10,7 +10,8 @@ use std::future::Future;
 ///
 /// This is the low-level runtime trait the SDK dispatches to. It is implemented by codegen (the
 /// `service!`/`object!`/`workflow!` macros and the deprecated trait macros) and can be implemented
-/// by hand for advanced use cases (see [`ServiceDefinition::from_service`]).
+/// by hand for advanced use cases (implement [`Discoverable`] too and bind it via
+/// [`IntoServiceDefinition`]).
 pub trait Service {
     type Future: Future<Output = Result<(), endpoint::Error>> + Send + 'static;
 
@@ -23,85 +24,6 @@ pub trait Service {
 /// This is used by codegen.
 pub trait Discoverable {
     fn discover() -> crate::discovery::Service;
-}
-
-/// Used by codegen
-#[doc(hidden)]
-pub type ServiceBoxFuture = BoxFuture<'static, Result<(), endpoint::Error>>;
-
-// ============================ Handler abstraction ============================
-
-/// Marker for plain [Services](https://docs.restate.dev/concepts/services#services-1). Used so that
-/// handlers of one kind cannot be composed into a service of another kind.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ServiceKind;
-/// Marker for [Virtual Objects](https://docs.restate.dev/concepts/services#virtual-objects).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ObjectKind;
-/// Marker for [Workflows](https://docs.restate.dev/concepts/services#workflows).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WorkflowKind;
-
-/// Static metadata describing a single handler, used to build the discovery manifest.
-#[derive(Clone)]
-pub struct HandlerMeta {
-    /// The Restate name of the handler.
-    pub name: Cow<'static, str>,
-    /// The handler type, or `None` to use the discovery manifest default (exclusive).
-    pub ty: Option<crate::discovery::HandlerType>,
-    /// Input payload schema.
-    pub input: crate::discovery::InputPayload,
-    /// Output payload schema.
-    pub output: crate::discovery::OutputPayload,
-    /// Whether lazy state is enabled for this handler.
-    pub enable_lazy_state: Option<bool>,
-}
-
-impl HandlerMeta {
-    fn into_discovery(self) -> crate::discovery::Handler {
-        crate::discovery::Handler {
-            name: crate::discovery::HandlerName::try_from(self.name.into_owned())
-                .expect("Handler name valid"),
-            input: Some(self.input),
-            output: Some(self.output),
-            ty: self.ty,
-            documentation: None,
-            metadata: Default::default(),
-            abort_timeout: None,
-            inactivity_timeout: None,
-            journal_retention: None,
-            idempotency_retention: None,
-            workflow_completion_retention: None,
-            enable_lazy_state: self.enable_lazy_state,
-            ingress_private: None,
-            retry_policy_initial_interval: None,
-            retry_policy_max_interval: None,
-            retry_policy_max_attempts: None,
-            retry_policy_exponentiation_factor: None,
-            retry_policy_on_max_attempts: None,
-        }
-    }
-}
-
-/// A single Restate handler, as a composable value.
-///
-/// This is the "well-defined trait" that codegen (the [`macro@crate::handler`] attribute macro)
-/// implements for you. `Kind` is a compile-time marker ([`ServiceKind`], [`ObjectKind`],
-/// [`WorkflowKind`]) that prevents mixing handlers of different service kinds in one service. The
-/// `Input`/`Output` associated types type the generated clients and back the compile-time
-/// conformance check performed by [`macro@crate::interface`].
-pub trait Handler<Kind>: Send + Sync + 'static {
-    /// The handler's deserialized input type.
-    type Input;
-    /// The handler's success output type.
-    type Output;
-
-    /// Static metadata for discovery.
-    fn meta(&self) -> HandlerMeta;
-
-    /// Handle an incoming invocation. Takes ownership of the [`ContextInternal`] and builds the
-    /// user-facing context borrow internally.
-    fn handle(&self, ctx: ContextInternal) -> ServiceBoxFuture;
 }
 
 // ============================ ServiceDefinition ============================
@@ -117,12 +39,9 @@ pub struct ServiceDefinition {
 }
 
 impl ServiceDefinition {
-    /// Build a definition from a hand-rolled [`Service`] + [`Discoverable`] implementation.
-    ///
-    /// This is the escape hatch used for back-compat with the deprecated trait macros.
-    pub fn from_service<S>(s: S) -> Self
+    pub(crate) fn from_service<S>(s: S) -> Self
     where
-        S: Service<Future = ServiceBoxFuture> + Discoverable + Send + Sync + 'static,
+        S: Service<Future = macro_support::ServiceBoxFuture> + Discoverable + Send + Sync + 'static,
     {
         Self {
             discovery: S::discover(),
@@ -135,14 +54,14 @@ impl ServiceDefinition {
     /// [`ContextExtensions::extension`](crate::context::ContextExtensions::extension).
     ///
     /// Overrides any endpoint-level extension of the same type.
-    pub fn with_extension<T: Any + Send + Sync>(mut self, value: T) -> Self {
+    pub fn extension<T: Any + Send + Sync>(mut self, value: T) -> Self {
         self.extensions.insert(value);
         self
     }
 
     /// Apply [`ServiceOptions`](crate::endpoint::ServiceOptions) (timeouts, retention, per-handler
     /// options, ...) to this definition.
-    pub fn with_options(mut self, options: crate::endpoint::ServiceOptions) -> Self {
+    pub fn options(mut self, options: crate::endpoint::ServiceOptions) -> Self {
         self.discovery.apply_options(options);
         self
     }
@@ -166,7 +85,7 @@ impl IntoServiceDefinition for ServiceDefinition {
 
 impl<S> IntoServiceDefinition for S
 where
-    S: Service<Future = ServiceBoxFuture> + Discoverable + Send + Sync + 'static,
+    S: Service<Future = macro_support::ServiceBoxFuture> + Discoverable + Send + Sync + 'static,
 {
     fn into_service_definition(self) -> ServiceDefinition {
         ServiceDefinition::from_service(self)
@@ -180,22 +99,93 @@ where
 pub mod macro_support {
     use super::*;
 
-    /// Build the discovery manifest for a service from its handlers' [`HandlerMeta`]. Backs the
+    /// Boxed future returned by a [`Service`]'s `handle`. Codegen sets `Service::Future` to this.
+    pub type ServiceBoxFuture = BoxFuture<'static, Result<(), endpoint::Error>>;
+
+    /// Marker for plain [Services](https://docs.restate.dev/concepts/services#services-1), so
+    /// handlers of one kind can't be composed into a service of another kind.
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct ServiceKind;
+    /// Marker for [Virtual Objects](https://docs.restate.dev/concepts/services#virtual-objects).
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct ObjectKind;
+    /// Marker for [Workflows](https://docs.restate.dev/concepts/services#workflows).
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct WorkflowKind;
+
+    /// A single Restate handler, as a composable value.
+    ///
+    /// The trait the [`macro@crate::handler`] attribute macro implements for you. `Kind` is a
+    /// compile-time marker ([`ServiceKind`], [`ObjectKind`], [`WorkflowKind`]) that prevents mixing
+    /// handlers of different service kinds in one service. `Input`/`Output` type the generated
+    /// clients and drive the discovery payloads (via their
+    /// [`PayloadMetadata`](crate::serde::PayloadMetadata) impls).
+    pub trait Handler<Kind>: Send + Sync + 'static {
+        /// The handler's input type: the client's argument type, and the source of the discovery
+        /// input payload. `()` renders as an empty (no-body) payload.
+        type Input: crate::serde::PayloadMetadata;
+        /// The handler's success output type: the client's response type, and the source of the
+        /// discovery output payload.
+        type Output: crate::serde::PayloadMetadata;
+
+        /// The Restate wire name of the handler.
+        fn name(&self) -> Cow<'static, str>;
+
+        /// The handler type, or `None` for the discovery manifest default (exclusive).
+        fn ty(&self) -> Option<crate::discovery::HandlerType>;
+
+        /// Per-handler options (lazy state, retention, ...) declared at the handler definition.
+        fn options(&self) -> crate::endpoint::HandlerOptions;
+
+        /// Handle an incoming invocation. Takes ownership of the [`ContextInternal`] and builds the
+        /// user-facing context borrow internally.
+        fn handle(&self, ctx: ContextInternal) -> ServiceBoxFuture;
+    }
+
+    /// Build a handler's discovery entry from its [`Handler`] impl: name + kind + the input/output
+    /// payloads (derived from the `Input`/`Output` associated types) + per-handler options.
+    pub fn handler_into_discovery<Kind, H>(handler: &H) -> crate::discovery::Handler
+    where
+        H: Handler<Kind>,
+    {
+        let mut discovery = crate::discovery::Handler {
+            name: crate::discovery::HandlerName::try_from(handler.name().into_owned())
+                .expect("Handler name valid"),
+            input: Some(<H::Input as crate::serde::PayloadMetadata>::input_payload()),
+            output: Some(<H::Output as crate::serde::PayloadMetadata>::output_payload()),
+            ty: handler.ty(),
+            documentation: None,
+            metadata: Default::default(),
+            abort_timeout: None,
+            inactivity_timeout: None,
+            journal_retention: None,
+            idempotency_retention: None,
+            workflow_completion_retention: None,
+            enable_lazy_state: None,
+            ingress_private: None,
+            retry_policy_initial_interval: None,
+            retry_policy_max_interval: None,
+            retry_policy_max_attempts: None,
+            retry_policy_exponentiation_factor: None,
+            retry_policy_on_max_attempts: None,
+        };
+        discovery.apply_options(handler.options());
+        discovery
+    }
+
+    /// Assemble the service discovery manifest from its handlers' discovery entries. Backs the
     /// `Discoverable` impl the `service!`/`object!`/`workflow!` macros generate; the dispatch
     /// `match` itself is hardcoded in the generated [`Service`] impl.
-    pub fn build_discovery(
+    pub fn service_into_discovery(
         name: &str,
         service_type: crate::discovery::ServiceType,
-        handlers: Vec<HandlerMeta>,
+        handlers: Vec<crate::discovery::Handler>,
     ) -> crate::discovery::Service {
         crate::discovery::Service {
             ty: service_type,
             name: crate::discovery::ServiceName::try_from(name.to_owned())
                 .expect("Service name valid"),
-            handlers: handlers
-                .into_iter()
-                .map(HandlerMeta::into_discovery)
-                .collect(),
+            handlers,
             documentation: None,
             metadata: Default::default(),
             abort_timeout: None,
@@ -221,6 +211,7 @@ pub mod macro_support {
 
 #[cfg(test)]
 mod tests {
+    use super::macro_support::{Handler, ServiceBoxFuture, ServiceKind};
     use super::*;
     use crate::discovery::ServiceType;
 
@@ -229,14 +220,14 @@ mod tests {
     impl Handler<ServiceKind> for Greet {
         type Input = String;
         type Output = String;
-        fn meta(&self) -> HandlerMeta {
-            HandlerMeta {
-                name: "greet".into(),
-                ty: None,
-                input: crate::discovery::InputPayload::empty(),
-                output: crate::discovery::OutputPayload::empty(),
-                enable_lazy_state: None,
-            }
+        fn name(&self) -> Cow<'static, str> {
+            Cow::Borrowed("greet")
+        }
+        fn ty(&self) -> Option<crate::discovery::HandlerType> {
+            None
+        }
+        fn options(&self) -> crate::endpoint::HandlerOptions {
+            crate::endpoint::HandlerOptions::default()
         }
         fn handle(&self, _ctx: ContextInternal) -> ServiceBoxFuture {
             Box::pin(async { Ok(()) })
@@ -244,7 +235,7 @@ mod tests {
     }
 
     // Hand-written dispatcher + discovery, mirroring what the `service!` macro generates: a
-    // hardcoded name→handler `match` and a `Discoverable` impl driven by `build_discovery`.
+    // hardcoded name→handler `match` and a `Discoverable` impl driven by `handler_into_discovery`.
     struct GreeterSvc;
     impl Service for GreeterSvc {
         type Future = ServiceBoxFuture;
@@ -257,7 +248,11 @@ mod tests {
     }
     impl Discoverable for GreeterSvc {
         fn discover() -> crate::discovery::Service {
-            macro_support::build_discovery("Greeter", ServiceType::Service, vec![Greet.meta()])
+            macro_support::service_into_discovery(
+                "Greeter",
+                ServiceType::Service,
+                vec![macro_support::handler_into_discovery(&Greet)],
+            )
         }
     }
 
@@ -267,7 +262,7 @@ mod tests {
 
     #[test]
     fn builds_definition_with_discovery_and_extension() {
-        let def = ServiceDefinition::from_service(GreeterSvc).with_extension(42u32);
+        let def = ServiceDefinition::from_service(GreeterSvc).extension(42u32);
 
         assert!(matches!(def.discovery.ty, ServiceType::Service));
         assert_eq!(def.discovery.name.to_string(), "Greeter");

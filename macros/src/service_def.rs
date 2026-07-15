@@ -50,7 +50,7 @@ impl Parse for ServiceDef {
                 input.span(),
                 "only `Name: { handler, ... }` is supported for now; \
                  per-handler config and service options are not yet available in the macro \
-                 (use `.with_options(..)` on the generated type for options)",
+                 (use `.options(..)` on the generated type for options)",
             ));
         }
 
@@ -65,13 +65,14 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
     let def: ServiceDef = syn::parse2(input)?;
     let name = &def.name;
     let handlers = &def.handlers;
+    crate::names::validate_service_name(&name.to_string(), name.span())?;
     let name_str = LitStr::new(&name.to_string(), name.span());
     let client_ident = format_ident!("{}Client", name);
 
     let kind_path = match kind {
-        Kind::Service => quote!(::restate_sdk::service::ServiceKind),
-        Kind::Object => quote!(::restate_sdk::service::ObjectKind),
-        Kind::Workflow => quote!(::restate_sdk::service::WorkflowKind),
+        Kind::Service => quote!(::restate_sdk::service::macro_support::ServiceKind),
+        Kind::Object => quote!(::restate_sdk::service::macro_support::ObjectKind),
+        Kind::Workflow => quote!(::restate_sdk::service::macro_support::WorkflowKind),
     };
     let service_type = match kind {
         Kind::Service => quote!(::restate_sdk::discovery::ServiceType::Service),
@@ -85,14 +86,15 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
     let dispatch_arms = handlers.iter().map(|h| {
         quote! {
             if ctx.handler_name() == #h::NAME {
-                return <#h as ::restate_sdk::service::Handler<#kind_path>>::handle(&#h, ctx);
+                return <#h as ::restate_sdk::service::macro_support::Handler<#kind_path>>::handle(&#h, ctx);
             }
         }
     });
-    // Discovery: each handler's static metadata, collected for the `Discoverable` impl.
-    let handler_metas = handlers
-        .iter()
-        .map(|h| quote!(<#h as ::restate_sdk::service::Handler<#kind_path>>::meta(&#h)));
+    // Discovery: each handler's discovery entry, collected for the `Discoverable` impl. The
+    // `::<#kind_path, _>` turbofish also enforces that every listed handler is of this kind.
+    let handler_discovery = handlers.iter().map(
+        |h| quote!(::restate_sdk::service::macro_support::handler_into_discovery::<#kind_path, _>(&#h)),
+    );
 
     // Client to call this service from another handler, typed from each handler's associated
     // input/output types and targeting its real wire name (`#h::NAME`).
@@ -141,11 +143,11 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
         quote! {
             pub fn #h(
                 &self,
-                req: <#h as ::restate_sdk::service::Handler<#kind_path>>::Input,
+                req: <#h as ::restate_sdk::service::macro_support::Handler<#kind_path>>::Input,
             ) -> ::restate_sdk::context::Request<
                 'ctx,
-                <#h as ::restate_sdk::service::Handler<#kind_path>>::Input,
-                <#h as ::restate_sdk::service::Handler<#kind_path>>::Output,
+                <#h as ::restate_sdk::service::macro_support::Handler<#kind_path>>::Input,
+                <#h as ::restate_sdk::service::macro_support::Handler<#kind_path>>::Output,
             > {
                 self.ctx.request(#target, req)
             }
@@ -154,7 +156,7 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
 
     let svc_doc = format!(
         "The `{name}` service definition. Bind it with `Endpoint::builder().bind({name})`, \
-         or `{name}.with_options(..)` to attach options."
+         or `{name}.options(..)` to attach options."
     );
     let client_doc = format!("Client to invoke the `{name}` service from another handler.");
 
@@ -165,7 +167,7 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
 
         // Runtime dispatcher: a hardcoded name→handler `match`, no dispatch map.
         impl ::restate_sdk::service::Service for #name {
-            type Future = ::restate_sdk::service::ServiceBoxFuture;
+            type Future = ::restate_sdk::service::macro_support::ServiceBoxFuture;
 
             fn handle(
                 &self,
@@ -178,10 +180,10 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
 
         impl ::restate_sdk::service::Discoverable for #name {
             fn discover() -> ::restate_sdk::discovery::Service {
-                ::restate_sdk::service::macro_support::build_discovery(
+                ::restate_sdk::service::macro_support::service_into_discovery(
                     #name_str,
                     #service_type,
-                    ::std::vec![ #( #handler_metas ),* ],
+                    ::std::vec![ #( #handler_discovery ),* ],
                 )
             }
         }
@@ -189,20 +191,22 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
         impl #name {
             /// Register a service-scoped dependency (extension), producing a bindable
             /// [`ServiceDefinition`](restate_sdk::service::ServiceDefinition).
-            pub fn with_extension<T: ::std::any::Any + ::core::marker::Send + ::core::marker::Sync>(
+            pub fn extension<T: ::std::any::Any + ::core::marker::Send + ::core::marker::Sync>(
                 self,
                 value: T,
             ) -> ::restate_sdk::service::ServiceDefinition {
-                ::restate_sdk::service::ServiceDefinition::from_service(self).with_extension(value)
+                ::restate_sdk::service::IntoServiceDefinition::into_service_definition(self)
+                    .extension(value)
             }
 
             /// Attach [`ServiceOptions`](restate_sdk::endpoint::ServiceOptions), producing a bindable
             /// [`ServiceDefinition`](restate_sdk::service::ServiceDefinition).
-            pub fn with_options(
+            pub fn options(
                 self,
                 options: ::restate_sdk::endpoint::ServiceOptions,
             ) -> ::restate_sdk::service::ServiceDefinition {
-                ::restate_sdk::service::ServiceDefinition::from_service(self).with_options(options)
+                ::restate_sdk::service::IntoServiceDefinition::into_service_definition(self)
+                    .options(options)
             }
         }
 

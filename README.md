@@ -31,14 +31,13 @@ Then you're ready to develop your Restate service using Rust:
 ```rust
 use restate_sdk::prelude::*;
 
-// Handlers are plain async functions. The context type (here `Context`) determines
-// whether this is a service, virtual object or workflow handler.
+// Handlers are plain async functions.
 #[restate_sdk::handler]
 async fn greet(_ctx: Context<'_>, name: String) -> HandlerResult<String> {
     Ok(format!("Greetings {name}"))
 }
 
-// Declaratively define the `Greeter` service (and a `GreeterClient`) from the handler(s).
+// Compose handlers into a service `Greeter`
 service!(Greeter: { greet });
 
 #[tokio::main]
