@@ -13,6 +13,8 @@ pub(crate) struct ProxyRequest {
     virtual_object_key: Option<String>,
     handler_name: String,
     idempotency_key: Option<String>,
+    scope: Option<String>,
+    limit_key: Option<String>,
     message: Vec<u8>,
     delay_millis: Option<u64>,
 }
@@ -57,6 +59,12 @@ impl Proxy {
         if let Some(idempotency_key) = req.idempotency_key {
             request = request.idempotency_key(idempotency_key);
         }
+        if let Some(scope) = req.scope {
+            request = request.scope(scope);
+        }
+        if let Some(limit_key) = req.limit_key {
+            request = request.limit_key(limit_key);
+        }
         Ok(request.call().await?.into())
     }
 
@@ -70,6 +78,12 @@ impl Proxy {
         let mut request = ctx.request::<_, ()>(req.to_target(), req.message);
         if let Some(idempotency_key) = req.idempotency_key {
             request = request.idempotency_key(idempotency_key);
+        }
+        if let Some(scope) = req.scope {
+            request = request.scope(scope);
+        }
+        if let Some(limit_key) = req.limit_key {
+            request = request.limit_key(limit_key);
         }
 
         let invocation_id = if let Some(delay_millis) = req.delay_millis {
@@ -99,6 +113,12 @@ impl Proxy {
                 ctx.request::<_, Vec<u8>>(req.proxy_request.to_target(), req.proxy_request.message);
             if let Some(idempotency_key) = req.proxy_request.idempotency_key {
                 restate_req = restate_req.idempotency_key(idempotency_key);
+            }
+            if let Some(scope) = req.proxy_request.scope {
+                restate_req = restate_req.scope(scope);
+            }
+            if let Some(limit_key) = req.proxy_request.limit_key {
+                restate_req = restate_req.limit_key(limit_key);
             }
             if req.one_way_call {
                 if let Some(delay_millis) = req.proxy_request.delay_millis {
