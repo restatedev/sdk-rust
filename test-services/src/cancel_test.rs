@@ -51,7 +51,7 @@ impl CancelTestBlockingService {
     async fn block(
         &self,
         context: ObjectContext<'_>,
-        op: Json<BlockingOperation>,
+        Json(op): Json<BlockingOperation>,
     ) -> HandlerResult<()> {
         let this = context.object_client::<CancelTestBlockingServiceClient>(context.key());
         let awakeable_holder_client =
@@ -61,9 +61,9 @@ impl CancelTestBlockingService {
         awakeable_holder_client.hold(awk_id).call().await?;
         awakeable.await?;
 
-        match &op.0 {
+        match &op {
             BlockingOperation::Call => {
-                this.block(op).call().await?;
+                this.block(op.into()).call().await?;
             }
             BlockingOperation::Sleep => {
                 context
