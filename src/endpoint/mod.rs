@@ -137,12 +137,12 @@ impl From<CoreError> for Error {
     }
 }
 
-struct BoxedService(
+pub(crate) struct BoxedService(
     Box<dyn Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync + 'static>,
 );
 
 impl BoxedService {
-    pub fn new<
+    pub(crate) fn new<
         S: Service<Future = BoxFuture<'static, Result<(), Error>>> + Send + Sync + 'static,
     >(
         service: S,

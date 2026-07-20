@@ -1,3 +1,7 @@
+// This file exercises discovery/schema generation through the deprecated trait-based API; the
+// schema machinery is shared with the struct-based API.
+#![allow(deprecated)]
+
 use restate_sdk::prelude::*;
 use restate_sdk::serde::{Json, PayloadMetadata};
 use restate_sdk::service::Discoverable;
@@ -29,7 +33,7 @@ struct Address {
     city: String,
 }
 
-#[restate_sdk::service]
+#[service]
 trait SchemaTestService {
     async fn string_handler(input: String) -> HandlerResult<i32>;
     async fn no_input_handler() -> HandlerResult<String>;

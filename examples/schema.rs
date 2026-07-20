@@ -10,22 +10,17 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-struct Product {
+pub struct Product {
     id: String,
     name: String,
     price_cents: u32,
 }
 
-#[restate_sdk::service]
-trait CatalogService {
-    async fn get_product_by_id(product_id: String) -> Result<Json<Product>, HandlerError>;
-    async fn save_product(product: Json<Product>) -> Result<String, HandlerError>;
-    async fn is_in_stock(product_id: String) -> Result<bool, HandlerError>;
-}
+struct CatalogService;
 
-struct CatalogServiceImpl;
-
-impl CatalogService for CatalogServiceImpl {
+#[service]
+impl CatalogService {
+    #[handler]
     async fn get_product_by_id(
         &self,
         ctx: Context<'_>,
@@ -39,6 +34,7 @@ impl CatalogService for CatalogServiceImpl {
         }))
     }
 
+    #[handler]
     async fn save_product(
         &self,
         _ctx: Context<'_>,
@@ -47,6 +43,7 @@ impl CatalogService for CatalogServiceImpl {
         Ok(product.0.id)
     }
 
+    #[handler]
     async fn is_in_stock(
         &self,
         _ctx: Context<'_>,
@@ -59,7 +56,7 @@ impl CatalogService for CatalogServiceImpl {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(CatalogServiceImpl.serve()).build())
+    HttpServer::new(Endpoint::builder().bind(CatalogService).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

@@ -15,50 +15,32 @@ pub(crate) struct FailureToPropagate {
     metadata: HashMap<String, String>,
 }
 
-#[restate_sdk::object]
-#[name = "Failing"]
-pub(crate) trait Failing {
-    #[name = "terminallyFailingCall"]
-    async fn terminally_failing_call(failure: Json<FailureToPropagate>) -> HandlerResult<()>;
-    #[name = "callTerminallyFailingCall"]
-    async fn call_terminally_failing_call(
-        failure: Json<FailureToPropagate>,
-    ) -> HandlerResult<String>;
-    #[name = "failingCallWithEventualSuccess"]
-    async fn failing_call_with_eventual_success() -> HandlerResult<i32>;
-    #[name = "terminallyFailingSideEffect"]
-    async fn terminally_failing_side_effect(failure: Json<FailureToPropagate>)
-    -> HandlerResult<()>;
-    #[name = "sideEffectSucceedsAfterGivenAttempts"]
-    async fn side_effect_succeeds_after_given_attempts(minimum_attempts: i32)
-    -> HandlerResult<i32>;
-    #[name = "sideEffectFailsAfterGivenAttempts"]
-    async fn side_effect_fails_after_given_attempts(
-        retry_policy_max_retry_count: i32,
-    ) -> HandlerResult<i32>;
-}
-
 #[derive(Clone, Default)]
-pub(crate) struct FailingImpl {
+pub(crate) struct Failing {
     eventual_success_calls: Arc<AtomicI32>,
     eventual_success_side_effects: Arc<AtomicI32>,
     eventual_failure_side_effects: Arc<AtomicI32>,
 }
 
-impl Failing for FailingImpl {
+#[object(name = "Failing")]
+impl Failing {
+    #[handler(name = "terminallyFailingCall")]
     async fn terminally_failing_call(
         &self,
         _: ObjectContext<'_>,
-        Json(failure): Json<FailureToPropagate>,
+        failure: Json<FailureToPropagate>,
     ) -> HandlerResult<()> {
+        let Json(failure) = failure;
         Err(TerminalError::new(failure.error_message).into())
     }
 
+    #[handler(name = "callTerminallyFailingCall")]
     async fn call_terminally_failing_call(
         &self,
         mut context: ObjectContext<'_>,
-        Json(failure): Json<FailureToPropagate>,
+        failure: Json<FailureToPropagate>,
     ) -> HandlerResult<String> {
+        let Json(failure) = failure;
         let uuid = context.rand_uuid().to_string();
         context
             .object_client::<FailingClient>(uuid)
@@ -69,6 +51,7 @@ impl Failing for FailingImpl {
         unreachable!("This should be unreachable")
     }
 
+    #[handler(name = "failingCallWithEventualSuccess")]
     async fn failing_call_with_eventual_success(&self, _: ObjectContext<'_>) -> HandlerResult<i32> {
         let current_attempt = self.eventual_success_calls.fetch_add(1, Ordering::SeqCst) + 1;
 
@@ -80,11 +63,13 @@ impl Failing for FailingImpl {
         }
     }
 
+    #[handler(name = "terminallyFailingSideEffect")]
     async fn terminally_failing_side_effect(
         &self,
         context: ObjectContext<'_>,
-        Json(failure): Json<FailureToPropagate>,
+        failure: Json<FailureToPropagate>,
     ) -> HandlerResult<()> {
+        let Json(failure) = failure;
         context
             .run::<_, _, ()>(|| async move { Err(TerminalError::new(failure.error_message))? })
             .await?;
@@ -92,6 +77,7 @@ impl Failing for FailingImpl {
         unreachable!("This should be unreachable")
     }
 
+    #[handler(name = "sideEffectSucceedsAfterGivenAttempts")]
     async fn side_effect_succeeds_after_given_attempts(
         &self,
         context: ObjectContext<'_>,
@@ -120,6 +106,7 @@ impl Failing for FailingImpl {
         Ok(success_attempt)
     }
 
+    #[handler(name = "sideEffectFailsAfterGivenAttempts")]
     async fn side_effect_fails_after_given_attempts(
         &self,
         context: ObjectContext<'_>,

@@ -1,0 +1,5 @@
+error: context type `ObjectContext` does not match the `#[service]` service kind; expected Context
+ --> tests/ui/struct_wrong_context.rs:9:33
+  |
+9 |     async fn greet(&self, _ctx: ObjectContext<'_>, name: String) -> HandlerResult<String> {
+  |                                 ^^^^^^^^^^^^^^^^^

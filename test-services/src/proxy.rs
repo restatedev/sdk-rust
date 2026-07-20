@@ -42,25 +42,17 @@ pub(crate) struct ManyCallRequest {
     await_at_the_end: bool,
 }
 
-#[restate_sdk::service]
-#[name = "Proxy"]
-pub(crate) trait Proxy {
-    #[name = "call"]
-    async fn call(req: Json<ProxyRequest>) -> HandlerResult<Json<Vec<u8>>>;
-    #[name = "oneWayCall"]
-    async fn one_way_call(req: Json<ProxyRequest>) -> HandlerResult<String>;
-    #[name = "manyCalls"]
-    async fn many_calls(req: Json<Vec<ManyCallRequest>>) -> HandlerResult<()>;
-}
+pub(crate) struct Proxy;
 
-pub(crate) struct ProxyImpl;
-
-impl Proxy for ProxyImpl {
+#[service(name = "Proxy")]
+impl Proxy {
+    #[handler(name = "call")]
     async fn call(
         &self,
         ctx: Context<'_>,
-        Json(req): Json<ProxyRequest>,
+        req: Json<ProxyRequest>,
     ) -> HandlerResult<Json<Vec<u8>>> {
+        let Json(req) = req;
         let mut request = ctx.request::<Vec<u8>, Vec<u8>>(req.to_target(), req.message);
         if let Some(idempotency_key) = req.idempotency_key {
             request = request.idempotency_key(idempotency_key);
@@ -68,11 +60,13 @@ impl Proxy for ProxyImpl {
         Ok(request.call().await?.into())
     }
 
+    #[handler(name = "oneWayCall")]
     async fn one_way_call(
         &self,
         ctx: Context<'_>,
-        Json(req): Json<ProxyRequest>,
+        req: Json<ProxyRequest>,
     ) -> HandlerResult<String> {
+        let Json(req) = req;
         let mut request = ctx.request::<_, ()>(req.to_target(), req.message);
         if let Some(idempotency_key) = req.idempotency_key {
             request = request.idempotency_key(idempotency_key);
@@ -90,11 +84,13 @@ impl Proxy for ProxyImpl {
         Ok(invocation_id)
     }
 
+    #[handler(name = "manyCalls")]
     async fn many_calls(
         &self,
         ctx: Context<'_>,
-        Json(requests): Json<Vec<ManyCallRequest>>,
+        requests: Json<Vec<ManyCallRequest>>,
     ) -> HandlerResult<()> {
+        let Json(requests) = requests;
         let mut futures: Vec<BoxFuture<'_, Result<Vec<u8>, TerminalError>>> = vec![];
 
         for req in requests {

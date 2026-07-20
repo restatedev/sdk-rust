@@ -41,6 +41,22 @@ impl<'a> ServiceGenerator<'a> {
         Self::new(ServiceType::Workflow, &s.0)
     }
 
+    fn deprecation_warning(&self) -> TokenStream2 {
+        // Proc-macro attributes can't attach a real `#[deprecated]` to the generated trait, so we
+        // emit a reference to a deprecated const, which makes the `deprecated` lint fire at the
+        // annotation site.
+        quote! {
+            const _: () = {
+                #[deprecated(
+                    note = "The trait-based service API is deprecated; put #[restate_sdk::service] (or #[object]/#[workflow]) on an impl block instead. See the crate docs."
+                )]
+                #[allow(non_upper_case_globals)]
+                const restate_sdk_trait_api_is_deprecated: () = ();
+                let _ = restate_sdk_trait_api_is_deprecated;
+            };
+        }
+    }
+
     fn trait_service(&self) -> TokenStream2 {
         let Self {
             attrs,
@@ -142,7 +158,7 @@ impl<'a> ServiceGenerator<'a> {
             impl<S> ::restate_sdk::service::Service for #serve_ident<S>
                 where S: #service_ident + Send + Sync + 'static,
             {
-                type Future = ::restate_sdk::service::ServiceBoxFuture;
+                type Future = ::restate_sdk::service::macro_support::ServiceBoxFuture;
 
                 fn handle(&self, ctx: ::restate_sdk::endpoint::ContextInternal) -> Self::Future {
                     let service_clone = ::std::sync::Arc::clone(&self.service);
@@ -157,6 +173,25 @@ impl<'a> ServiceGenerator<'a> {
                             }
                         }
                     })
+                }
+            }
+        }
+    }
+
+    fn impl_into_service_definition(&self) -> TokenStream2 {
+        let Self {
+            serve_ident,
+            service_ident,
+            ..
+        } = self;
+
+        quote! {
+            impl<S> ::restate_sdk::service::IntoServiceDefinition for #serve_ident<S>
+                where S: #service_ident + Send + Sync + 'static,
+            {
+                fn into_service_definition(self) -> ::restate_sdk::service::ServiceDefinition {
+                    let discovery = <Self as ::restate_sdk::service::Discoverable>::discover();
+                    ::restate_sdk::service::macro_support::service_definition(self, discovery)
                 }
             }
         }
@@ -395,9 +430,11 @@ impl<'a> ServiceGenerator<'a> {
 impl ToTokens for ServiceGenerator<'_> {
     fn to_tokens(&self, output: &mut TokenStream2) {
         output.extend(vec![
+            self.deprecation_warning(),
             self.trait_service(),
             self.struct_serve(),
             self.impl_service_for_serve(),
+            self.impl_into_service_definition(),
             self.impl_discoverable(),
             self.struct_client(),
             self.impl_client(),

@@ -1,14 +1,11 @@
 use restate_sdk::prelude::*;
 use std::collections::HashMap;
 
-#[restate_sdk::service]
-trait RunExample {
-    async fn do_run() -> Result<Json<HashMap<String, String>>, HandlerError>;
-}
+struct RunExample(reqwest::Client);
 
-struct RunExampleImpl(reqwest::Client);
-
-impl RunExample for RunExampleImpl {
+#[service]
+impl RunExample {
+    #[handler]
     async fn do_run(
         &self,
         context: Context<'_>,
@@ -39,7 +36,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
     HttpServer::new(
         Endpoint::builder()
-            .bind(RunExampleImpl(reqwest::Client::new()).serve())
+            .bind(RunExample(reqwest::Client::new()))
             .build(),
     )
     .listen_and_serve("0.0.0.0:9080".parse().unwrap())

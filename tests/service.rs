@@ -1,7 +1,10 @@
+// This file exercises the deprecated trait-based API for back-compatibility coverage.
+#![allow(deprecated)]
+
 use restate_sdk::prelude::*;
 
 // Should compile
-#[restate_sdk::service]
+#[service]
 trait MyService {
     async fn my_handler(input: String) -> HandlerResult<String>;
 
@@ -18,21 +21,21 @@ trait MyService {
     async fn std_result_with_handler_error() -> Result<(), HandlerError>;
 }
 
-#[restate_sdk::object]
+#[object]
 trait MyObject {
     async fn my_handler(input: String) -> HandlerResult<String>;
     #[shared]
     async fn my_shared_handler(input: String) -> HandlerResult<String>;
 }
 
-#[restate_sdk::workflow]
+#[workflow]
 trait MyWorkflow {
     async fn my_handler(input: String) -> HandlerResult<String>;
     #[shared]
     async fn my_shared_handler(input: String) -> HandlerResult<String>;
 }
 
-#[restate_sdk::service]
+#[service]
 #[name = "myRenamedService"]
 trait MyRenamedService {
     #[name = "myRenamedHandler"]

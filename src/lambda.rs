@@ -21,15 +21,12 @@
 //!
 //! use restate_sdk::prelude::*;
 //!
+//! struct Greeter;
+//!
 //! #[restate_sdk::service]
-//! trait Greeter {
-//!     async fn greet(name: String) -> HandlerResult<String>;
-//! }
-//!
-//! struct GreeterImpl;
-//!
-//! impl Greeter for GreeterImpl {
-//!     async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
+//! impl Greeter {
+//!     #[handler]
+//!     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
 //!         Ok(format!("Greetings {name}"))
 //!     }
 //! }
@@ -42,7 +39,7 @@
 //!     // Build and run the Lambda endpoint
 //!     LambdaEndpoint::run(
 //!         Endpoint::builder()
-//!             .bind(GreeterImpl.serve())
+//!             .bind(Greeter)
 //!             .build(),
 //!     )
 //!     .await

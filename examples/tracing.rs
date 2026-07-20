@@ -3,14 +3,11 @@ use std::time::Duration;
 use tracing::info;
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
-#[restate_sdk::service]
-trait Greeter {
-    async fn greet(name: String) -> Result<String, HandlerError>;
-}
+struct Greeter;
 
-struct GreeterImpl;
-
-impl Greeter for GreeterImpl {
+#[service]
+impl Greeter {
+    #[handler]
     async fn greet(&self, ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
         info!("Before sleep");
         ctx.sleep(Duration::from_secs(61)).await?; // More than suspension timeout to trigger replay
@@ -31,7 +28,7 @@ async fn main() {
                 .with_filter(replay_filter),
         )
         .init();
-    HttpServer::new(Endpoint::builder().bind(GreeterImpl.serve()).build())
+    HttpServer::new(Endpoint::builder().bind(Greeter).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

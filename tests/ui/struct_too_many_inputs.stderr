@@ -1,0 +1,5 @@
+error: Restate handlers support at most one input argument (after the context)
+ --> tests/ui/struct_too_many_inputs.rs:9:57
+  |
+9 |     async fn greet(&self, _ctx: Context<'_>, a: String, b: String) -> HandlerResult<String> {
+  |                                                         ^^^^^^^^^
