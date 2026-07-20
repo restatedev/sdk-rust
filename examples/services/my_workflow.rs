@@ -2,7 +2,7 @@ use restate_sdk::prelude::*;
 
 pub struct MyWorkflow;
 
-#[restate_sdk::workflow]
+#[workflow]
 impl MyWorkflow {
     #[handler]
     async fn run(&self, _ctx: WorkflowContext<'_>, _req: String) -> Result<String, HandlerError> {

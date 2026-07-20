@@ -33,7 +33,7 @@ struct Address {
     city: String,
 }
 
-#[restate_sdk::service]
+#[service]
 trait SchemaTestService {
     async fn string_handler(input: String) -> HandlerResult<i32>;
     async fn no_input_handler() -> HandlerResult<String>;

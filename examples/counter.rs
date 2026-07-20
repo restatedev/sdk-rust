@@ -4,7 +4,7 @@ struct Counter;
 
 const COUNT: &str = "count";
 
-#[restate_sdk::object]
+#[object]
 impl Counter {
     #[handler(name = "get")]
     async fn get(&self, ctx: SharedObjectContext<'_>) -> Result<u64, TerminalError> {

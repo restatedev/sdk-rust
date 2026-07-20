@@ -11,7 +11,7 @@ use restate_sdk::service::Discoverable;
 
 struct MySvc;
 
-#[restate_sdk::service(name = "ParityService")]
+#[service(name = "ParityService")]
 impl MySvc {
     #[handler]
     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
@@ -24,7 +24,7 @@ impl MySvc {
     }
 }
 
-#[restate_sdk::service]
+#[service]
 #[name = "ParityService"]
 trait ParityServiceTrait {
     async fn greet(name: String) -> HandlerResult<String>;
@@ -49,7 +49,7 @@ impl ParityServiceTrait for ParityServiceTraitImpl {
 
 struct MyObj;
 
-#[restate_sdk::object(name = "ParityObject")]
+#[object(name = "ParityObject")]
 impl MyObj {
     #[handler]
     async fn add(&self, _ctx: ObjectContext<'_>, v: u64) -> HandlerResult<u64> {
@@ -62,7 +62,7 @@ impl MyObj {
     }
 }
 
-#[restate_sdk::object]
+#[object]
 #[name = "ParityObject"]
 trait ParityObjectTrait {
     async fn add(v: u64) -> HandlerResult<u64>;
@@ -87,7 +87,7 @@ impl ParityObjectTrait for ParityObjectTraitImpl {
 
 struct MyWf;
 
-#[restate_sdk::workflow(name = "ParityWorkflow")]
+#[workflow(name = "ParityWorkflow")]
 impl MyWf {
     #[handler]
     async fn run(&self, _ctx: WorkflowContext<'_>, req: String) -> HandlerResult<String> {
@@ -100,7 +100,7 @@ impl MyWf {
     }
 }
 
-#[restate_sdk::workflow]
+#[workflow]
 #[name = "ParityWorkflow"]
 trait ParityWorkflowTrait {
     async fn run(req: String) -> HandlerResult<String>;
@@ -169,7 +169,7 @@ struct GenericGreeter<G> {
     with: G,
 }
 
-#[restate_sdk::service(name = "GenericGreeter")]
+#[service(name = "GenericGreeter")]
 impl<G: Greeting> GenericGreeter<G> {
     #[handler]
     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
@@ -182,7 +182,7 @@ struct BoundedObject<G> {
     with: G,
 }
 
-#[restate_sdk::object(name = "BoundedObject")]
+#[object(name = "BoundedObject")]
 impl<G> BoundedObject<G>
 where
     G: Greeting + 'static,

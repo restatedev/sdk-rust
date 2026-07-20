@@ -18,7 +18,7 @@ pub struct Product {
 
 struct CatalogService;
 
-#[restate_sdk::service]
+#[service]
 impl CatalogService {
     #[handler]
     async fn get_product_by_id(

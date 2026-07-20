@@ -11,7 +11,7 @@ pub(crate) struct NonDeterministic(Arc<Mutex<HashMap<String, i32>>>);
 const STATE_A: &str = "a";
 const STATE_B: &str = "b";
 
-#[restate_sdk::object(name = "NonDeterministic")]
+#[object(name = "NonDeterministic")]
 impl NonDeterministic {
     #[handler(name = "eitherSleepOrCall")]
     async fn either_sleep_or_call(&self, context: ObjectContext<'_>) -> HandlerResult<()> {

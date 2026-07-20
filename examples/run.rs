@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 struct RunExample(reqwest::Client);
 
-#[restate_sdk::service]
+#[service]
 impl RunExample {
     #[handler]
     async fn do_run(

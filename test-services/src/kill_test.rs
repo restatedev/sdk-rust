@@ -3,7 +3,7 @@ use restate_sdk::prelude::*;
 
 pub(crate) struct KillTestRunner;
 
-#[restate_sdk::object(name = "KillTestRunner")]
+#[object(name = "KillTestRunner")]
 impl KillTestRunner {
     #[handler(name = "startCallTree")]
     async fn start_call_tree(&self, context: ObjectContext<'_>) -> HandlerResult<()> {
@@ -18,7 +18,7 @@ impl KillTestRunner {
 
 pub(crate) struct KillTestSingleton;
 
-#[restate_sdk::object(name = "KillTestSingleton")]
+#[object(name = "KillTestSingleton")]
 impl KillTestSingleton {
     #[handler(name = "recursiveCall")]
     async fn recursive_call(&self, context: ObjectContext<'_>) -> HandlerResult<()> {

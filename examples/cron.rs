@@ -17,7 +17,7 @@ struct PeriodicTask;
 
 const ACTIVE: &str = "active";
 
-#[restate_sdk::object]
+#[object]
 impl PeriodicTask {
     /// Schedules the periodic task to start
     #[handler]

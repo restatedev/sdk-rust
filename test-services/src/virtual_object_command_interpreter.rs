@@ -68,7 +68,7 @@ pub(crate) struct RejectAwakeable {
 
 pub(crate) struct VirtualObjectCommandInterpreter;
 
-#[restate_sdk::object(name = "VirtualObjectCommandInterpreter")]
+#[object(name = "VirtualObjectCommandInterpreter")]
 impl VirtualObjectCommandInterpreter {
     #[handler(name = "interpretCommands")]
     async fn interpret_commands(

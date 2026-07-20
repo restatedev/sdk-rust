@@ -22,7 +22,7 @@ pub(crate) struct Failing {
     eventual_failure_side_effects: Arc<AtomicI32>,
 }
 
-#[restate_sdk::object(name = "Failing")]
+#[object(name = "Failing")]
 impl Failing {
     #[handler(name = "terminallyFailingCall")]
     async fn terminally_failing_call(

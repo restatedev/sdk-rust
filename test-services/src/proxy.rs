@@ -44,7 +44,7 @@ pub(crate) struct ManyCallRequest {
 
 pub(crate) struct Proxy;
 
-#[restate_sdk::service(name = "Proxy")]
+#[service(name = "Proxy")]
 impl Proxy {
     #[handler(name = "call")]
     async fn call(

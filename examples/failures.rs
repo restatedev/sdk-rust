@@ -7,7 +7,7 @@ struct FailureExample;
 #[error("I'm very bad, retry me")]
 struct MyError;
 
-#[restate_sdk::service]
+#[service]
 impl FailureExample {
     #[handler(name = "doRun")]
     async fn do_run(&self, context: Context<'_>) -> Result<(), TerminalError> {

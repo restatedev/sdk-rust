@@ -1,6 +1,6 @@
 use restate_sdk::prelude::*;
 
-#[restate_sdk::service]
+#[service]
 trait SharedHandlerInService {
     #[shared]
     async fn my_handler() -> HandlerResult<()>;

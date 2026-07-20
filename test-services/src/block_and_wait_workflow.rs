@@ -5,7 +5,7 @@ pub(crate) struct BlockAndWaitWorkflow;
 const MY_PROMISE: &str = "my-promise";
 const MY_STATE: &str = "my-state";
 
-#[restate_sdk::workflow(name = "BlockAndWaitWorkflow")]
+#[workflow(name = "BlockAndWaitWorkflow")]
 impl BlockAndWaitWorkflow {
     #[handler(name = "run")]
     async fn run(&self, context: WorkflowContext<'_>, input: String) -> HandlerResult<String> {

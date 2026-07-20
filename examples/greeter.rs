@@ -3,7 +3,7 @@ use std::convert::Infallible;
 
 struct Greeter;
 
-#[restate_sdk::service]
+#[service]
 impl Greeter {
     #[handler]
     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, Infallible> {

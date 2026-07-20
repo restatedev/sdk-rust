@@ -12,7 +12,7 @@ pub(crate) struct Entry {
 
 pub(crate) struct MapObject;
 
-#[restate_sdk::object(name = "MapObject")]
+#[object(name = "MapObject")]
 impl MapObject {
     #[handler(name = "set")]
     async fn set(&self, ctx: ObjectContext<'_>, entry: Json<Entry>) -> HandlerResult<()> {

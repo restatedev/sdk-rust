@@ -14,7 +14,7 @@ use std::time::Duration;
 /// ```
 struct FanOut;
 
-#[restate_sdk::service]
+#[service]
 impl FanOut {
     #[handler]
     async fn fan_out(&self, ctx: Context<'_>) -> Result<String, TerminalError> {

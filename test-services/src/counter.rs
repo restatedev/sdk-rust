@@ -14,7 +14,7 @@ pub(crate) struct Counter;
 
 const COUNT: &str = "counter";
 
-#[restate_sdk::object(name = "Counter")]
+#[object(name = "Counter")]
 impl Counter {
     #[handler(name = "get")]
     async fn get(&self, ctx: SharedObjectContext<'_>) -> HandlerResult<u64> {

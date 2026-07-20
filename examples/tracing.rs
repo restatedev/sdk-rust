@@ -5,7 +5,7 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 struct Greeter;
 
-#[restate_sdk::service]
+#[service]
 impl Greeter {
     #[handler]
     async fn greet(&self, ctx: Context<'_>, name: String) -> Result<String, HandlerError> {

@@ -2,7 +2,7 @@ use restate_sdk::prelude::*;
 
 pub struct MyVirtualObject;
 
-#[restate_sdk::object]
+#[object]
 impl MyVirtualObject {
     #[handler]
     async fn my_handler(&self, ctx: ObjectContext<'_>, greeting: String) -> Result<String, HandlerError> {

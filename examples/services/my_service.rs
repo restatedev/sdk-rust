@@ -2,7 +2,7 @@ use restate_sdk::prelude::*;
 
 pub struct MyService;
 
-#[restate_sdk::service]
+#[service]
 impl MyService {
     #[handler]
     async fn my_handler(&self, _ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {

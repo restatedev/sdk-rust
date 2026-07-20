@@ -17,7 +17,7 @@ pub(crate) struct CancelTestRunner;
 
 const CANCELED: &str = "canceled";
 
-#[restate_sdk::object(name = "CancelTestRunner")]
+#[object(name = "CancelTestRunner")]
 impl CancelTestRunner {
     #[handler(name = "startTest")]
     async fn start_test(
@@ -45,7 +45,7 @@ impl CancelTestRunner {
 
 pub(crate) struct CancelTestBlockingService;
 
-#[restate_sdk::object(name = "CancelTestBlockingService")]
+#[object(name = "CancelTestBlockingService")]
 impl CancelTestBlockingService {
     #[handler(name = "block")]
     async fn block(

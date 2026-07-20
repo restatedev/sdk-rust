@@ -4,7 +4,7 @@ pub(crate) struct ListObject;
 
 const LIST: &str = "list";
 
-#[restate_sdk::object(name = "ListObject")]
+#[object(name = "ListObject")]
 impl ListObject {
     #[handler(name = "append")]
     async fn append(&self, ctx: ObjectContext<'_>, value: String) -> HandlerResult<()> {

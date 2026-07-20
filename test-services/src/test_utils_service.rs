@@ -9,7 +9,7 @@ use std::time::Duration;
 
 pub(crate) struct TestUtilsService;
 
-#[restate_sdk::service(name = "TestUtilsService")]
+#[service(name = "TestUtilsService")]
 impl TestUtilsService {
     #[handler(name = "echo")]
     async fn echo(&self, _: Context<'_>, input: String) -> HandlerResult<String> {

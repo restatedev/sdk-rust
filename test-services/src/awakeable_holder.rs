@@ -4,7 +4,7 @@ pub(crate) struct AwakeableHolder;
 
 const ID: &str = "id";
 
-#[restate_sdk::object(name = "AwakeableHolder")]
+#[object(name = "AwakeableHolder")]
 impl AwakeableHolder {
     #[handler(name = "hold")]
     async fn hold(&self, context: ObjectContext<'_>, id: String) -> HandlerResult<()> {

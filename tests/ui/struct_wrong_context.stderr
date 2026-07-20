@@ -3,11 +3,3 @@ error: context type `ObjectContext` does not match the `#[service]` service kind
   |
 9 |     async fn greet(&self, _ctx: ObjectContext<'_>, name: String) -> HandlerResult<String> {
   |                                 ^^^^^^^^^^^^^^^^^
-
-warning: unused import: `restate_sdk::prelude::*`
- --> tests/ui/struct_wrong_context.rs:1:5
-  |
-1 | use restate_sdk::prelude::*;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` on by default

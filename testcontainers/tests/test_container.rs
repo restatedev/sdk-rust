@@ -5,7 +5,7 @@ use tracing::info;
 
 struct MyService;
 
-#[restate_sdk::service]
+#[service]
 impl MyService {
     #[handler]
     async fn my_handler(&self, _ctx: Context<'_>) -> HandlerResult<String> {
@@ -16,7 +16,7 @@ impl MyService {
 
 struct MyObject;
 
-#[restate_sdk::object]
+#[object]
 impl MyObject {
     #[handler]
     async fn my_handler(&self, _ctx: ObjectContext<'_>, input: String) -> HandlerResult<String> {
@@ -35,7 +35,7 @@ impl MyObject {
 
 struct MyWorkflow;
 
-#[restate_sdk::workflow]
+#[workflow]
 impl MyWorkflow {
     #[handler]
     async fn my_handler(&self, _ctx: WorkflowContext<'_>, input: String) -> HandlerResult<String> {
