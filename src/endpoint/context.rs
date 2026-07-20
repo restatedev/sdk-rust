@@ -15,9 +15,9 @@ use futures::future::{BoxFuture, Either, Shared};
 use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
-    CoreVM, DoProgressResponse, Error as CoreError, Header, NonEmptyValue, NotificationHandle,
-    PayloadOptions, RetryPolicy, RunExitResult, TakeOutputResult, Target, TerminalFailure, VM,
-    Value,
+    AwaitResponse, AwakeableHandle, CoreVM, Error as CoreError, Header, NonEmptyValue,
+    NotificationHandle, OnMaxAttempts, PayloadOptions, RetryPolicy, RunExitResult, RunHandle,
+    Target, TerminalFailure, UnresolvedFuture, VM, Value,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -67,10 +67,10 @@ impl ContextInternalInner {
     }
 
     pub(super) fn maybe_flip_span_replaying_field(&mut self) {
-        if !self.span_replaying_field_state && self.vm.is_replaying() {
+        if !self.span_replaying_field_state && self.vm.state().is_replaying() {
             tracing::Span::current().record("restate.sdk.is_replaying", true);
             self.span_replaying_field_state = true;
-        } else if self.span_replaying_field_state && !self.vm.is_replaying() {
+        } else if self.span_replaying_field_state && !self.vm.state().is_replaying() {
             tracing::Span::current().record("restate.sdk.is_replaying", false);
             self.span_replaying_field_state = false;
         }
@@ -131,6 +131,8 @@ impl From<RequestTarget> for Target {
                 handler,
                 key: None,
                 idempotency_key: None,
+                scope: None,
+                limit_key: None,
                 headers: vec![],
             },
             RequestTarget::Object { name, key, handler } => Target {
@@ -138,6 +140,8 @@ impl From<RequestTarget> for Target {
                 handler,
                 key: Some(key),
                 idempotency_key: None,
+                scope: None,
+                limit_key: None,
                 headers: vec![],
             },
             RequestTarget::Workflow { name, key, handler } => Target {
@@ -145,6 +149,8 @@ impl From<RequestTarget> for Target {
                 handler,
                 key: Some(key),
                 idempotency_key: None,
+                scope: None,
+                limit_key: None,
                 headers: vec![],
             },
         }
@@ -236,9 +242,10 @@ impl ContextInternal {
                     syscall: "input",
                     err: err.0.clone().into(),
                 };
-                let _ = inner_lock
-                    .vm
-                    .sys_write_output(NonEmptyValue::Failure(err.into()), PayloadOptions::stable());
+                let _ = inner_lock.vm.sys_write_output(
+                    NonEmptyValue::Failure(err.into()),
+                    PayloadOptions::default(),
+                );
                 let _ = inner_lock.vm.sys_end();
                 // This causes the trap, plus logs the error
                 inner_lock.handler_state.mark_error(error_inner.into());
@@ -261,7 +268,7 @@ impl ContextInternal {
             inner_lock,
             inner_lock
                 .vm
-                .sys_state_get(key.to_owned(), PayloadOptions::stable())
+                .sys_state_get(key.to_owned(), PayloadOptions::default())
         );
         inner_lock.maybe_flip_span_replaying_field();
 
@@ -309,7 +316,7 @@ impl ContextInternal {
             Ok(b) => {
                 let _ = inner_lock
                     .vm
-                    .sys_state_set(key.to_owned(), b, PayloadOptions::stable());
+                    .sys_state_set(key.to_owned(), b, PayloadOptions::default());
                 inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
@@ -402,7 +409,7 @@ impl ContextInternal {
             .and_then(|input| {
                 inner_lock
                     .vm
-                    .sys_call(target, input, None, PayloadOptions::stable())
+                    .sys_call(target, input, None, PayloadOptions::default())
                     .map_err(Into::into)
             });
 
@@ -501,7 +508,7 @@ impl ContextInternal {
                     + delay
             }),
             None,
-            PayloadOptions::stable(),
+            PayloadOptions::default(),
         ) {
             Ok(h) => h,
             Err(e) => {
@@ -554,7 +561,7 @@ impl ContextInternal {
         inner_lock.maybe_flip_span_replaying_field();
 
         let (awakeable_id, handle) = match maybe_awakeable_id_and_handle {
-            Ok((s, handle)) => (s, handle),
+            Ok(AwakeableHandle { id, handle }) => (id, handle),
             Err(e) => {
                 inner_lock.fail(e.into());
                 return (
@@ -597,7 +604,7 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_complete_awakeable(
                     id.to_owned(),
                     NonEmptyValue::Success(b),
-                    PayloadOptions::stable(),
+                    PayloadOptions::default(),
                 );
             }
             Err(e) => {
@@ -610,7 +617,7 @@ impl ContextInternal {
         let _ = must_lock!(self.inner).vm.sys_complete_awakeable(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
-            PayloadOptions::stable(),
+            PayloadOptions::default(),
         );
     }
 
@@ -679,7 +686,7 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_complete_promise(
                     name.to_owned(),
                     NonEmptyValue::Success(b),
-                    PayloadOptions::stable(),
+                    PayloadOptions::default(),
                 );
             }
             Err(e) => {
@@ -698,7 +705,7 @@ impl ContextInternal {
         let _ = must_lock!(self.inner).vm.sys_complete_promise(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
-            PayloadOptions::stable(),
+            PayloadOptions::default(),
         );
     }
 
@@ -744,7 +751,7 @@ impl ContextInternal {
 
         let _ = inner_lock
             .vm
-            .sys_write_output(res_to_write, PayloadOptions::stable());
+            .sys_write_output(res_to_write, PayloadOptions::default());
         inner_lock.maybe_flip_span_replaying_field();
     }
 
@@ -755,11 +762,8 @@ impl ContextInternal {
     pub(crate) fn consume_to_end(&self) {
         let mut inner_lock = must_lock!(self.inner);
 
-        let out = inner_lock.vm.take_output();
-        if let TakeOutputResult::Buffer(b) = out
-            && !b.is_empty()
-            && !inner_lock.write.send(b)
-        {
+        let b = inner_lock.vm.take_output();
+        if !b.is_empty() && !inner_lock.write.send(b) {
             // Nothing we can do anymore here
         }
     }
@@ -879,6 +883,7 @@ where
             max_interval: retry_policy.max_delay,
             max_attempts: retry_policy.max_attempts,
             max_duration: retry_policy.max_duration,
+            on_max_attempts: OnMaxAttempts::FailAsTerminal,
         };
         self
     }
@@ -911,14 +916,14 @@ where
                         .expect("Future should not be polled after returning Poll::Ready");
                     let mut inner_ctx = must_lock!(ctx);
 
-                    let handle = inner_ctx
+                    let RunHandle { handle, .. } = inner_ctx
                         .vm
                         .sys_run(this.name.to_owned())
                         .map_err(ErrorInner::from)?;
 
                     // Now we do progress once to check whether this closure should be executed or not.
-                    match inner_ctx.vm.do_progress(vec![handle]) {
-                        Ok(DoProgressResponse::ExecuteRun(handle_to_run)) => {
+                    match inner_ctx.vm.do_await(UnresolvedFuture::Single(handle)) {
+                        Ok(AwaitResponse::ExecuteRun(handle_to_run)) => {
                             // In case it returns ExecuteRun, it must be the handle we just gave it,
                             // and it means we need to execute the closure
                             assert_eq!(handle, handle_to_run);
@@ -931,7 +936,7 @@ where
                                 closure_fut: closure.run(),
                             });
                         }
-                        Ok(DoProgressResponse::CancelSignalReceived) => {
+                        Ok(AwaitResponse::CancelSignalReceived) => {
                             drop(inner_ctx);
                             // Got cancellation!
                             this.state.set(RunState::WaitingResultFut {

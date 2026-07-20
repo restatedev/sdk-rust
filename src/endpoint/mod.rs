@@ -62,7 +62,6 @@ impl Error {
             ErrorInner::VM(e) => e.code(),
             ErrorInner::UnknownService(_) | ErrorInner::UnknownServiceHandler(_, _) => 404,
             ErrorInner::Suspended
-            | ErrorInner::UnexpectedOutputClosed
             | ErrorInner::UnexpectedValueVariantForSyscall { .. }
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
@@ -89,7 +88,7 @@ pub(crate) enum ErrorInner {
     #[error("Cannot convert header '{0}', reason: {1}")]
     Header(String, #[source] BoxError),
     #[error(
-        "Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2 and v3"
+        "Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2, v3 and v4"
     )]
     BadDiscoveryVersion(String),
     #[error(
@@ -100,8 +99,6 @@ pub(crate) enum ErrorInner {
     BadPath(String),
     #[error("Suspended")]
     Suspended,
-    #[error("Unexpected output closed")]
-    UnexpectedOutputClosed,
     #[error("Unexpected value variant {variant} for syscall '{syscall}'")]
     UnexpectedValueVariantForSyscall {
         variant: &'static str,
@@ -336,7 +333,7 @@ impl Endpoint {
             Bytes::from(
                 serde_json::to_string(&crate::discovery::Endpoint {
                     lambda_compression: None,
-                    max_protocol_version: std::num::NonZero::new(5).unwrap(),
+                    max_protocol_version: std::num::NonZero::new(7).unwrap(),
                     min_protocol_version: std::num::NonZero::new(5).unwrap(),
                     protocol_mode: Some(match protocol_mode {
                         ProtocolMode::RequestResponse => {
