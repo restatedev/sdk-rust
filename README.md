@@ -33,7 +33,7 @@ use restate_sdk::prelude::*;
 
 struct Greeter;
 
-#[restate_sdk::service]
+#[service]
 impl Greeter {
     #[handler]
     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
@@ -78,7 +78,7 @@ use restate_sdk::prelude::*;
 
 struct Greeter;
 
-#[restate_sdk::service]
+#[service]
 impl Greeter {
     #[handler]
     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
