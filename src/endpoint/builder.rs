@@ -296,6 +296,7 @@ impl HandlerOptions {
 struct BindService {
     dispatcher: BoxedService,
     extensions: ExtensionMap,
+    required_extensions: Vec<crate::service::macro_support::RequiredExtension>,
 }
 
 /// Builder for [`Endpoint`]
@@ -342,6 +343,7 @@ impl Builder {
             mut discovery,
             dispatcher,
             extensions,
+            required_extensions,
         } = definition.into_service_definition();
         discovery.apply_options(service_options);
 
@@ -351,6 +353,7 @@ impl Builder {
             BindService {
                 dispatcher,
                 extensions,
+                required_extensions,
             },
         );
         self.discovery_services.push(discovery);
@@ -374,20 +377,48 @@ impl Builder {
     }
 
     /// Build the [`Endpoint`].
+    ///
+    /// # Panics
+    /// Panics if a bound service has a handler that declares an [`Extension`](crate::context::Extension)
+    /// which was not registered (on the service or endpoint builder). This validates at startup what
+    /// would otherwise be a panic on the handler's first invocation.
     pub fn build(self) -> Endpoint {
         let endpoint_extensions = self.endpoint_extensions;
-        let svcs = self
-            .svcs
+
+        // Merge endpoint-level extensions with each service's own (service wins), then validate that
+        // every extension the service's handlers declare via `Extension<..>` is present.
+        let mut merged_by_svc = HashMap::with_capacity(self.svcs.len());
+        let mut missing = Vec::new();
+        for (name, svc) in self.svcs {
+            let mut merged = endpoint_extensions.clone();
+            merged.overlay(&svc.extensions);
+            for req in &svc.required_extensions {
+                if !merged.contains(&req.type_id) {
+                    missing.push(format!(
+                        "  - service `{name}`, handler `{}`: missing extension `{}`",
+                        req.handler_name, req.type_name,
+                    ));
+                }
+            }
+            merged_by_svc.insert(name, (svc.dispatcher, merged));
+        }
+        if !missing.is_empty() {
+            panic!(
+                "Cannot build endpoint: the following handlers require extensions that were not \
+                 registered. Register them with `.extension(..)` on the service or endpoint \
+                 builder:\n{}",
+                missing.join("\n"),
+            );
+        }
+
+        let svcs = merged_by_svc
             .into_iter()
-            .map(|(name, svc)| {
-                // Merge endpoint-level extensions with the service-level ones (service wins).
-                let mut merged = endpoint_extensions.clone();
-                merged.overlay(&svc.extensions);
+            .map(|(name, (dispatcher, extensions))| {
                 (
                     name,
                     BoundService {
-                        dispatcher: svc.dispatcher,
-                        extensions: Arc::new(merged),
+                        dispatcher,
+                        extensions: Arc::new(extensions),
                     },
                 )
             })

@@ -299,45 +299,9 @@ pub trait ContextTimers<'ctx>: private::SealedContext<'ctx> {
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 
-/// # Dependency injection (extensions)
-///
-/// Handlers are plain functions, so they don't have a `self` to hold dependencies (an HTTP client,
-/// a database pool, configuration, ...). Instead, register such endpoint-lifetime singletons as
-/// *extensions* — per-service with [`.extension(..)`](crate::service::ServiceDefinition::extension)
-/// or endpoint-wide with the [endpoint builder](crate::endpoint::Builder::extension), and retrieve
-/// them by type inside any handler using [`extension`](ContextExtensions::extension):
-///
-/// ```rust,no_run
-/// use restate_sdk::prelude::*;
-///
-/// // A dependency you want available inside handlers (an HTTP client, here).
-/// struct HttpClient;
-/// # impl HttpClient { async fn get(&self, _: &str) -> Result<String, HandlerError> { Ok(String::new()) } }
-///
-/// #[restate_sdk::handler]
-/// async fn fetch(ctx: Context<'_>, url: String) -> Result<String, HandlerError> {
-///     // Retrieve it by type — handlers have no `self` to hold it.
-///     let client = ctx.extension::<HttpClient>();
-///     client.get(&url).await
-/// }
-///
-/// service!(Fetcher: { fetch });
-///
-/// # fn setup() {
-/// // Register it per-service (overrides an endpoint-wide extension of the same type) ...
-/// let _ = Endpoint::builder().bind(Fetcher.extension(HttpClient)).build();
-/// // ... or endpoint-wide, shared by every service:
-/// let _ = Endpoint::builder().extension(HttpClient).bind(Fetcher).build();
-/// # }
-/// ```
-///
-/// This is distinct from a Virtual Object's durable K/V [state](ContextReadState): extensions are
-/// in-memory, process-lifetime dependencies, not persisted per-key state.
+/// See [`Extension`].
 pub trait ContextExtensions<'ctx>: private::SealedContext<'ctx> {
-    /// Retrieve a registered extension of type `T`.
-    ///
-    /// # Panics
-    /// Panics if no extension of type `T` was registered on the service or endpoint builder.
+    #[doc(hidden)]
     fn extension<T: Send + Sync + 'static>(&self) -> &'ctx T {
         self.try_extension::<T>().unwrap_or_else(|| {
             panic!(
@@ -349,13 +313,61 @@ pub trait ContextExtensions<'ctx>: private::SealedContext<'ctx> {
         })
     }
 
-    /// Retrieve a registered extension of type `T`, or `None` if it wasn't registered.
+    #[doc(hidden)]
     fn try_extension<T: Send + Sync + 'static>(&self) -> Option<&'ctx T> {
         self.inner_context().get_extension::<T>()
     }
 }
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
+
+/// # Dependency injection (extensions)
+///
+/// Handler argument extractor for injecting a registered dependency (extension).
+///
+/// Use it to inject in your handlers an HTTP client, a database pool, configuration, ...
+///
+/// Extensions are validated when the [`Endpoint`](crate::endpoint::Endpoint) is built.
+///
+/// ```rust,no_run
+/// use restate_sdk::prelude::*;
+///
+/// // A dependency you want available inside handlers (an HTTP client, here).
+/// struct HttpClient;
+/// # impl HttpClient { async fn get(&self, _: &str) -> Result<String, HandlerError> { Ok(String::new()) } }
+///
+/// #[restate_sdk::handler]
+/// async fn fetch(
+///     _ctx: Context<'_>,
+///     Extension(client): Extension<&HttpClient>,
+///     url: String,
+/// ) -> Result<String, HandlerError> {
+///     client.get(&url).await
+/// }
+///
+/// service!(Fetcher: { fetch });
+///
+/// #[tokio::main]
+/// async fn main() {
+///     HttpServer::new(
+///         // Register the dependency; declaring `Extension<..>` for an unregistered type fails here.
+///         Endpoint::builder().extension(HttpClient).bind(Fetcher).build(),
+///     )
+///     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+///     .await;
+/// }
+/// ```
+///
+/// Register extensions per-service (with [`.extension(..)`](crate::service::ServiceDefinition::extension)
+/// on the bound service) or endpoint-wide (with the [endpoint builder](crate::endpoint::Builder::extension));
+/// a service-level extension overrides an endpoint-level one of the same type.
+///
+/// Use `Extension<&T>` to borrow the dependency (no clone), or `Extension<T>` (for a `T: Clone`) to
+/// take it by value.
+///
+/// This is distinct from a Virtual Object's durable K/V [state](ContextReadState): extensions are
+/// in-memory, process-lifetime dependencies, not persisted per-key state.
+pub struct Extension<T>(pub T);
 
 /// # Service Communication
 ///

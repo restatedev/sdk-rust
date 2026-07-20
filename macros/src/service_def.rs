@@ -95,6 +95,10 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
     let handler_discovery = handlers.iter().map(
         |h| quote!(::restate_sdk::service::macro_support::handler_into_discovery::<#kind_path, _>(&#h)),
     );
+    // Extensions the handlers declare via `Extension<..>` params, aggregated for build-time validation.
+    let handler_required_extensions = handlers.iter().map(
+        |h| quote!(v.extend(::restate_sdk::service::macro_support::handler_into_required_extensions::<#kind_path, _>(&#h));),
+    );
 
     // Client to call this service from another handler, typed from each handler's associated
     // input/output types and targeting its real wire name (`#h::NAME`).
@@ -185,6 +189,13 @@ pub(crate) fn expand(kind: Kind, input: TokenStream) -> syn::Result<TokenStream>
                     #service_type,
                     ::std::vec![ #( #handler_discovery ),* ],
                 )
+            }
+
+            fn required_extensions(
+            ) -> ::std::vec::Vec<::restate_sdk::service::macro_support::RequiredExtension> {
+                let mut v = ::std::vec::Vec::new();
+                #( #handler_required_extensions )*
+                v
             }
         }
 

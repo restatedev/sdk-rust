@@ -24,6 +24,12 @@ pub trait Service {
 /// This is used by codegen.
 pub trait Discoverable {
     fn discover() -> crate::discovery::Service;
+
+    /// The extensions this service's handlers require (declared via
+    /// [`Extension`](crate::context::Extension) parameters).
+    fn required_extensions() -> Vec<macro_support::RequiredExtension> {
+        Vec::new()
+    }
 }
 
 // ============================ ServiceDefinition ============================
@@ -36,6 +42,7 @@ pub struct ServiceDefinition {
     pub(crate) discovery: crate::discovery::Service,
     pub(crate) dispatcher: BoxedService,
     pub(crate) extensions: ExtensionMap,
+    pub(crate) required_extensions: Vec<macro_support::RequiredExtension>,
 }
 
 impl ServiceDefinition {
@@ -47,6 +54,7 @@ impl ServiceDefinition {
             discovery: S::discover(),
             dispatcher: BoxedService::new(s),
             extensions: ExtensionMap::new(),
+            required_extensions: S::required_extensions(),
         }
     }
 
@@ -95,8 +103,21 @@ where
 #[doc(hidden)]
 pub mod macro_support {
     use super::*;
+    use std::any::TypeId;
 
     pub type ServiceBoxFuture = BoxFuture<'static, Result<(), endpoint::Error>>;
+
+    /// An extension a handler declares (via an [`Extension`](crate::context::Extension) parameter)
+    /// and therefore requires to be registered before the endpoint can serve it.
+    #[derive(Clone, Debug)]
+    pub struct RequiredExtension {
+        /// The [`TypeId`] of the extension's type, checked against the registered extensions.
+        pub type_id: TypeId,
+        /// The extension's type name, for diagnostics.
+        pub type_name: &'static str,
+        /// The handler that declared it, for diagnostics.
+        pub handler_name: Cow<'static, str>,
+    }
 
     // --- Markers used for compile time checking of handler compositions.
 
@@ -128,6 +149,12 @@ pub mod macro_support {
 
         /// Per-handler options (lazy state, retention, ...) declared at the handler definition.
         fn options(&self) -> crate::endpoint::HandlerOptions;
+
+        /// The extensions this handler declares via [`Extension`](crate::context::Extension)
+        /// parameters, as `(TypeId, type_name)` pairs. Defaults to none.
+        fn required_extensions(&self) -> Vec<(TypeId, &'static str)> {
+            Vec::new()
+        }
 
         /// Handle an incoming invocation. Takes ownership of the [`ContextInternal`] and builds the
         /// user-facing context borrow internally.
@@ -161,6 +188,23 @@ pub mod macro_support {
         };
         discovery.apply_options(handler.options());
         discovery
+    }
+
+    /// Collect a handler's declared [`RequiredExtension`]s, tagged with the handler's wire name.
+    pub fn handler_into_required_extensions<Kind, H>(handler: &H) -> Vec<RequiredExtension>
+    where
+        H: Handler<Kind>,
+    {
+        let handler_name = handler.name();
+        handler
+            .required_extensions()
+            .into_iter()
+            .map(|(type_id, type_name)| RequiredExtension {
+                type_id,
+                type_name,
+                handler_name: handler_name.clone(),
+            })
+            .collect()
     }
 
     pub fn service_into_discovery(

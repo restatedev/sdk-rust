@@ -32,6 +32,14 @@ impl ExtensionMap {
             .and_then(|v| v.downcast_ref::<T>())
     }
 
+    /// Whether an extension with the given [`TypeId`] is registered.
+    ///
+    /// Used at endpoint build time to validate that every extension a handler declares via
+    /// [`Extension`](crate::context::Extension) is present.
+    pub(crate) fn contains(&self, type_id: &TypeId) -> bool {
+        self.inner.contains_key(type_id)
+    }
+
     /// Overlay `higher` on top of `self`: entries present in `higher` override those in `self`.
     ///
     /// Used to layer service-level extensions over endpoint-level ones, with the service winning.

@@ -15,7 +15,7 @@
 //! shared are inferred from the context-type of the first parameter.
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -123,6 +123,33 @@ impl HandlerAttrs {
     }
 }
 
+/// Recognize an `Extension<T>` / `Extension<&T>` parameter type.
+///
+/// Returns the looked-up type `T` and whether it was written as a reference (`Extension<&T>`, which
+/// borrows the extension, versus `Extension<T>`, which clones it out).
+fn parse_extension(ty: &Type) -> Option<(Type, bool)> {
+    let tp = match ty {
+        Type::Path(tp) => tp,
+        _ => return None,
+    };
+    let seg = tp.path.segments.last()?;
+    if seg.ident != "Extension" {
+        return None;
+    }
+    let args = match &seg.arguments {
+        PathArguments::AngleBracketed(a) => a,
+        _ => return None,
+    };
+    let inner = match args.args.first()? {
+        GenericArgument::Type(t) => t,
+        _ => return None,
+    };
+    match inner {
+        Type::Reference(r) => Some(((*r.elem).clone(), true)),
+        other => Some((other.clone(), false)),
+    }
+}
+
 /// Extract the `Ok` type from a `Result<T, E>` / `HandlerResult<T>` return type.
 fn extract_ok_type(output: &ReturnType) -> syn::Result<Type> {
     let ty = match output {
@@ -176,7 +203,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
         ));
     }
 
-    // Parse arguments: first is the context, an optional second is the (single) input.
+    // Parse arguments: first is the context; the rest are, in any order, `Extension<..>` extractors
+    // and at most one input parameter.
     let mut iter = func.sig.inputs.iter();
     let ctx_arg = match iter.next() {
         Some(FnArg::Typed(pt)) => pt,
@@ -193,18 +221,34 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
             ));
         }
     };
-    let input_arg: Option<&PatType> = match iter.next() {
-        Some(FnArg::Typed(pt)) => Some(pt),
-        Some(FnArg::Receiver(r)) => {
-            return Err(Error::new(r.span(), "handler cannot take `self`"));
+
+    // A slot in the argument list passed to `call`, so the generated dispatch shim can reconstruct
+    // the handler's parameters in their original order.
+    enum ArgSlot {
+        /// An `Extension<..>` extractor: `(lookup type, is `&T`)`.
+        Extension(Box<Type>, bool),
+        /// The (single) deserialized input parameter.
+        Input,
+    }
+    let mut slots: Vec<ArgSlot> = Vec::new();
+    let mut input_arg: Option<&PatType> = None;
+    for arg in iter {
+        let pt = match arg {
+            FnArg::Typed(pt) => pt,
+            FnArg::Receiver(r) => return Err(Error::new(r.span(), "handler cannot take `self`")),
+        };
+        if let Some((lookup, is_ref)) = parse_extension(&pt.ty) {
+            slots.push(ArgSlot::Extension(Box::new(lookup), is_ref));
+        } else if input_arg.is_none() {
+            input_arg = Some(pt);
+            slots.push(ArgSlot::Input);
+        } else {
+            return Err(Error::new(
+                pt.span(),
+                "handler supports at most one input parameter besides the context and \
+                 `Extension<..>` parameters",
+            ));
         }
-        None => None,
-    };
-    if let Some(extra) = iter.next() {
-        return Err(Error::new(
-            extra.span(),
-            "handler supports at most one input parameter besides the context",
-        ));
     }
 
     let ctx_kind = CtxKind::detect(&ctx_arg.ty).ok_or_else(|| {
@@ -228,17 +272,62 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     };
 
     let ident = &func.sig.ident;
+    let ctx_ty = &ctx_arg.ty;
 
-    // Dispatch shim: deserialize input, build the borrowing context, run the body.
-    let get_input_and_call = match &input_ty {
-        Some(ty) => quote! {
-            let (input, metadata) = ctx.input::<#ty>().await;
-            let fut = #ident::call((&ctx, metadata).into(), input);
-        },
-        None => quote! {
-            let (_, metadata) = ctx.input::<()>().await;
-            let fut = #ident::call((&ctx, metadata).into());
-        },
+    // Dispatch shim: deserialize input, build the borrowing context, extract the extensions, run
+    // the body. `call` receives the parameters in their original order; each `Extension` is
+    // precomputed into a local so the context can still be moved in as the first argument (the
+    // extracted `&T` borrows the underlying `ContextInternal`, not the context wrapper).
+    let mut ext_locals = Vec::new();
+    let mut call_args = vec![quote!(restate_ctx)];
+    let mut required_ext: Vec<Type> = Vec::new();
+    for slot in &slots {
+        match slot {
+            ArgSlot::Input => call_args.push(quote!(input)),
+            ArgSlot::Extension(lookup, is_ref) => {
+                let lookup = &**lookup;
+                let local = format_ident!("__restate_ext_{}", required_ext.len());
+                let fetch = quote! {
+                    ::restate_sdk::context::ContextExtensions::extension::<#lookup>(&restate_ctx)
+                };
+                let value = if *is_ref {
+                    quote!(::restate_sdk::context::Extension(#fetch))
+                } else {
+                    quote!(::restate_sdk::context::Extension(::core::clone::Clone::clone(#fetch)))
+                };
+                ext_locals.push(quote!(let #local = #value;));
+                call_args.push(quote!(#local));
+                required_ext.push(lookup.clone());
+            }
+        }
+    }
+    let input_bind = match &input_ty {
+        Some(ty) => quote!(let (input, metadata) = ctx.input::<#ty>().await;),
+        None => quote!(let (_, metadata) = ctx.input::<()>().await;),
+    };
+    let get_input_and_call = quote! {
+        #input_bind
+        let restate_ctx: #ctx_ty = ::core::convert::Into::into((&ctx, metadata));
+        #( #ext_locals )*
+        let fut = #ident::call( #( #call_args ),* );
+    };
+
+    // Only override the default (empty) `required_extensions` when the handler declares some.
+    let required_ext_method = if required_ext.is_empty() {
+        quote!()
+    } else {
+        quote! {
+            fn required_extensions(
+                &self,
+            ) -> ::std::vec::Vec<(::std::any::TypeId, &'static str)> {
+                ::std::vec![
+                    #( (
+                        ::std::any::TypeId::of::<#required_ext>(),
+                        ::std::any::type_name::<#required_ext>()
+                    ) ),*
+                ]
+            }
+        }
     };
 
     let restate_name = attrs.name.unwrap_or_else(|| func.sig.ident.to_string());
@@ -286,6 +375,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
             fn options(&self) -> ::restate_sdk::endpoint::HandlerOptions {
                 #options_expr
             }
+
+            #required_ext_method
 
             fn handle(
                 &self,

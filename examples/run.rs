@@ -2,9 +2,11 @@ use restate_sdk::prelude::*;
 use std::collections::HashMap;
 
 #[restate_sdk::handler]
-async fn do_run(ctx: Context<'_>) -> Result<Json<HashMap<String, String>>, HandlerError> {
-    // The HTTP client is injected as ambient state (see `main`), instead of living on a struct.
-    let client = ctx.extension::<reqwest::Client>().clone();
+async fn do_run(
+    ctx: Context<'_>,
+    Extension(client): Extension<&reqwest::Client>,
+) -> Result<Json<HashMap<String, String>>, HandlerError> {
+    let client = client.clone();
     let res = ctx
         .run(|| async move {
             let req = client.get("https://httpbin.org/ip").build()?;

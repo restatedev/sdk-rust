@@ -29,8 +29,11 @@ async fn sleep_then_increment_counter(ctx: &ObjectContext<'_>) -> HandlerResult<
 }
 
 #[restate_sdk::handler(name = "eitherSleepOrCall")]
-pub(crate) async fn either_sleep_or_call(ctx: ObjectContext<'_>) -> HandlerResult<()> {
-    if do_left_action(ctx.extension::<NonDetState>(), &ctx).await {
+pub(crate) async fn either_sleep_or_call(
+    ctx: ObjectContext<'_>,
+    Extension(state): Extension<&NonDetState>,
+) -> HandlerResult<()> {
+    if do_left_action(state, &ctx).await {
         ctx.sleep(Duration::from_millis(100)).await?;
     } else {
         ctx.object_client::<CounterClient>("abc")
@@ -42,8 +45,11 @@ pub(crate) async fn either_sleep_or_call(ctx: ObjectContext<'_>) -> HandlerResul
 }
 
 #[restate_sdk::handler(name = "callDifferentMethod")]
-pub(crate) async fn call_different_method(ctx: ObjectContext<'_>) -> HandlerResult<()> {
-    if do_left_action(ctx.extension::<NonDetState>(), &ctx).await {
+pub(crate) async fn call_different_method(
+    ctx: ObjectContext<'_>,
+    Extension(state): Extension<&NonDetState>,
+) -> HandlerResult<()> {
+    if do_left_action(state, &ctx).await {
         ctx.object_client::<CounterClient>("abc")
             .get(())
             .call()
@@ -60,8 +66,9 @@ pub(crate) async fn call_different_method(ctx: ObjectContext<'_>) -> HandlerResu
 #[restate_sdk::handler(name = "backgroundInvokeWithDifferentTargets")]
 pub(crate) async fn background_invoke_with_different_targets(
     ctx: ObjectContext<'_>,
+    Extension(state): Extension<&NonDetState>,
 ) -> HandlerResult<()> {
-    if do_left_action(ctx.extension::<NonDetState>(), &ctx).await {
+    if do_left_action(state, &ctx).await {
         ctx.object_client::<CounterClient>("abc").get(()).send();
     } else {
         ctx.object_client::<CounterClient>("abc").reset(()).send();
@@ -70,8 +77,11 @@ pub(crate) async fn background_invoke_with_different_targets(
 }
 
 #[restate_sdk::handler(name = "setDifferentKey")]
-pub(crate) async fn set_different_key(ctx: ObjectContext<'_>) -> HandlerResult<()> {
-    if do_left_action(ctx.extension::<NonDetState>(), &ctx).await {
+pub(crate) async fn set_different_key(
+    ctx: ObjectContext<'_>,
+    Extension(state): Extension<&NonDetState>,
+) -> HandlerResult<()> {
+    if do_left_action(state, &ctx).await {
         ctx.set(STATE_A, "my-state".to_owned());
     } else {
         ctx.set(STATE_B, "my-state".to_owned());

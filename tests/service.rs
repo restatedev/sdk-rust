@@ -151,3 +151,75 @@ fn fn_handlers_meta_and_composition() {
 fn client_compiles<'ctx>(client: &FnServiceClient<'ctx>) -> Request<'ctx, String, String> {
     client.fn_my_handler("hi".to_string())
 }
+
+// ============================ Extension extractor + build-time validation ============================
+
+struct MyDep;
+
+#[derive(Clone)]
+struct MyClonableDep;
+
+// Borrowed extension (`Extension<&T>`) alongside an input parameter, in any order.
+#[restate_sdk::handler]
+async fn ext_borrow(
+    _ctx: Context<'_>,
+    Extension(_dep): Extension<&MyDep>,
+    input: String,
+) -> HandlerResult<String> {
+    Ok(input)
+}
+
+// Owned extension (`Extension<T>`, clones out of the store) and no input.
+#[restate_sdk::handler]
+async fn ext_owned(
+    _ctx: Context<'_>,
+    Extension(_dep): Extension<MyClonableDep>,
+) -> HandlerResult<()> {
+    Ok(())
+}
+
+service!(ExtService: { ext_borrow, ext_owned });
+
+#[test]
+fn handler_reports_required_extensions() {
+    use restate_sdk::service::macro_support::Handler;
+    use std::any::TypeId;
+
+    let reqs = Handler::<restate_sdk::service::macro_support::ServiceKind>::required_extensions(
+        &ext_borrow,
+    );
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].0, TypeId::of::<MyDep>());
+
+    // A handler with no `Extension<..>` params declares none.
+    assert!(
+        Handler::<restate_sdk::service::macro_support::ServiceKind>::required_extensions(
+            &fn_no_input
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn build_succeeds_when_extensions_registered() {
+    // Per-service registration.
+    let _ = Endpoint::builder()
+        .bind(ExtService.extension(MyDep).extension(MyClonableDep))
+        .build();
+
+    // Endpoint-wide registration works too.
+    let _ = Endpoint::builder()
+        .extension(MyDep)
+        .extension(MyClonableDep)
+        .bind(ExtService)
+        .build();
+}
+
+#[test]
+#[should_panic(expected = "missing extension")]
+fn build_panics_when_extension_missing() {
+    // `MyClonableDep` is provided but `MyDep` is not: build must fail fast, not on invocation.
+    let _ = Endpoint::builder()
+        .bind(ExtService.extension(MyClonableDep))
+        .build();
+}
