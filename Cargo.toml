@@ -40,7 +40,7 @@ pin-project-lite = "0.2"
 rand = { version = "0.10", optional = true }
 regress = "0.10"
 restate-sdk-macros = { version = "0.10", path = "macros" }
-restate-sdk-shared-core = { version = "=0.10.0", features = ["request_identity", "sha2_random_seed", "http"] }
+restate-sdk-shared-core = { version = "=7.0.1", features = ["request_identity", "sha2_random_seed", "http"] }
 schemars = { version = "1.2", optional = true }
 serde = "1.0"
 serde_json = "1.0"

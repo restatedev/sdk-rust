@@ -2,8 +2,7 @@ use crate::endpoint::ErrorInner;
 use crate::endpoint::context::ContextInternalInner;
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{
-    DoProgressResponse, Error as CoreError, NotificationHandle, TakeOutputResult, TerminalFailure,
-    VM,
+    AwaitResponse, Error as CoreError, NotificationHandle, TerminalFailure, UnresolvedFuture, VM,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -56,21 +55,14 @@ impl Future for VmSelectAsyncResultPollFuture {
                 VmSelectAsyncResultPollState::Init { ctx, handles } => {
                     let mut inner_lock = must_lock!(ctx);
 
-                    // Let's consume some output to begin with
-                    let out = inner_lock.vm.take_output();
-                    match out {
-                        TakeOutputResult::Buffer(b) => {
-                            // Skip empty buffers: take_output returns an empty buffer when there's
-                            // nothing to send (e.g. while replaying completed entries). Sending it
-                            // would emit an empty HTTP/2 DATA frame per replayed await, which some
-                            // proxies (e.g. Envoy) reject when consecutive. See sdk-rust#114.
-                            if !b.is_empty() && !inner_lock.write.send(b) {
-                                return Poll::Ready(Err(ErrorInner::Suspended));
-                            }
-                        }
-                        TakeOutputResult::EOF => {
-                            return Poll::Ready(Err(ErrorInner::UnexpectedOutputClosed));
-                        }
+                    // Let's consume some output to begin with.
+                    // Skip empty buffers: take_output returns an empty buffer when there's
+                    // nothing to send (e.g. while replaying completed entries). Sending it
+                    // would emit an empty HTTP/2 DATA frame per replayed await, which some
+                    // proxies (e.g. Envoy) reject when consecutive. See sdk-rust#114.
+                    let b = inner_lock.vm.take_output();
+                    if !b.is_empty() && !inner_lock.write.send(b) {
+                        return Poll::Ready(Err(ErrorInner::Suspended));
                     }
 
                     // We can now start polling
@@ -108,23 +100,40 @@ impl Future for VmSelectAsyncResultPollFuture {
                 VmSelectAsyncResultPollState::PollProgress { ctx, handles } => {
                     let mut inner_lock = must_lock!(ctx);
 
-                    match inner_lock.vm.do_progress(handles.clone()) {
-                        Ok(DoProgressResponse::AnyCompleted) => {
+                    let unresolved_future = UnresolvedFuture::FirstCompleted(
+                        handles
+                            .iter()
+                            .copied()
+                            .map(UnresolvedFuture::Single)
+                            .collect(),
+                    );
+                    match inner_lock.vm.do_await(unresolved_future) {
+                        Ok(AwaitResponse::AnyCompleted) => {
                             // We're good, we got the response
                         }
-                        Ok(DoProgressResponse::ReadFromInput) => {
+                        Ok(AwaitResponse::WaitingExternalProgress {
+                            waiting_input: true,
+                            ..
+                        }) => {
+                            // do_await buffered an AwaitingOnMessage describing what we're
+                            // suspending on; flush it to the runtime before we block on input,
+                            // otherwise the runtime never learns what we're waiting for.
+                            let b = inner_lock.vm.take_output();
+                            if !b.is_empty() && !inner_lock.write.send(b) {
+                                return Poll::Ready(Err(ErrorInner::Suspended));
+                            }
                             drop(inner_lock);
                             self.state =
                                 Some(VmSelectAsyncResultPollState::WaitingInput { ctx, handles });
                             continue;
                         }
-                        Ok(DoProgressResponse::ExecuteRun(_)) => {
+                        Ok(AwaitResponse::WaitingExternalProgress { .. })
+                        | Ok(AwaitResponse::ExecuteRun(_)) => {
+                            // Waiting only on a run proposal is not expected on this await path.
+                            // These two are used by the shared-core to implement async run, which is not supported by the rust sdk currently.
                             unimplemented!()
                         }
-                        Ok(DoProgressResponse::WaitingPendingRun) => {
-                            unimplemented!()
-                        }
-                        Ok(DoProgressResponse::CancelSignalReceived) => {
+                        Ok(AwaitResponse::CancelSignalReceived) => {
                             return Poll::Ready(Ok(Err(TerminalFailure {
                                 code: 409,
                                 message: "cancelled".to_string(),
