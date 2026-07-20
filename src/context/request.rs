@@ -77,6 +77,8 @@ pub struct Request<'a, Req, Res = ()> {
     ctx: &'a ContextInternal,
     request_target: RequestTarget,
     idempotency_key: Option<String>,
+    scope: Option<String>,
+    limit_key: Option<String>,
     headers: Vec<(String, String)>,
     req: Req,
     res: PhantomData<Res>,
@@ -88,6 +90,8 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
             ctx,
             request_target,
             idempotency_key: None,
+            scope: None,
+            limit_key: None,
             headers: vec![],
             req,
             res: PhantomData,
@@ -105,6 +109,26 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self
     }
 
+    /// Route this request within the given scope.
+    ///
+    /// A scope is a sub-grouping of resources (invocations, virtual object instances, workflow
+    /// executions). Under the hood the scope contributes to the partition key, so all resources
+    /// in a scope get co-located by the restate-server. Idempotency keys are scoped, so the same
+    /// idempotency key in two different scopes refers to two distinct requests.
+    pub fn scope(mut self, scope: impl Into<String>) -> Self {
+        self.scope = Some(scope.into());
+        self
+    }
+
+    /// Add a concurrency limit key to the request.
+    ///
+    /// The limit key enforces hierarchical concurrency limits on invocations sharing the same
+    /// scope. It can only be used in conjunction with a scope (see [`Request::scope`]).
+    pub fn limit_key(mut self, limit_key: impl Into<String>) -> Self {
+        self.limit_key = Some(limit_key.into());
+        self
+    }
+
     /// Call a service. This returns a future encapsulating the response.
     pub fn call(self) -> impl CallFuture<Response = Res> + Send
     where
@@ -114,6 +138,8 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self.ctx.call(
             self.request_target,
             self.idempotency_key,
+            self.scope,
+            self.limit_key,
             self.headers,
             self.req,
         )
@@ -130,6 +156,8 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self.ctx.send(
             self.request_target,
             self.idempotency_key,
+            self.scope,
+            self.limit_key,
             self.headers,
             self.req,
             None,
@@ -146,6 +174,8 @@ impl<'a, Req, Res> Request<'a, Req, Res> {
         self.ctx.send(
             self.request_target,
             self.idempotency_key,
+            self.scope,
+            self.limit_key,
             self.headers,
             self.req,
             Some(delay),

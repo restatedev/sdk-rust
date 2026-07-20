@@ -121,6 +121,9 @@ pub struct InputMetadata {
     pub random_seed: u64,
     pub key: String,
     pub headers: http::HeaderMap<String>,
+    pub scope: Option<String>,
+    pub limit_key: Option<String>,
+    pub idempotency_key: Option<String>,
 }
 
 impl From<RequestTarget> for Target {
@@ -227,6 +230,9 @@ impl ContextInternal {
                             random_seed: raw_input.random_seed,
                             key: raw_input.key,
                             headers,
+                            scope: raw_input.scope,
+                            limit_key: raw_input.limit_key,
+                            idempotency_key: raw_input.idempotency_key,
                         },
                     ))
                 });
@@ -390,6 +396,8 @@ impl ContextInternal {
         &self,
         request_target: RequestTarget,
         idempotency_key: Option<String>,
+        scope: Option<String>,
+        limit_key: Option<String>,
         headers: Vec<(String, String)>,
         req: Req,
     ) -> impl CallFuture<Response = Res> + Send {
@@ -397,6 +405,8 @@ impl ContextInternal {
 
         let mut target: Target = request_target.into();
         target.idempotency_key = idempotency_key;
+        target.scope = scope;
+        target.limit_key = limit_key;
         target.headers = headers
             .into_iter()
             .map(|(k, v)| Header {
@@ -471,10 +481,13 @@ impl ContextInternal {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn send<Req: Serialize>(
         &self,
         request_target: RequestTarget,
         idempotency_key: Option<String>,
+        scope: Option<String>,
+        limit_key: Option<String>,
         headers: Vec<(String, String)>,
         req: Req,
         delay: Option<Duration>,
@@ -483,6 +496,8 @@ impl ContextInternal {
 
         let mut target: Target = request_target.into();
         target.idempotency_key = idempotency_key;
+        target.scope = scope;
+        target.limit_key = limit_key;
         target.headers = headers
             .into_iter()
             .map(|(k, v)| Header {

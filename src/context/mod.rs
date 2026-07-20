@@ -26,6 +26,9 @@ pub struct Context<'ctx> {
     #[cfg(feature = "rand")]
     std_rng: rand::prelude::StdRng,
     headers: HeaderMap,
+    scope: Option<String>,
+    limit_key: Option<String>,
+    idempotency_key: Option<String>,
     inner: &'ctx ContextInternal,
 }
 
@@ -44,6 +47,21 @@ impl Context<'_> {
     pub fn headers_mut(&mut self) -> &HeaderMap {
         &mut self.headers
     }
+
+    /// Scope this invocation was submitted with, if any.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Limit key this invocation was submitted with, if any.
+    pub fn limit_key(&self) -> Option<&str> {
+        self.limit_key.as_deref()
+    }
+
+    /// Idempotency key this invocation was submitted with, if any.
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
+    }
 }
 
 impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for Context<'ctx> {
@@ -54,6 +72,9 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for Context<'ctx> {
             #[cfg(feature = "rand")]
             std_rng: rand::prelude::SeedableRng::seed_from_u64(value.1.random_seed),
             headers: value.1.headers,
+            scope: value.1.scope,
+            limit_key: value.1.limit_key,
+            idempotency_key: value.1.idempotency_key,
             inner: value.0,
         }
     }
@@ -67,6 +88,9 @@ pub struct SharedObjectContext<'ctx> {
     #[cfg(feature = "rand")]
     std_rng: rand::prelude::StdRng,
     headers: HeaderMap,
+    scope: Option<String>,
+    limit_key: Option<String>,
+    idempotency_key: Option<String>,
     pub(crate) inner: &'ctx ContextInternal,
 }
 
@@ -90,6 +114,21 @@ impl SharedObjectContext<'_> {
     pub fn headers_mut(&mut self) -> &HeaderMap {
         &mut self.headers
     }
+
+    /// Scope this invocation was submitted with, if any.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Limit key this invocation was submitted with, if any.
+    pub fn limit_key(&self) -> Option<&str> {
+        self.limit_key.as_deref()
+    }
+
+    /// Idempotency key this invocation was submitted with, if any.
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
+    }
 }
 
 impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for SharedObjectContext<'ctx> {
@@ -101,6 +140,9 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for SharedObjectContext<
             #[cfg(feature = "rand")]
             std_rng: rand::prelude::SeedableRng::seed_from_u64(value.1.random_seed),
             headers: value.1.headers,
+            scope: value.1.scope,
+            limit_key: value.1.limit_key,
+            idempotency_key: value.1.idempotency_key,
             inner: value.0,
         }
     }
@@ -114,6 +156,9 @@ pub struct ObjectContext<'ctx> {
     #[cfg(feature = "rand")]
     std_rng: rand::prelude::StdRng,
     headers: HeaderMap,
+    scope: Option<String>,
+    limit_key: Option<String>,
+    idempotency_key: Option<String>,
     pub(crate) inner: &'ctx ContextInternal,
 }
 
@@ -137,6 +182,21 @@ impl ObjectContext<'_> {
     pub fn headers_mut(&mut self) -> &HeaderMap {
         &mut self.headers
     }
+
+    /// Scope this invocation was submitted with, if any.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Limit key this invocation was submitted with, if any.
+    pub fn limit_key(&self) -> Option<&str> {
+        self.limit_key.as_deref()
+    }
+
+    /// Idempotency key this invocation was submitted with, if any.
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
+    }
 }
 
 impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for ObjectContext<'ctx> {
@@ -148,6 +208,9 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for ObjectContext<'ctx> 
             #[cfg(feature = "rand")]
             std_rng: rand::prelude::SeedableRng::seed_from_u64(value.1.random_seed),
             headers: value.1.headers,
+            scope: value.1.scope,
+            limit_key: value.1.limit_key,
+            idempotency_key: value.1.idempotency_key,
             inner: value.0,
         }
     }
@@ -161,6 +224,9 @@ pub struct SharedWorkflowContext<'ctx> {
     #[cfg(feature = "rand")]
     std_rng: rand::prelude::StdRng,
     headers: HeaderMap,
+    scope: Option<String>,
+    limit_key: Option<String>,
+    idempotency_key: Option<String>,
     pub(crate) inner: &'ctx ContextInternal,
 }
 
@@ -173,6 +239,9 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for SharedWorkflowContex
             #[cfg(feature = "rand")]
             std_rng: rand::prelude::SeedableRng::seed_from_u64(value.1.random_seed),
             headers: value.1.headers,
+            scope: value.1.scope,
+            limit_key: value.1.limit_key,
+            idempotency_key: value.1.idempotency_key,
             inner: value.0,
         }
     }
@@ -198,6 +267,21 @@ impl SharedWorkflowContext<'_> {
     pub fn headers_mut(&mut self) -> &HeaderMap {
         &mut self.headers
     }
+
+    /// Scope this invocation was submitted with, if any.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Limit key this invocation was submitted with, if any.
+    pub fn limit_key(&self) -> Option<&str> {
+        self.limit_key.as_deref()
+    }
+
+    /// Idempotency key this invocation was submitted with, if any.
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
+    }
 }
 
 /// Workflow handler context.
@@ -208,6 +292,9 @@ pub struct WorkflowContext<'ctx> {
     #[cfg(feature = "rand")]
     std_rng: rand::prelude::StdRng,
     headers: HeaderMap,
+    scope: Option<String>,
+    limit_key: Option<String>,
+    idempotency_key: Option<String>,
     pub(crate) inner: &'ctx ContextInternal,
 }
 
@@ -220,6 +307,9 @@ impl<'ctx> From<(&'ctx ContextInternal, InputMetadata)> for WorkflowContext<'ctx
             #[cfg(feature = "rand")]
             std_rng: rand::prelude::SeedableRng::seed_from_u64(value.1.random_seed),
             headers: value.1.headers,
+            scope: value.1.scope,
+            limit_key: value.1.limit_key,
+            idempotency_key: value.1.idempotency_key,
             inner: value.0,
         }
     }
@@ -244,6 +334,21 @@ impl WorkflowContext<'_> {
     /// Get request headers.
     pub fn headers_mut(&mut self) -> &HeaderMap {
         &mut self.headers
+    }
+
+    /// Scope this invocation was submitted with, if any.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Limit key this invocation was submitted with, if any.
+    pub fn limit_key(&self) -> Option<&str> {
+        self.limit_key.as_deref()
+    }
+
+    /// Idempotency key this invocation was submitted with, if any.
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
     }
 }
 
@@ -355,6 +460,31 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextTimers<'ctx> for CTX {}
 /// **No need for manual retry logic**:
 /// Restate proxies all the calls and logs them in the journal.
 /// In case of failures, Restate takes care of retries, so you don't need to implement this yourself here.
+///
+/// ## Idempotency key, scope and concurrency limit key
+///
+/// Calls and sends can carry an idempotency key, a scope, and a concurrency limit key.
+/// A *scope* is a sub-grouping of resources that gets co-located by the restate-server (idempotency
+/// keys are scoped). A *limit key* enforces hierarchical concurrency limits within the scope, and can
+/// only be used together with a scope.
+///
+/// ```rust,no_run
+/// # #[path = "../../examples/services/mod.rs"]
+/// # mod services;
+/// # use services::my_service::MyServiceClient;
+/// # use restate_sdk::prelude::*;
+/// #
+/// # async fn greet(ctx: Context<'_>, greeting: String) -> Result<(), HandlerError> {
+///     ctx.service_client::<MyServiceClient>()
+///         .my_handler(String::from("Hi!"))
+///         .idempotency_key("req-1")
+///         .scope("tenant-123")
+///         .limit_key("api-key/user42")
+///         .call()
+///         .await?;
+/// #    Ok(())
+/// # }
+/// ```
 ///
 /// ## Sending messages
 ///
