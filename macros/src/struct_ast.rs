@@ -22,7 +22,7 @@ use syn::{
 };
 
 /// Arguments accepted by the service/object/workflow attribute in the struct API,
-/// e.g. `#[restate_sdk::service(name = "Greeter", vis = "pub(crate)")]`.
+/// e.g. `#[restate_sdk::service(name = "Greeter", client_visibility = "pub(crate)")]`.
 #[derive(Default)]
 pub(crate) struct ServiceArgs {
     pub(crate) name: Option<String>,
@@ -40,13 +40,13 @@ impl Parse for ServiceArgs {
             let ident = meta.path.require_ident()?;
             if ident == "name" {
                 args.name = Some(parse_str_lit(&meta.value)?);
-            } else if ident == "vis" {
+            } else if ident == "client_visibility" {
                 let s = parse_str_lit(&meta.value)?;
                 args.vis = Some(syn::parse_str::<Visibility>(&s)?);
             } else {
                 return Err(Error::new(
                     ident.span(),
-                    "unsupported attribute argument; supported arguments are `name` and `vis`",
+                    "unsupported attribute argument; supported arguments are `name` and `client_visibility`",
                 ));
             }
         }

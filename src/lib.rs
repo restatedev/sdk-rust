@@ -293,7 +293,7 @@ pub mod serde;
 /// ```
 ///
 /// The visibility of the generated client defaults to `pub`; override it with
-/// `#[restate_sdk::service(vis = "pub(crate)")]`.
+/// `#[restate_sdk::service(client_visibility = "pub(crate)")]`.
 pub use restate_sdk_macros::service;
 
 /// Entry-point macro to define a Restate [Virtual object](https://docs.restate.dev/concepts/services#virtual-objects).

@@ -205,6 +205,25 @@ fn generic_service_discovers_and_binds() {
         .build();
 }
 
+// `client_visibility` overrides the generated client's visibility.
+struct Restricted;
+
+#[service(name = "Restricted", client_visibility = "pub(crate)")]
+impl Restricted {
+    #[handler]
+    async fn ping(&self, _ctx: Context<'_>) -> HandlerResult<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn client_visibility_override_discovers() {
+    let disc = <Restricted as Discoverable>::discover();
+    assert_eq!(disc.name.to_string(), "Restricted");
+    // `RestrictedClient` is generated with `pub(crate)` visibility.
+    let _bind = Endpoint::builder().bind(Restricted).build();
+}
+
 #[test]
 fn binds_without_serve() {
     // The struct value binds directly, no `.serve()`.
