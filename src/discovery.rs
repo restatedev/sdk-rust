@@ -52,28 +52,43 @@ impl OutputPayload {
 
 impl Service {
     pub(crate) fn apply_options(&mut self, options: ServiceOptions) {
-        // Apply service options
         if let Some(name) = options.name {
             self.name = ServiceName::try_from(name).expect("Service name valid");
         }
         self.metadata.extend(options.metadata);
-        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
-        self.abort_timeout = options.abort_timeout.map(|d| d.as_millis() as u64);
-        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
-        self.idempotency_retention = options.idempotency_retention.map(|d| d.as_millis() as u64);
-        self.journal_retention = options.journal_retention.map(|d| d.as_millis() as u64);
-        self.enable_lazy_state = options.enable_lazy_state;
-        self.ingress_private = options.ingress_private;
-        // Retry policy
-        self.retry_policy_initial_interval = options
-            .retry_policy_initial_interval
-            .map(|d| d.as_millis() as u64);
-        self.retry_policy_exponentiation_factor = options.retry_policy_exponentiation_factor;
-        self.retry_policy_max_interval = options
-            .retry_policy_max_interval
-            .map(|d| d.as_millis() as u64);
-        self.retry_policy_max_attempts = options.retry_policy_max_attempts;
-        self.retry_policy_on_max_attempts = options.retry_policy_on_max_attempts;
+        if let Some(d) = options.inactivity_timeout {
+            self.inactivity_timeout = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.abort_timeout {
+            self.abort_timeout = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.idempotency_retention {
+            self.idempotency_retention = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.journal_retention {
+            self.journal_retention = Some(d.as_millis() as u64);
+        }
+        if let Some(v) = options.enable_lazy_state {
+            self.enable_lazy_state = Some(v);
+        }
+        if let Some(v) = options.ingress_private {
+            self.ingress_private = Some(v);
+        }
+        if let Some(d) = options.retry_policy_initial_interval {
+            self.retry_policy_initial_interval = Some(d.as_millis() as u64);
+        }
+        if let Some(v) = options.retry_policy_exponentiation_factor {
+            self.retry_policy_exponentiation_factor = Some(v);
+        }
+        if let Some(d) = options.retry_policy_max_interval {
+            self.retry_policy_max_interval = Some(d.as_millis() as u64);
+        }
+        if let Some(v) = options.retry_policy_max_attempts {
+            self.retry_policy_max_attempts = Some(v);
+        }
+        if let Some(v) = options.retry_policy_on_max_attempts {
+            self.retry_policy_on_max_attempts = Some(v);
+        }
 
         // Apply handler specific options
         for (handler_name, handler_options) in options.handler_options {
@@ -89,26 +104,42 @@ impl Service {
 
 impl Handler {
     pub(crate) fn apply_options(&mut self, options: HandlerOptions) {
-        // Apply handler options
         self.metadata.extend(options.metadata);
-        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
-        self.abort_timeout = options.abort_timeout.map(|d| d.as_millis() as u64);
-        self.inactivity_timeout = options.inactivity_timeout.map(|d| d.as_millis() as u64);
-        self.idempotency_retention = options.idempotency_retention.map(|d| d.as_millis() as u64);
-        self.journal_retention = options.journal_retention.map(|d| d.as_millis() as u64);
-        self.workflow_completion_retention =
-            options.workflow_retention.map(|d| d.as_millis() as u64);
-        self.enable_lazy_state = options.enable_lazy_state;
-        self.ingress_private = options.ingress_private;
-        // Retry policy
-        self.retry_policy_initial_interval = options
-            .retry_policy_initial_interval
-            .map(|d| d.as_millis() as u64);
-        self.retry_policy_exponentiation_factor = options.retry_policy_exponentiation_factor;
-        self.retry_policy_max_interval = options
-            .retry_policy_max_interval
-            .map(|d| d.as_millis() as u64);
-        self.retry_policy_max_attempts = options.retry_policy_max_attempts;
-        self.retry_policy_on_max_attempts = options.retry_policy_on_max_attempts;
+        if let Some(d) = options.inactivity_timeout {
+            self.inactivity_timeout = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.abort_timeout {
+            self.abort_timeout = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.idempotency_retention {
+            self.idempotency_retention = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.journal_retention {
+            self.journal_retention = Some(d.as_millis() as u64);
+        }
+        if let Some(d) = options.workflow_retention {
+            self.workflow_completion_retention = Some(d.as_millis() as u64);
+        }
+        if let Some(v) = options.enable_lazy_state {
+            self.enable_lazy_state = Some(v);
+        }
+        if let Some(v) = options.ingress_private {
+            self.ingress_private = Some(v);
+        }
+        if let Some(d) = options.retry_policy_initial_interval {
+            self.retry_policy_initial_interval = Some(d.as_millis() as u64);
+        }
+        if let Some(v) = options.retry_policy_exponentiation_factor {
+            self.retry_policy_exponentiation_factor = Some(v);
+        }
+        if let Some(d) = options.retry_policy_max_interval {
+            self.retry_policy_max_interval = Some(d.as_millis() as u64);
+        }
+        if let Some(v) = options.retry_policy_max_attempts {
+            self.retry_policy_max_attempts = Some(v);
+        }
+        if let Some(v) = options.retry_policy_on_max_attempts {
+            self.retry_policy_on_max_attempts = Some(v);
+        }
     }
 }
