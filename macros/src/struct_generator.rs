@@ -12,10 +12,57 @@
 //! the same `Service`/`Discoverable`/`IntoServiceDefinition` runtime traits used by the trait API.
 
 use crate::ast::ServiceType;
-use crate::struct_ast::{StructHandler, StructService};
+use crate::struct_ast::{CommonOptions, OnMaxAttempts, StructHandler, StructService};
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::quote;
 use syn::PatType;
+
+/// `Some(<v>)` if set, else `None`, for a primitive that `quote!` can interpolate directly.
+fn opt_lit<T: quote::ToTokens>(v: Option<T>) -> TokenStream2 {
+    match v {
+        Some(v) => quote! { Some(#v) },
+        None => quote! { None },
+    }
+}
+
+fn opt_doc(doc: &Option<String>) -> TokenStream2 {
+    match doc {
+        Some(d) => quote! { Some(#d.to_string()) },
+        None => quote! { None },
+    }
+}
+
+fn opt_on_max_attempts(v: Option<OnMaxAttempts>) -> TokenStream2 {
+    match v {
+        Some(OnMaxAttempts::Pause) => {
+            quote! { Some(::restate_sdk::discovery::RetryPolicyOnMaxAttempts::Pause) }
+        }
+        Some(OnMaxAttempts::Kill) => {
+            quote! { Some(::restate_sdk::discovery::RetryPolicyOnMaxAttempts::Kill) }
+        }
+        None => quote! { None },
+    }
+}
+
+/// Tokens for the retry-policy fields shared by `discovery::Service` and `discovery::Handler`.
+struct RetryPolicyTokens {
+    initial_interval: TokenStream2,
+    max_interval: TokenStream2,
+    max_attempts: TokenStream2,
+    exponentiation_factor: TokenStream2,
+    on_max_attempts: TokenStream2,
+}
+
+fn retry_policy_tokens(opts: &CommonOptions) -> RetryPolicyTokens {
+    let r = &opts.retry_policy;
+    RetryPolicyTokens {
+        initial_interval: opt_lit(r.initial_interval),
+        max_interval: opt_lit(r.max_interval),
+        max_attempts: opt_lit(r.max_attempts),
+        exponentiation_factor: opt_lit(r.factor),
+        on_max_attempts: opt_on_max_attempts(r.on_max_attempts),
+    }
+}
 
 pub(crate) fn generate(svc: &StructService) -> TokenStream2 {
     let stripped_impl = &svc.stripped_impl;
@@ -150,29 +197,70 @@ fn discovery(svc: &StructService) -> TokenStream2 {
             },
         };
 
+        let opts = &handler.options;
+        let documentation = opt_doc(&handler.documentation);
+        let abort_timeout = opt_lit(opts.abort_timeout);
+        let inactivity_timeout = opt_lit(opts.inactivity_timeout);
+        let journal_retention = opt_lit(opts.journal_retention);
+        let idempotency_retention = opt_lit(opts.idempotency_retention);
+        // `workflow_completion_retention` is configured at the workflow level but lives on the
+        // workflow's (non-shared) `run` handler in the discovery schema.
+        let workflow_completion_retention =
+            if svc.service_ty == ServiceType::Workflow && !handler.is_shared {
+                opt_lit(svc.options.workflow_completion_retention)
+            } else {
+                quote! { None }
+            };
+        let enable_lazy_state = opt_lit(opts.enable_lazy_state);
+        let ingress_private = opt_lit(opts.ingress_private);
+        let retry = retry_policy_tokens(opts);
+        let RetryPolicyTokens {
+            initial_interval,
+            max_interval,
+            max_attempts,
+            exponentiation_factor,
+            on_max_attempts,
+        } = retry;
+
         quote! {
             ::restate_sdk::discovery::Handler {
                 name: ::restate_sdk::discovery::HandlerName::try_from(#handler_literal).expect("Handler name valid"),
                 input: #input_schema,
                 output: #output_schema,
                 ty: #handler_ty,
-                documentation: None,
+                documentation: #documentation,
                 metadata: Default::default(),
-                abort_timeout: None,
-                inactivity_timeout: None,
-                journal_retention: None,
-                idempotency_retention: None,
-                workflow_completion_retention: None,
-                enable_lazy_state: None,
-                ingress_private: None,
-                retry_policy_initial_interval: None,
-                retry_policy_max_interval: None,
-                retry_policy_max_attempts: None,
-                retry_policy_exponentiation_factor: None,
-                retry_policy_on_max_attempts: None,
+                abort_timeout: #abort_timeout,
+                inactivity_timeout: #inactivity_timeout,
+                journal_retention: #journal_retention,
+                idempotency_retention: #idempotency_retention,
+                workflow_completion_retention: #workflow_completion_retention,
+                enable_lazy_state: #enable_lazy_state,
+                ingress_private: #ingress_private,
+                retry_policy_initial_interval: #initial_interval,
+                retry_policy_max_interval: #max_interval,
+                retry_policy_max_attempts: #max_attempts,
+                retry_policy_exponentiation_factor: #exponentiation_factor,
+                retry_policy_on_max_attempts: #on_max_attempts,
             }
         }
     });
+
+    let opts = &svc.options;
+    let documentation = opt_doc(&svc.documentation);
+    let abort_timeout = opt_lit(opts.abort_timeout);
+    let inactivity_timeout = opt_lit(opts.inactivity_timeout);
+    let journal_retention = opt_lit(opts.journal_retention);
+    let idempotency_retention = opt_lit(opts.idempotency_retention);
+    let enable_lazy_state = opt_lit(opts.enable_lazy_state);
+    let ingress_private = opt_lit(opts.ingress_private);
+    let RetryPolicyTokens {
+        initial_interval,
+        max_interval,
+        max_attempts,
+        exponentiation_factor,
+        on_max_attempts,
+    } = retry_policy_tokens(opts);
 
     quote! {
         impl #impl_generics ::restate_sdk::service::Discoverable for #self_ty #where_clause {
@@ -182,19 +270,19 @@ fn discovery(svc: &StructService) -> TokenStream2 {
                     name: ::restate_sdk::discovery::ServiceName::try_from(#service_literal.to_string())
                         .expect("Service name valid"),
                     handlers: vec![#( #handlers ),*],
-                    documentation: None,
+                    documentation: #documentation,
                     metadata: Default::default(),
-                    abort_timeout: None,
-                    inactivity_timeout: None,
-                    journal_retention: None,
-                    idempotency_retention: None,
-                    enable_lazy_state: None,
-                    ingress_private: None,
-                    retry_policy_initial_interval: None,
-                    retry_policy_max_interval: None,
-                    retry_policy_max_attempts: None,
-                    retry_policy_exponentiation_factor: None,
-                    retry_policy_on_max_attempts: None,
+                    abort_timeout: #abort_timeout,
+                    inactivity_timeout: #inactivity_timeout,
+                    journal_retention: #journal_retention,
+                    idempotency_retention: #idempotency_retention,
+                    enable_lazy_state: #enable_lazy_state,
+                    ingress_private: #ingress_private,
+                    retry_policy_initial_interval: #initial_interval,
+                    retry_policy_max_interval: #max_interval,
+                    retry_policy_max_attempts: #max_attempts,
+                    retry_policy_exponentiation_factor: #exponentiation_factor,
+                    retry_policy_on_max_attempts: #on_max_attempts,
                 }
             }
         }

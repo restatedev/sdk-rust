@@ -1,0 +1,5 @@
+error: invalid `on_max_attempts` value "explode"; expected "pause" or "kill"
+ --> tests/ui/struct_bad_on_max_attempts.rs:8:75
+  |
+8 |     #[handler(invocation_retry_policy(max_attempts = 3, on_max_attempts = "explode"))]
+  |                                                                           ^^^^^^^^^
