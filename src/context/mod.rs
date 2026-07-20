@@ -13,7 +13,7 @@ mod run;
 mod select;
 mod select_any;
 
-pub use request::{CallFuture, InvocationHandle, Request, RequestTarget};
+pub use request::{CallFuture, InvocationHandle, Request, RequestTarget, SendHandle, SignalHandle};
 pub use run::{RunClosure, RunFuture, RunRetryPolicy};
 pub use select_any::DurableFuturesUnordered;
 
@@ -477,7 +477,7 @@ pub trait ContextClient<'ctx>: private::SealedContext<'ctx> {
     }
 
     /// Create an [`InvocationHandle`] from an invocation id.
-    fn invocation_handle(&self, invocation_id: String) -> impl InvocationHandle + 'ctx {
+    fn invocation_handle(&self, invocation_id: String) -> InvocationHandle {
         self.inner_context().invocation_handle(invocation_id)
     }
 
@@ -692,6 +692,76 @@ pub trait ContextAwakeables<'ctx>: private::SealedContext<'ctx> {
 }
 
 impl<'ctx, CTX: private::SealedContext<'ctx>> ContextAwakeables<'ctx> for CTX {}
+
+/// # Signals
+///
+/// Signals let invocations communicate with each other. A signal is a named, one-shot
+/// durable promise **scoped to a specific invocation**: a running handler awaits a signal by name,
+/// and any other handler completes it by targeting the awaiter's **invocation id** and the same
+/// **signal name**.
+///
+/// Signals are similar to [awakeables][crate::context::ContextAwakeables], but instead of an
+/// opaque generated identifier you exfiltrate, they are addressed by `(invocation_id, name)`.
+/// The awaiting handler just needs to share its own invocation id (available via
+/// [`Context::invocation_id`]).
+///
+/// ## Awaiting a signal
+///
+/// ```rust,no_run
+/// # use restate_sdk::prelude::*;
+/// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
+/// // Wait for a named signal on the current invocation
+/// let value = ctx.signal::<String>("my-signal").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The returned future is a [`DurableFuture`], so it can be combined with other durable futures
+/// using [`crate::select`].
+///
+/// ## Completing a signal
+///
+/// Another handler completes the signal on the target invocation using its
+/// [`InvocationHandle`][crate::context::InvocationHandle]:
+///
+/// ```rust,no_run
+/// # use restate_sdk::prelude::*;
+/// // Resolve the signal with a value
+/// # async fn resolve(ctx: Context<'_>, invocation_id: String) -> Result<(), HandlerError> {
+/// ctx.invocation_handle(invocation_id)
+///     .signal("my-signal")
+///     .resolve("hello".to_string());
+/// # Ok(())
+/// # }
+///
+/// // Or reject it, so the awaiting handler observes a terminal error
+/// # async fn reject(ctx: Context<'_>, invocation_id: String) -> Result<(), HandlerError> {
+/// ctx.invocation_handle(invocation_id)
+///     .signal("my-signal")
+///     .reject(TerminalError::new("my error reason"));
+/// # Ok(())
+/// # }
+/// ```
+///
+/// For more info about serialization of the payload, see [crate::serde].
+///
+/// **Be aware**: Virtual Objects only process a single invocation at a time, so the Virtual Object
+/// will be blocked while waiting on the signal to be completed.
+pub trait ContextSignals<'ctx>: private::SealedContext<'ctx> {
+    /// Wait for a named signal to arrive on the current invocation.
+    ///
+    /// Signals are identified by name and are scoped to the current invocation. Another handler
+    /// can complete this signal via [`InvocationHandle::signal`][crate::context::InvocationHandle::signal],
+    /// specifying this invocation's id (available via [`Context::invocation_id`]) and the same name.
+    fn signal<T: Deserialize + 'static>(
+        &self,
+        name: &str,
+    ) -> impl DurableFuture<Output = Result<T, TerminalError>> + Send + 'ctx {
+        self.inner_context().signal(name)
+    }
+}
+
+impl<'ctx, CTX: private::SealedContext<'ctx>> ContextSignals<'ctx> for CTX {}
 
 /// # Journaling Results
 ///

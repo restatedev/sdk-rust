@@ -27,6 +27,7 @@
 //! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
 //! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
 //! - [Awakeables][crate::context::ContextAwakeables]: Durable Futures to wait for events and the completion of external tasks.
+//! - [Signals][crate::context::ContextSignals]: Named durable promises scoped to an invocation, for communication between invocations.
 //! - [Error Handling][crate::errors]: Restate retries failures infinitely. Use `TerminalError` to stop retries.
 //! - [Serialization][crate::serde]: The SDK serializes results to send them to the Server. Includes [Schema Generation and payload metadata](crate::serde::PayloadMetadata) for documentation & discovery.
 //! - [Serving][crate::http_server]: Start an HTTP server to expose services.
@@ -511,9 +512,10 @@ pub mod prelude {
 
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,
-        ContextSideEffects, ContextTimers, ContextWriteState, DurableFuturesUnordered, HeaderMap,
-        InvocationHandle, ObjectContext, Request, RunFuture, RunRetryPolicy, SharedObjectContext,
-        SharedWorkflowContext, WorkflowContext,
+        ContextSideEffects, ContextSignals, ContextTimers, ContextWriteState,
+        DurableFuturesUnordered, HeaderMap, InvocationHandle, ObjectContext, Request, RunFuture,
+        RunRetryPolicy, SendHandle, SharedObjectContext, SharedWorkflowContext, SignalHandle,
+        WorkflowContext,
     };
     pub use crate::endpoint::{
         Endpoint, HandleOptions, HandlerOptions, ProtocolMode, ServiceOptions,

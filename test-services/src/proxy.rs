@@ -75,10 +75,11 @@ impl Proxy {
         let invocation_id = if let Some(delay_millis) = req.delay_millis {
             request
                 .send_after(Duration::from_millis(delay_millis))
-                .invocation_id()
                 .await?
+                .invocation_id()
+                .to_owned()
         } else {
-            request.send().invocation_id().await?
+            request.send().await?.invocation_id().to_owned()
         };
 
         Ok(invocation_id)

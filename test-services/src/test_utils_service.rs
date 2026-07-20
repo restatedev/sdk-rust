@@ -1,11 +1,29 @@
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use restate_sdk::prelude::*;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResolveSignalRequest {
+    invocation_id: String,
+    signal_name: String,
+    value: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RejectSignalRequest {
+    invocation_id: String,
+    signal_name: String,
+    reason: String,
+}
 
 pub(crate) struct TestUtilsService;
 
@@ -88,7 +106,41 @@ impl TestUtilsService {
         ctx: Context<'_>,
         invocation_id: String,
     ) -> Result<(), TerminalError> {
-        ctx.invocation_handle(invocation_id).cancel().await?;
+        ctx.invocation_handle(invocation_id).cancel();
+        Ok(())
+    }
+
+    #[handler(name = "resolveSignal")]
+    async fn resolve_signal(
+        &self,
+        ctx: Context<'_>,
+        req: Json<ResolveSignalRequest>,
+    ) -> Result<(), HandlerError> {
+        let ResolveSignalRequest {
+            invocation_id,
+            signal_name,
+            value,
+        } = req.into_inner();
+        ctx.invocation_handle(invocation_id)
+            .signal(signal_name)
+            .resolve(value);
+        Ok(())
+    }
+
+    #[handler(name = "rejectSignal")]
+    async fn reject_signal(
+        &self,
+        ctx: Context<'_>,
+        req: Json<RejectSignalRequest>,
+    ) -> Result<(), HandlerError> {
+        let RejectSignalRequest {
+            invocation_id,
+            signal_name,
+            reason,
+        } = req.into_inner();
+        ctx.invocation_handle(invocation_id)
+            .signal(signal_name)
+            .reject(TerminalError::new(reason));
         Ok(())
     }
 }

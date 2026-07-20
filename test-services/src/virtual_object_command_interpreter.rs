@@ -46,6 +46,8 @@ pub(crate) enum Command {
 pub(crate) enum AwaitableCommand {
     #[serde(rename = "createAwakeable")]
     CreateAwakeable { awakeable_key: String },
+    #[serde(rename = "createSignal")]
+    CreateSignal { signal_name: String },
     #[serde(rename = "sleep")]
     Sleep { timeout_millis: u64 },
     #[serde(rename = "runThrowTerminalException")]
@@ -109,6 +111,9 @@ impl VirtualObjectCommandInterpreter {
                             let (awakeable_id, fut) = context.awakeable::<String>();
                             context.set::<String>(&format!("awk-{awakeable_key}"), awakeable_id);
                             fut.await?
+                        }
+                        AwaitableCommand::CreateSignal { signal_name } => {
+                            context.signal::<String>(&signal_name).await?
                         }
                         AwaitableCommand::Sleep { timeout_millis } => {
                             context
