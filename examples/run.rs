@@ -4,9 +4,9 @@ use std::collections::HashMap;
 #[restate_sdk::handler]
 async fn do_run(
     ctx: Context<'_>,
-    Extension(client): Extension<&reqwest::Client>,
+    // `reqwest::Client` is cheap to clone (`Arc` inside), so it's cloned out of the extension store.
+    Extension(client): Extension<reqwest::Client>,
 ) -> Result<Json<HashMap<String, String>>, HandlerError> {
-    let client = client.clone();
     let res = ctx
         .run(|| async move {
             let req = client.get("https://httpbin.org/ip").build()?;

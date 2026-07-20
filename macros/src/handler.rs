@@ -123,10 +123,9 @@ impl HandlerAttrs {
     }
 }
 
-/// Recognize an `Extension<T>` / `Extension<&T>` parameter type.
-///
-/// Returns the looked-up type `T` and whether it was written as a reference (`Extension<&T>`, which
-/// borrows the extension, versus `Extension<T>`, which clones it out).
+/// Recognize an `Extension<T>` parameter type, returning the inner type `T` and whether it was
+/// written as a reference (`Extension<&T>`, which is rejected — extensions are cloned out, like
+/// axum's `State`/`Extension`).
 fn parse_extension(ty: &Type) -> Option<(Type, bool)> {
     let tp = match ty {
         Type::Path(tp) => tp,
@@ -225,8 +224,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     // A slot in the argument list passed to `call`, so the generated dispatch shim can reconstruct
     // the handler's parameters in their original order.
     enum ArgSlot {
-        /// An `Extension<..>` extractor: `(lookup type, is `&T`)`.
-        Extension(Box<Type>, bool),
+        /// An `Extension<T>` extractor, holding the looked-up type `T`.
+        Extension(Box<Type>),
         /// The (single) deserialized input parameter.
         Input,
     }
@@ -238,7 +237,14 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
             FnArg::Receiver(r) => return Err(Error::new(r.span(), "handler cannot take `self`")),
         };
         if let Some((lookup, is_ref)) = parse_extension(&pt.ty) {
-            slots.push(ArgSlot::Extension(Box::new(lookup), is_ref));
+            if is_ref {
+                return Err(Error::new(
+                    pt.ty.span(),
+                    "borrowed extensions (`Extension<&T>`) are not supported; use `Extension<T>` \
+                     with `T: Clone` (wrap shared or expensive dependencies in `Arc`)",
+                ));
+            }
+            slots.push(ArgSlot::Extension(Box::new(lookup)));
         } else if input_arg.is_none() {
             input_arg = Some(pt);
             slots.push(ArgSlot::Input);
@@ -274,28 +280,23 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     let ident = &func.sig.ident;
     let ctx_ty = &ctx_arg.ty;
 
-    // Dispatch shim: deserialize input, build the borrowing context, extract the extensions, run
-    // the body. `call` receives the parameters in their original order; each `Extension` is
-    // precomputed into a local so the context can still be moved in as the first argument (the
-    // extracted `&T` borrows the underlying `ContextInternal`, not the context wrapper).
+    // Dispatch shim: deserialize input, build the context, clone the extensions out of it, run the
+    // body. `call` receives the parameters in their original order; each `Extension` is cloned into
+    // a local before the context is moved in as the first argument.
     let mut ext_locals = Vec::new();
     let mut call_args = vec![quote!(restate_ctx)];
     let mut required_ext: Vec<Type> = Vec::new();
     for slot in &slots {
         match slot {
             ArgSlot::Input => call_args.push(quote!(input)),
-            ArgSlot::Extension(lookup, is_ref) => {
+            ArgSlot::Extension(lookup) => {
                 let lookup = &**lookup;
                 let local = format_ident!("__restate_ext_{}", required_ext.len());
-                let fetch = quote! {
-                    ::restate_sdk::context::ContextExtensions::extension::<#lookup>(&restate_ctx)
-                };
-                let value = if *is_ref {
-                    quote!(::restate_sdk::context::Extension(#fetch))
-                } else {
-                    quote!(::restate_sdk::context::Extension(::core::clone::Clone::clone(#fetch)))
-                };
-                ext_locals.push(quote!(let #local = #value;));
+                ext_locals.push(quote! {
+                    let #local = ::restate_sdk::context::Extension(::core::clone::Clone::clone(
+                        ::restate_sdk::context::ContextExtensions::extension::<#lookup>(&restate_ctx),
+                    ));
+                });
                 call_args.push(quote!(#local));
                 required_ext.push(lookup.clone());
             }

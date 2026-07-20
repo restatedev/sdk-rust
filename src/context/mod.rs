@@ -332,14 +332,15 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
-/// // A dependency you want available inside handlers (an HTTP client, here).
+/// // A dependency you want available inside handlers (an HTTP client, here)/
+/// #[derive(Clone)]
 /// struct HttpClient;
 /// # impl HttpClient { async fn get(&self, _: &str) -> Result<String, HandlerError> { Ok(String::new()) } }
 ///
 /// #[restate_sdk::handler]
 /// async fn fetch(
 ///     _ctx: Context<'_>,
-///     Extension(client): Extension<&HttpClient>,
+///     Extension(client): Extension<HttpClient>,
 ///     url: String,
 /// ) -> Result<String, HandlerError> {
 ///     client.get(&url).await
@@ -362,8 +363,8 @@ impl<'ctx, CTX: private::SealedContext<'ctx>> ContextExtensions<'ctx> for CTX {}
 /// on the bound service) or endpoint-wide (with the [endpoint builder](crate::endpoint::Builder::extension));
 /// a service-level extension overrides an endpoint-level one of the same type.
 ///
-/// Use `Extension<&T>` to borrow the dependency (no clone), or `Extension<T>` (for a `T: Clone`) to
-/// take it by value.
+/// The extension is **cloned** out of the store into the handler (`T: Clone`).
+/// Keep the clone cheap by wrapping shared or expensive dependencies in `Arc`.
 ///
 /// This is distinct from a Virtual Object's durable K/V [state](ContextReadState): extensions are
 /// in-memory, process-lifetime dependencies, not persisted per-key state.

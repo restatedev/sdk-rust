@@ -154,22 +154,23 @@ fn client_compiles<'ctx>(client: &FnServiceClient<'ctx>) -> Request<'ctx, String
 
 // ============================ Extension extractor + build-time validation ============================
 
+#[derive(Clone)]
 struct MyDep;
 
 #[derive(Clone)]
 struct MyClonableDep;
 
-// Borrowed extension (`Extension<&T>`) alongside an input parameter, in any order.
+// An extension (`Extension<T>`, cloned out of the store) alongside an input parameter, in any order.
 #[restate_sdk::handler]
-async fn ext_borrow(
+async fn ext_with_input(
     _ctx: Context<'_>,
-    Extension(_dep): Extension<&MyDep>,
+    Extension(_dep): Extension<MyDep>,
     input: String,
 ) -> HandlerResult<String> {
     Ok(input)
 }
 
-// Owned extension (`Extension<T>`, clones out of the store) and no input.
+// An extension and no input.
 #[restate_sdk::handler]
 async fn ext_owned(
     _ctx: Context<'_>,
@@ -178,7 +179,7 @@ async fn ext_owned(
     Ok(())
 }
 
-service!(ExtService: { ext_borrow, ext_owned });
+service!(ExtService: { ext_with_input, ext_owned });
 
 #[test]
 fn handler_reports_required_extensions() {
@@ -186,7 +187,7 @@ fn handler_reports_required_extensions() {
     use std::any::TypeId;
 
     let reqs = Handler::<restate_sdk::service::macro_support::ServiceKind>::required_extensions(
-        &ext_borrow,
+        &ext_with_input,
     );
     assert_eq!(reqs.len(), 1);
     assert_eq!(reqs[0].0, TypeId::of::<MyDep>());

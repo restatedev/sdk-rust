@@ -1,0 +1,5 @@
+error: borrowed extensions (`Extension<&T>`) are not supported; use `Extension<T>` with `T: Clone` (wrap shared or expensive dependencies in `Arc`)
+ --> tests/ui/borrowed_extension.rs:9:57
+  |
+9 | async fn borrow_ext(_ctx: Context<'_>, Extension(_dep): Extension<&Dep>) -> HandlerResult<()> {
+  |                                                         ^^^^^^^^^
