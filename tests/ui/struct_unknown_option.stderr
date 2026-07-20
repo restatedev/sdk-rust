@@ -1,0 +1,5 @@
+error: unsupported `#[handler]` argument `bogus`; supported arguments are: name, inactivity_timeout, abort_timeout, journal_retention, idempotency_retention, lazy_state, ingress_private, invocation_retry_policy(..)
+ --> tests/ui/struct_unknown_option.rs:8:15
+  |
+8 |     #[handler(bogus = "x")]
+  |               ^^^^^^^^^^^

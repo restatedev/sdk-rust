@@ -21,6 +21,7 @@
 //! Have a look at the following SDK capabilities:
 //!
 //! - [SDK Overview](#sdk-overview): Overview of the SDK and how to implement services, virtual objects, and workflows.
+//! - [Configuration][crate::configuration]: Configure services, objects, workflows and their handlers — timeouts, retention, private-ness and the invocation retry policy — via attribute arguments.
 //! - [Service Communication][crate::context::ContextClient]: Durable RPC and messaging between services (optionally with a delay).
 //! - [Journaling Results][crate::context::ContextSideEffects]: Persist results in Restate's log to avoid re-execution on retries
 //! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
@@ -195,6 +196,7 @@
 pub mod endpoint;
 pub mod service;
 
+pub mod configuration;
 pub mod context;
 pub mod discovery;
 pub mod errors;

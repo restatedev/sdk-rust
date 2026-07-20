@@ -12,59 +12,330 @@
 //! applied to an inherent `impl` block, with handlers annotated `#[handler]`.
 
 use crate::ast::{ServiceType, extract_handler_result_parameter};
-use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::{
     Attribute, Error, Expr, ExprLit, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue,
     PatType, Result, ReturnType, Type, Visibility, parse_quote,
 };
 
+/// Configuration options accepted both by the service/object/workflow attribute (as service-wide
+/// defaults) and by the `#[handler]` attribute (as per-handler overrides). Durations are parsed
+/// with `jiff` and converted to milliseconds at macro-expansion time, so codegen only has to splice
+/// integers. Every field is optional; unset fields become `None` in the generated discovery.
+#[derive(Default)]
+pub(crate) struct CommonOptions {
+    pub(crate) inactivity_timeout: Option<u64>,
+    pub(crate) abort_timeout: Option<u64>,
+    pub(crate) journal_retention: Option<u64>,
+    pub(crate) idempotency_retention: Option<u64>,
+    /// Handler-only; rejected on the service attribute (no such field on `discovery::Service`).
+    pub(crate) workflow_completion_retention: Option<u64>,
+    pub(crate) enable_lazy_state: Option<bool>,
+    pub(crate) ingress_private: Option<bool>,
+    pub(crate) retry_policy: RetryPolicyArgs,
+}
+
+/// Parsed `invocation_retry_policy(..)` group.
+#[derive(Default)]
+pub(crate) struct RetryPolicyArgs {
+    pub(crate) initial_interval: Option<u64>,
+    pub(crate) max_interval: Option<u64>,
+    pub(crate) factor: Option<f64>,
+    pub(crate) max_attempts: Option<u64>,
+    pub(crate) on_max_attempts: Option<OnMaxAttempts>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum OnMaxAttempts {
+    Pause,
+    Kill,
+}
+
+/// Where a `CommonOptions` set is being parsed, used to gate level-specific options. The service
+/// level carries the service kind so `workflow_completion_retention` can be restricted to workflows.
+#[derive(Clone, Copy)]
+enum ConfigLevel {
+    Service(ServiceType),
+    Handler,
+}
+
 /// Arguments accepted by the service/object/workflow attribute in the struct API,
-/// e.g. `#[restate_sdk::service(name = "Greeter", client_visibility = "pub(crate)")]`.
+/// e.g. `#[restate_sdk::service(name = "Greeter", client_visibility = "pub(crate)")]` plus any of
+/// the shared [`CommonOptions`].
 #[derive(Default)]
 pub(crate) struct ServiceArgs {
     pub(crate) name: Option<String>,
     pub(crate) vis: Option<Visibility>,
+    pub(crate) options: CommonOptions,
 }
 
-impl Parse for ServiceArgs {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut args = ServiceArgs::default();
-        if input.is_empty() {
-            return Ok(args);
+/// Parse the service/object/workflow attribute arguments. Takes the service kind so that
+/// `workflow_completion_retention` can be accepted only on `#[workflow]`.
+pub(crate) fn parse_service_args(
+    tokens: proc_macro2::TokenStream,
+    service_ty: ServiceType,
+) -> Result<ServiceArgs> {
+    use syn::parse::Parser;
+
+    let mut args = ServiceArgs::default();
+    if tokens.is_empty() {
+        return Ok(args);
+    }
+    let metas = Punctuated::<Meta, Comma>::parse_terminated.parse2(tokens)?;
+    for meta in &metas {
+        if apply_common_meta(&mut args.options, meta, ConfigLevel::Service(service_ty))? {
+            continue;
         }
-        let metas = Punctuated::<MetaNameValue, Comma>::parse_terminated(input)?;
-        for meta in metas {
-            let ident = meta.path.require_ident()?;
-            if ident == "name" {
-                args.name = Some(parse_str_lit(&meta.value)?);
-            } else if ident == "client_visibility" {
-                let s = parse_str_lit(&meta.value)?;
-                args.vis = Some(syn::parse_str::<Visibility>(&s)?);
-            } else {
-                return Err(Error::new(
-                    ident.span(),
-                    "unsupported attribute argument; supported arguments are `name` and `client_visibility`",
+        let ident = meta.path().require_ident()?;
+        if ident == "name" {
+            args.name = Some(parse_str_lit(name_value_expr(meta)?)?);
+        } else if ident == "client_visibility" {
+            let s = parse_str_lit(name_value_expr(meta)?)?;
+            args.vis = Some(syn::parse_str::<Visibility>(&s)?);
+        } else {
+            return Err(Error::new_spanned(
+                meta,
+                format!(
+                    "unsupported attribute argument `{ident}`; supported arguments are: \
+                     name, client_visibility, inactivity_timeout, abort_timeout, \
+                     journal_retention, idempotency_retention, lazy_state, ingress_private, \
+                     invocation_retry_policy(..){}",
+                    if service_ty == ServiceType::Workflow {
+                        ", workflow_completion_retention"
+                    } else {
+                        ""
+                    }
+                ),
+            ));
+        }
+    }
+    Ok(args)
+}
+
+/// Match one meta item against the shared configuration options. Returns `Ok(true)` if it matched a
+/// common option (already applied), `Ok(false)` if unrecognized so the caller can handle its own
+/// keys (`name`/`client_visibility`) or raise an error.
+fn apply_common_meta(opts: &mut CommonOptions, meta: &Meta, level: ConfigLevel) -> Result<bool> {
+    let Some(ident) = meta.path().get_ident() else {
+        return Ok(false);
+    };
+    match ident.to_string().as_str() {
+        "inactivity_timeout" => opts.inactivity_timeout = Some(parse_duration_meta(meta)?),
+        "abort_timeout" => opts.abort_timeout = Some(parse_duration_meta(meta)?),
+        "journal_retention" => opts.journal_retention = Some(parse_duration_meta(meta)?),
+        "idempotency_retention" => opts.idempotency_retention = Some(parse_duration_meta(meta)?),
+        // Configured at the workflow level (there is a single `run` handler), even though the
+        // discovery schema carries it on the workflow handler. Rejected elsewhere.
+        "workflow_completion_retention" => match level {
+            ConfigLevel::Service(ServiceType::Workflow) => {
+                opts.workflow_completion_retention = Some(parse_duration_meta(meta)?);
+            }
+            ConfigLevel::Service(_) => {
+                return Err(Error::new_spanned(
+                    meta,
+                    "`workflow_completion_retention` is only valid on `#[workflow]`",
+                ));
+            }
+            ConfigLevel::Handler => {
+                return Err(Error::new_spanned(
+                    meta,
+                    "`workflow_completion_retention` is configured on the `#[workflow]` attribute, \
+                     not on individual handlers",
+                ));
+            }
+        },
+        "lazy_state" => opts.enable_lazy_state = Some(parse_flag_or_bool(meta)?),
+        "ingress_private" => opts.ingress_private = Some(parse_flag_or_bool(meta)?),
+        "invocation_retry_policy" => parse_retry_policy(&mut opts.retry_policy, meta)?,
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+fn parse_retry_policy(retry: &mut RetryPolicyArgs, meta: &Meta) -> Result<()> {
+    let Meta::List(list) = meta else {
+        return Err(Error::new_spanned(
+            meta,
+            "`invocation_retry_policy` expects a group, e.g. \
+             `invocation_retry_policy(max_attempts = 5, initial_interval = \"100ms\")`",
+        ));
+    };
+    let inner = list.parse_args_with(Punctuated::<MetaNameValue, Comma>::parse_terminated)?;
+    for nv in &inner {
+        let ident = nv.path.require_ident()?;
+        match ident.to_string().as_str() {
+            "initial_interval" => retry.initial_interval = Some(parse_duration_expr(&nv.value)?),
+            "max_interval" => retry.max_interval = Some(parse_duration_expr(&nv.value)?),
+            "factor" => retry.factor = Some(parse_f64(&nv.value)?),
+            "max_attempts" => retry.max_attempts = Some(parse_u64(&nv.value)?),
+            "on_max_attempts" => retry.on_max_attempts = Some(parse_on_max_attempts(&nv.value)?),
+            other => {
+                return Err(Error::new_spanned(
+                    &nv.path,
+                    format!(
+                        "unknown `invocation_retry_policy` option `{other}`; supported options are: \
+                         initial_interval, max_interval, factor, max_attempts, on_max_attempts"
+                    ),
                 ));
             }
         }
-        Ok(args)
+    }
+    Ok(())
+}
+
+/// The value expression of a `key = value` meta.
+fn name_value_expr(meta: &Meta) -> Result<&Expr> {
+    match meta {
+        Meta::NameValue(nv) => Ok(&nv.value),
+        _ => Err(Error::new_spanned(
+            meta,
+            "expected `key = value`, e.g. `inactivity_timeout = \"30s\"`",
+        )),
     }
 }
 
 fn parse_str_lit(expr: &Expr) -> Result<String> {
+    Ok(as_str_lit(expr)?.value())
+}
+
+fn as_str_lit(expr: &Expr) -> Result<syn::LitStr> {
     if let Expr::Lit(ExprLit {
         lit: Lit::Str(s), ..
     }) = expr
     {
-        Ok(s.value())
+        Ok(s.clone())
     } else {
-        Err(Error::new(
-            expr.span(),
-            "expected a string literal, e.g. `name = \"Greeter\"`",
+        Err(Error::new_spanned(expr, "expected a string literal"))
+    }
+}
+
+fn parse_duration_meta(meta: &Meta) -> Result<u64> {
+    parse_duration_expr(name_value_expr(meta)?)
+}
+
+fn parse_duration_expr(expr: &Expr) -> Result<u64> {
+    parse_duration_lit(&as_str_lit(expr)?)
+}
+
+/// Parse a human duration string (jiff's "friendly" format, e.g. `"1 sec"`, `"30s"`, `"5m"`,
+/// `"500ms"`, `"2h"`, `"1 day"`, `"7 days"`) into whole milliseconds.
+///
+/// We parse into a [`jiff::Span`] (rather than `SignedDuration`) so calendar-ish units up to weeks
+/// are accepted, treating days as 24h and weeks as 7 days. Months/years are intentionally rejected
+/// by jiff here: they have no fixed millisecond length without a reference date, so they'd be
+/// ambiguous for a timeout/retention value.
+fn parse_duration_lit(lit: &syn::LitStr) -> Result<u64> {
+    let raw = lit.value();
+    let span: jiff::Span = raw
+        .trim()
+        .parse()
+        .map_err(|e| Error::new(lit.span(), format!("invalid duration {raw:?}: {e}")))?;
+    let ms = span
+        .total((
+            jiff::Unit::Millisecond,
+            jiff::SpanRelativeTo::days_are_24_hours(),
         ))
+        .map_err(|e| Error::new(lit.span(), format!("invalid duration {raw:?}: {e}")))?;
+    if ms < 0.0 {
+        return Err(Error::new(
+            lit.span(),
+            format!("duration {raw:?} must not be negative"),
+        ));
+    }
+    let ms = ms.round();
+    if ms > u64::MAX as f64 {
+        return Err(Error::new(
+            lit.span(),
+            format!("duration {raw:?} is too large to represent in milliseconds"),
+        ));
+    }
+    Ok(ms as u64)
+}
+
+fn parse_flag_or_bool(meta: &Meta) -> Result<bool> {
+    match meta {
+        // Bare flag, e.g. `#[handler(lazy_state)]`.
+        Meta::Path(_) => Ok(true),
+        Meta::NameValue(nv) => {
+            if let Expr::Lit(ExprLit {
+                lit: Lit::Bool(b), ..
+            }) = &nv.value
+            {
+                Ok(b.value)
+            } else {
+                Err(Error::new_spanned(
+                    &nv.value,
+                    "expected a boolean literal `true` or `false`",
+                ))
+            }
+        }
+        Meta::List(_) => Err(Error::new_spanned(
+            meta,
+            "expected a bare flag or `= true`/`= false`",
+        )),
+    }
+}
+
+fn parse_f64(expr: &Expr) -> Result<f64> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Float(f), ..
+        }) => f.base10_parse::<f64>(),
+        Expr::Lit(ExprLit {
+            lit: Lit::Int(i), ..
+        }) => Ok(i.base10_parse::<u64>()? as f64),
+        _ => Err(Error::new_spanned(expr, "expected a number, e.g. `2.0`")),
+    }
+}
+
+fn parse_u64(expr: &Expr) -> Result<u64> {
+    if let Expr::Lit(ExprLit {
+        lit: Lit::Int(i), ..
+    }) = expr
+    {
+        i.base10_parse::<u64>()
+    } else {
+        Err(Error::new_spanned(expr, "expected an integer, e.g. `10`"))
+    }
+}
+
+fn parse_on_max_attempts(expr: &Expr) -> Result<OnMaxAttempts> {
+    let s = as_str_lit(expr)?;
+    match s.value().as_str() {
+        "pause" => Ok(OnMaxAttempts::Pause),
+        "kill" => Ok(OnMaxAttempts::Kill),
+        other => Err(Error::new_spanned(
+            expr,
+            format!(r#"invalid `on_max_attempts` value {other:?}; expected "pause" or "kill""#),
+        )),
+    }
+}
+
+/// Collect leading `///`/`#[doc = ".."]` comments from an item's attributes into a single string,
+/// stripping the conventional leading space and trimming. Returns `None` when there are none.
+fn extract_docs(attrs: &[Attribute]) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for attr in attrs {
+        if attr.path().is_ident("doc")
+            && let Meta::NameValue(MetaNameValue {
+                value:
+                    Expr::Lit(ExprLit {
+                        lit: Lit::Str(s), ..
+                    }),
+                ..
+            }) = &attr.meta
+        {
+            let raw = s.value();
+            lines.push(raw.strip_prefix(' ').unwrap_or(&raw).to_string());
+        }
+    }
+    let joined = lines.join("\n");
+    let trimmed = joined.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -80,6 +351,10 @@ pub(crate) struct StructService {
     /// Generics of the impl block (type params, bounds and where-clause), propagated onto every
     /// generated impl and the client.
     pub(crate) generics: syn::Generics,
+    /// Doc-comment on the `impl` block, if any (service-level documentation).
+    pub(crate) documentation: Option<String>,
+    /// Service-wide configuration defaults parsed from the service/object/workflow attribute.
+    pub(crate) options: CommonOptions,
     /// The user's impl block with `#[handler]` attributes stripped, re-emitted verbatim.
     pub(crate) stripped_impl: ItemImpl,
     pub(crate) handlers: Vec<StructHandler>,
@@ -91,6 +366,10 @@ pub(crate) struct StructHandler {
     pub(crate) ident: Ident,
     pub(crate) arg: Option<PatType>,
     pub(crate) output_ok: Type,
+    /// Doc-comment on the handler method, if any.
+    pub(crate) documentation: Option<String>,
+    /// Per-handler configuration parsed from `#[handler(..)]`.
+    pub(crate) options: CommonOptions,
 }
 
 impl StructService {
@@ -118,9 +397,11 @@ impl StructService {
         let generics = item_impl.generics.clone();
         let self_ty = item_impl.self_ty.clone();
         let self_ident = type_last_ident(&self_ty)?;
+        let documentation = extract_docs(&item_impl.attrs);
 
         let restate_name = args.name.unwrap_or_else(|| self_ident.to_string());
         let vis = args.vis.unwrap_or_else(|| parse_quote!(pub));
+        let options = args.options;
 
         let mut handlers = Vec::new();
         for item in &mut item_impl.items {
@@ -128,8 +409,15 @@ impl StructService {
                 && let Some(idx) = find_handler_attr(&f.attrs)
             {
                 let attr = f.attrs.remove(idx);
-                let name_override = read_handler_name(&attr)?;
-                handlers.push(parse_handler(service_ty, f, name_override)?);
+                let (name_override, handler_options) = read_handler_attr(&attr)?;
+                let documentation = extract_docs(&f.attrs);
+                handlers.push(parse_handler(
+                    service_ty,
+                    f,
+                    name_override,
+                    handler_options,
+                    documentation,
+                )?);
             }
         }
 
@@ -147,6 +435,8 @@ impl StructService {
             self_ty,
             self_ident,
             generics,
+            documentation,
+            options,
             stripped_impl: item_impl,
             handlers,
         })
@@ -163,37 +453,50 @@ fn find_handler_attr(attrs: &[Attribute]) -> Option<usize> {
     })
 }
 
-/// Read `name = ".."` from `#[handler(name = "..")]`, if present.
-fn read_handler_name(attr: &Attribute) -> Result<Option<String>> {
+/// Read the optional `name = ".."` override and any [`CommonOptions`] from `#[handler(..)]`.
+fn read_handler_attr(attr: &Attribute) -> Result<(Option<String>, CommonOptions)> {
+    let mut name = None;
+    let mut options = CommonOptions::default();
     match &attr.meta {
-        Meta::Path(_) => Ok(None),
+        Meta::Path(_) => {}
         Meta::List(list) => {
-            let metas =
-                list.parse_args_with(Punctuated::<MetaNameValue, Comma>::parse_terminated)?;
-            let mut name = None;
-            for m in metas {
-                if m.path.require_ident()? == "name" {
-                    name = Some(parse_str_lit(&m.value)?);
+            let metas = list.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated)?;
+            for meta in &metas {
+                if apply_common_meta(&mut options, meta, ConfigLevel::Handler)? {
+                    continue;
+                }
+                let ident = meta.path().require_ident()?;
+                if ident == "name" {
+                    name = Some(parse_str_lit(name_value_expr(meta)?)?);
                 } else {
                     return Err(Error::new_spanned(
-                        &m.path,
-                        "unsupported `#[handler]` argument; the only supported argument is `name`",
+                        meta,
+                        format!(
+                            "unsupported `#[handler]` argument `{ident}`; supported arguments are: \
+                             name, inactivity_timeout, abort_timeout, journal_retention, \
+                             idempotency_retention, lazy_state, ingress_private, \
+                             invocation_retry_policy(..)"
+                        ),
                     ));
                 }
             }
-            Ok(name)
         }
-        Meta::NameValue(_) => Err(Error::new_spanned(
-            attr,
-            "invalid `#[handler]` attribute; use `#[handler]` or `#[handler(name = \"..\")]`",
-        )),
+        Meta::NameValue(_) => {
+            return Err(Error::new_spanned(
+                attr,
+                "invalid `#[handler]` attribute; use `#[handler]` or `#[handler(name = \"..\", ..)]`",
+            ));
+        }
     }
+    Ok((name, options))
 }
 
 fn parse_handler(
     service_ty: ServiceType,
     f: &syn::ImplItemFn,
     name_override: Option<String>,
+    options: CommonOptions,
+    documentation: Option<String>,
 ) -> Result<StructHandler> {
     let sig = &f.sig;
 
@@ -280,6 +583,8 @@ fn parse_handler(
         ident: sig.ident.clone(),
         arg,
         output_ok,
+        documentation,
+        options,
     })
 }
 
@@ -343,5 +648,37 @@ fn type_last_ident(ty: &Type) -> Result<Ident> {
             .map(|seg| seg.ident.clone())
             .ok_or_else(|| Error::new_spanned(ty, "expected a named type")),
         _ => Err(Error::new_spanned(ty, "expected a named type")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proc_macro2::Span;
+
+    fn ms(s: &str) -> u64 {
+        parse_duration_lit(&syn::LitStr::new(s, Span::call_site())).expect("valid duration")
+    }
+
+    #[test]
+    fn friendly_durations_parse_to_ms() {
+        assert_eq!(ms("1 sec"), 1_000);
+        assert_eq!(ms("30s"), 30_000);
+        assert_eq!(ms("500ms"), 500);
+        assert_eq!(ms("5m"), 300_000);
+        assert_eq!(ms("1h"), 3_600_000);
+        assert_eq!(ms("2h"), 7_200_000);
+        assert_eq!(ms("1m 30s"), 90_000);
+        assert_eq!(ms("1 day"), 86_400_000);
+        assert_eq!(ms("7 days"), 604_800_000);
+    }
+
+    #[test]
+    fn invalid_duration_is_rejected() {
+        assert!(
+            parse_duration_lit(&syn::LitStr::new("not-a-duration", Span::call_site())).is_err()
+        );
+        // Months/years have no fixed ms length without a reference date -> rejected.
+        assert!(parse_duration_lit(&syn::LitStr::new("1 month", Span::call_site())).is_err());
     }
 }

@@ -1,0 +1,5 @@
+error: `workflow_completion_retention` is only valid on `#[workflow]`
+ --> tests/ui/struct_workflow_retention_on_service.rs:6:11
+  |
+6 | #[service(workflow_completion_retention = "1 day")]
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -20,7 +20,7 @@ mod struct_generator;
 
 use crate::ast::{Object, Service, ServiceType, Workflow};
 use crate::generator::ServiceGenerator;
-use crate::struct_ast::{ServiceArgs, StructService};
+use crate::struct_ast::StructService;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{Item, parse_macro_input};
@@ -55,7 +55,10 @@ fn dispatch(service_ty: ServiceType, attr: TokenStream, input: TokenStream) -> T
     let item = parse_macro_input!(input as Item);
     match item {
         Item::Impl(item_impl) => {
-            let args = parse_macro_input!(attr as ServiceArgs);
+            let args = match struct_ast::parse_service_args(attr.into(), service_ty) {
+                Ok(args) => args,
+                Err(e) => return e.to_compile_error().into(),
+            };
             match StructService::from_impl(service_ty, args, item_impl) {
                 Ok(svc) => struct_generator::generate(&svc).into(),
                 Err(e) => e.to_compile_error().into(),

@@ -1,0 +1,5 @@
+error: `workflow_completion_retention` is configured on the `#[workflow]` attribute, not on individual handlers
+ --> tests/ui/struct_workflow_retention_on_handler.rs:8:15
+  |
+8 |     #[handler(workflow_completion_retention = "1 day")]
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
