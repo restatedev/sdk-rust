@@ -46,59 +46,47 @@
 //! // The prelude contains all the imports you need to get started
 //! use restate_sdk::prelude::*;
 //!
-//! // Define the service using Rust traits
+//! // Define the service by annotating an impl block
+//! struct MyService;
+//!
 //! #[restate_sdk::service]
-//! trait MyService {
-//!     async fn my_handler(greeting: String) -> Result<String, HandlerError>;
-//! }
-//!
-//! // Implement the service
-//! struct MyServiceImpl;
-//! impl MyService for MyServiceImpl {
-//!
+//! impl MyService {
+//!     #[handler]
 //!     async fn my_handler(&self, ctx: Context<'_>, greeting: String) -> Result<String, HandlerError> {
 //!         Ok(format!("{greeting}!"))
 //!     }
-//!
 //! }
 //!
 //! // Start the HTTP server to expose services
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyServiceImpl.serve()).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyService).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
 //! ```
 //!
-//! - Specify that you want to create a service by using the [`#[restate_sdk::service]` macro](restate_sdk_macros::service).
-//! - Create a trait with the service handlers.
-//!     - Handlers can accept zero or one parameter and return a [`Result`].
+//! - Define a service by putting the [`#[restate_sdk::service]` macro](restate_sdk_macros::service) on an `impl` block of a `struct`, and annotate each handler with [`#[handler]`](macro@crate::handler).
+//!     - Handlers take `&self`, a [`Context`](crate::context::Context), and optionally one input parameter, and return a [`Result`].
 //!     - The type of the input parameter of the handler needs to implement [`Serialize`](crate::serde::Deserialize) and [`Deserialize`](crate::serde::Deserialize). See [`crate::serde`].
 //!     - The Result contains the return value or a [`HandlerError`][crate::errors::HandlerError], which can be a [`TerminalError`](crate::errors::TerminalError) or any other Rust's [`std::error::Error`].
-//!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/myHandler`. You can optionally override the handler name used via `#[name = "myHandler"]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
-//! - Implement the trait on a concrete type, for example on a struct.
-//! - The first parameter of a handler after `&self` is always a [`Context`](crate::context::Context) to interact with Restate.
+//!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/my_handler`. You can optionally override the handler name used via `#[handler(name = "myHandler")]`, and the service name via `#[restate_sdk::service(name = "MyService")]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
+//! - Store dependencies (e.g. clients, config) as fields on the `struct` and access them via `&self`. The struct is shared (behind an [`Arc`](std::sync::Arc)) across all concurrent invocations, so use interior mutability (e.g. a [`Mutex`](std::sync::Mutex) or atomics) for any mutable state.
+//! - The parameter after `&self` is always a [`Context`](crate::context::Context) to interact with Restate.
 //!   The SDK stores the actions you do on the context in the Restate journal to make them durable.
-//! - Finally, create an HTTP endpoint and bind the service(s) to it. Listen on the specified port (here 9080) for connections and requests.
+//! - Finally, create an HTTP endpoint and bind the service(s) to it — pass the value directly to [`bind`](crate::endpoint::Builder::bind), no `.serve()` needed. Listen on the specified port (here 9080) for connections and requests.
 //!
 //! ## Virtual Objects
 //! [Virtual Objects](https://docs.restate.dev/concepts/services/#virtual-objects) and their handlers are defined similarly to services, with the following differences:
 //!
 //! ```rust,no_run
-//!use restate_sdk::prelude::*;
+//! use restate_sdk::prelude::*;
+//!
+//! pub struct MyVirtualObject;
 //!
 //! #[restate_sdk::object]
-//! pub trait MyVirtualObject {
-//!     async fn my_handler(name: String) -> Result<String, HandlerError>;
-//!     #[shared]
-//!     async fn my_concurrent_handler(name: String) -> Result<String, HandlerError>;
-//! }
-//!
-//! pub struct MyVirtualObjectImpl;
-//!
-//! impl MyVirtualObject for MyVirtualObjectImpl {
-//!
+//! impl MyVirtualObject {
+//!     #[handler]
 //!     async fn my_handler(
 //!         &self,
 //!         ctx: ObjectContext<'_>,
@@ -107,6 +95,7 @@
 //!         Ok(format!("{} {}", greeting, ctx.key()))
 //!     }
 //!
+//!     #[handler]
 //!     async fn my_concurrent_handler(
 //!         &self,
 //!         ctx: SharedObjectContext<'_>,
@@ -114,26 +103,21 @@
 //!     ) -> Result<String, HandlerError> {
 //!         Ok(format!("{} {}", greeting, ctx.key()))
 //!     }
-//!
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(
-//!         Endpoint::builder()
-//!             .bind(MyVirtualObjectImpl.serve())
-//!             .build(),
-//!     )
-//!     .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-//!     .await;
+//!     HttpServer::new(Endpoint::builder().bind(MyVirtualObject).build())
+//!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+//!         .await;
 //! }
 //! ```
 //!
-//! - Specify that you want to create a Virtual Object by using the [`#[restate_sdk::object]` macro](restate_sdk_macros::object).
-//! - The first argument of each handler must be the [`ObjectContext`](crate::context::ObjectContext) parameter. Handlers with the `ObjectContext` parameter can write to the K/V state store. Only one handler can be active at a time per object, to ensure consistency.
+//! - Specify that you want to create a Virtual Object by putting the [`#[restate_sdk::object]` macro](restate_sdk_macros::object) on the `impl` block.
+//! - The context after `&self` must be the [`ObjectContext`](crate::context::ObjectContext) parameter. Handlers with the `ObjectContext` parameter can write to the K/V state store. Only one handler can be active at a time per object, to ensure consistency.
 //! - You can retrieve the key of the object you are in via [`ObjectContext.key`].
-//! - If you want to have a handler that executes concurrently to the others and doesn't have write access to the K/V state, add `#[shared]` to the handler definition in the trait.
-//!   Shared handlers need to use the [`SharedObjectContext`](crate::context::SharedObjectContext).
+//! - If you want to have a handler that executes concurrently to the others and doesn't have write access to the K/V state, use the [`SharedObjectContext`](crate::context::SharedObjectContext) as its context.
+//!   The shared/exclusive kind is inferred from the context type.
 //!   You can use these handlers, for example, to read K/V state and expose it to the outside world, or to interact with the blocking handler and resolve awakeables etc.
 //!
 //! ## Workflows
@@ -143,43 +127,37 @@
 //! ```rust,no_run
 //! use restate_sdk::prelude::*;
 //!
+//! pub struct MyWorkflow;
+//!
 //! #[restate_sdk::workflow]
-//! pub trait MyWorkflow {
-//!     async fn run(req: String) -> Result<String, HandlerError>;
-//!     #[shared]
-//!     async fn interact_with_workflow() -> Result<(), HandlerError>;
-//! }
-//!
-//! pub struct MyWorkflowImpl;
-//!
-//! impl MyWorkflow for MyWorkflowImpl {
-//!
+//! impl MyWorkflow {
+//!     #[handler]
 //!     async fn run(&self, ctx: WorkflowContext<'_>, req: String) -> Result<String, HandlerError> {
-//!         //! implement workflow logic here
+//!         // implement workflow logic here
 //!
 //!         Ok(String::from("success"))
 //!     }
 //!
+//!     #[handler]
 //!     async fn interact_with_workflow(&self, ctx: SharedWorkflowContext<'_>) -> Result<(), HandlerError> {
-//!         //! implement interaction logic here
-//!         //! e.g. resolve a promise that the workflow is waiting on
+//!         // implement interaction logic here
+//!         // e.g. resolve a promise that the workflow is waiting on
 //!
 //!         Ok(())
 //!     }
-//!
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyWorkflowImpl.serve()).build())
+//!     HttpServer::new(Endpoint::builder().bind(MyWorkflow).build())
 //!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 //!         .await;
 //! }
 //! ```
 //!
-//! - Specify that you want to create a Workflow by using the [`#[restate_sdk::workflow]` macro](workflow).
+//! - Specify that you want to create a Workflow by putting the [`#[restate_sdk::workflow]` macro](workflow) on the `impl` block.
 //! - The workflow needs to have a `run` handler.
-//! - The first argument of the `run` handler must be the [`WorkflowContext`](crate::context::WorkflowContext) parameter.
+//! - The context of the `run` handler must be the [`WorkflowContext`](crate::context::WorkflowContext) parameter.
 //!   The `WorkflowContext` parameter is used to interact with Restate.
 //!   The `run` handler executes exactly once per workflow instance.
 //! - The other handlers of the workflow are used to interact with the workflow: either query it, or signal it.
@@ -232,53 +210,41 @@ pub mod serde;
 
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
 ///
+/// Apply it to an inherent `impl` block of a `struct`, and annotate each handler with
+/// [`#[handler]`](macro@crate::handler):
+///
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
+/// struct Greeter;
+///
 /// #[restate_sdk::service]
-/// trait Greeter {
-///     async fn greet(name: String) -> Result<String, HandlerError>;
-/// }
-/// ```
-///
-/// This macro accepts a `trait` as input, and generates as output:
-///
-/// * A trait with the same name, that you should implement on your own concrete type (e.g. `struct`), e.g.:
-///
-/// ```rust,no_run
-/// # use restate_sdk::prelude::*;
-/// # #[restate_sdk::service]
-/// # trait Greeter {
-/// #    async fn greet(name: String) -> Result<String, HandlerError>;
-/// # }
-/// struct GreeterImpl;
-/// impl Greeter for GreeterImpl {
-///     async fn greet(&self, _: Context<'_>, name: String) -> Result<String, HandlerError> {
+/// impl Greeter {
+///     #[handler]
+///     async fn greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
 ///         Ok(format!("Greetings {name}"))
 ///     }
 /// }
 /// ```
 ///
-/// This trait will additionally contain, for each handler, the appropriate [`Context`](crate::prelude::Context), to interact with Restate.
+/// This macro keeps your `impl` block as-is (so handlers stay directly callable, and you can add
+/// non-`#[handler]` helper methods), and additionally generates:
 ///
-/// * An implementation of the [`Service`](crate::service::Service) trait, to bind the service in the [`Endpoint`](crate::prelude::Endpoint) and expose it:
+/// * An implementation of the [`Service`](crate::service::Service) and [`IntoServiceDefinition`](crate::service::IntoServiceDefinition)
+///   traits, so you can bind the value directly to the [`Endpoint`](crate::prelude::Endpoint) — no `.serve()`:
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
+/// # struct Greeter;
 /// # #[restate_sdk::service]
-/// # trait Greeter {
-/// #    async fn greet(name: String) -> HandlerResult<String>;
-/// # }
-/// # struct GreeterImpl;
-/// # impl Greeter for GreeterImpl {
-/// #    async fn greet(&self, _: Context<'_>, name: String) -> HandlerResult<String> {
+/// # impl Greeter {
+/// #    #[handler]
+/// #    async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
 /// #        Ok(format!("Greetings {name}"))
 /// #    }
 /// # }
 /// let endpoint = Endpoint::builder()
-///     // .serve() returns the implementation of Service used by the SDK
-///     //  to bind your struct to the endpoint
-///     .bind(GreeterImpl.serve())
+///     .bind(Greeter)
 ///     .build();
 /// ```
 ///
@@ -286,9 +252,13 @@ pub mod serde;
 ///
 /// ```rust,no_run
 /// # use restate_sdk::prelude::*;
+/// # struct Greeter;
 /// # #[restate_sdk::service]
-/// # trait Greeter {
-/// #    async fn greet(name: String) -> HandlerResult<String>;
+/// # impl Greeter {
+/// #    #[handler]
+/// #    async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
+/// #        Ok(format!("Greetings {name}"))
+/// #    }
 /// # }
 /// # async fn example(ctx: Context<'_>) -> Result<(), TerminalError> {
 /// let result = ctx
@@ -300,34 +270,30 @@ pub mod serde;
 /// # }
 /// ```
 ///
-/// Methods of this trait can accept either no parameter, or one parameter implementing [`Deserialize`](crate::serde::Deserialize).
-/// The return value MUST always be a `Result`. Down the hood, the error type is always converted to [`HandlerError`](crate::prelude::HandlerError) for the SDK to distinguish between terminal and retryable errors. For more details, check the [`HandlerError`](crate::prelude::HandlerError) doc.
+/// Handlers can accept either no parameter, or one parameter implementing [`Deserialize`](crate::serde::Deserialize).
+/// The return value MUST always be a `Result`. Under the hood, the error type is always converted to [`HandlerError`](crate::prelude::HandlerError) for the SDK to distinguish between terminal and retryable errors. For more details, check the [`HandlerError`](crate::prelude::HandlerError) doc.
 ///
-/// When invoking the service through Restate, the method name should be used as handler name, that is:
-///
-/// ```rust,no_run
-/// use restate_sdk::prelude::*;
-///
-/// #[restate_sdk::service]
-/// trait Greeter {
-///     async fn my_greet(name: String) -> Result<String, HandlerError>;
-/// }
-/// ```
-///
-/// The `Greeter/my_greet` handler be invoked sending a request to `http://<RESTATE_ENDPOINT>/Greeter/my_greet`.
-/// You can override the names used by Restate during registration using the `name` attribute:
+/// When invoking the service through Restate, the method name is used as handler name, that is the
+/// `greet` handler above is invoked by sending a request to `http://<RESTATE_ENDPOINT>/Greeter/greet`.
+/// You can override the names used by Restate during registration using the `name` argument:
 ///
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
-/// #[restate_sdk::service]
-/// #[name = "greeter"]
-/// trait Greeter {
+/// struct Greeter;
+///
+/// #[restate_sdk::service(name = "greeter")]
+/// impl Greeter {
 ///     // You can invoke this handler with `http://<RESTATE_ENDPOINT>/greeter/myGreet`
-///     #[name = "myGreet"]
-///     async fn my_greet(name: String) -> Result<String, HandlerError>;
+///     #[handler(name = "myGreet")]
+///     async fn my_greet(&self, _ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+///         Ok(format!("Greetings {name}"))
+///     }
 /// }
 /// ```
+///
+/// The visibility of the generated client defaults to `pub`; override it with
+/// `#[restate_sdk::service(vis = "pub(crate)")]`.
 pub use restate_sdk_macros::service;
 
 /// Entry-point macro to define a Restate [Virtual object](https://docs.restate.dev/concepts/services#virtual-objects).
@@ -336,16 +302,25 @@ pub use restate_sdk_macros::service;
 ///
 /// ## Shared handlers
 ///
-/// To define a shared handler, simply annotate the handler with the `#[shared]` annotation:
+/// To define a shared handler, use the [`SharedObjectContext`](crate::context::SharedObjectContext)
+/// as the handler's context; exclusive handlers use the [`ObjectContext`](crate::context::ObjectContext).
+/// The kind is inferred from the context type.
 ///
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
+/// struct Counter;
+///
 /// #[restate_sdk::object]
-/// trait Counter {
-///     async fn add(val: u64) -> Result<u64, TerminalError>;
-///     #[shared]
-///     async fn get() -> Result<u64, TerminalError>;
+/// impl Counter {
+///     #[handler]
+///     async fn add(&self, ctx: ObjectContext<'_>, val: u64) -> Result<u64, TerminalError> {
+///         Ok(val)
+///     }
+///     #[handler]
+///     async fn get(&self, ctx: SharedObjectContext<'_>) -> Result<u64, TerminalError> {
+///         Ok(0)
+///     }
 /// }
 /// ```
 pub use restate_sdk_macros::object;
@@ -382,19 +357,11 @@ pub use restate_sdk_macros::object;
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
 ///
+/// pub struct SignupWorkflow;
+///
 /// #[restate_sdk::workflow]
-/// pub trait SignupWorkflow {
-///     async fn run(req: String) -> Result<bool, HandlerError>;
-///     #[shared]
-///     async fn click(click_secret: String) -> Result<(), HandlerError>;
-///     #[shared]
-///     async fn get_status() -> Result<String, HandlerError>;
-/// }
-///
-/// pub struct SignupWorkflowImpl;
-///
-/// impl SignupWorkflow for SignupWorkflowImpl {
-///
+/// impl SignupWorkflow {
+///     #[handler]
 ///     async fn run(&self, mut ctx: WorkflowContext<'_>, email: String) -> Result<bool, HandlerError> {
 ///         let secret = ctx.rand_uuid().to_string();
 ///         ctx.run(|| send_email_with_link(email.clone(), secret.clone())).await?;
@@ -406,15 +373,16 @@ pub use restate_sdk_macros::object;
 ///         Ok(click_secret == secret)
 ///     }
 ///
+///     #[handler]
 ///     async fn click(&self, ctx: SharedWorkflowContext<'_>, click_secret: String) -> Result<(), HandlerError> {
 ///         ctx.resolve_promise::<String>("email.clicked", click_secret);
 ///         Ok(())
 ///     }
 ///
+///     #[handler]
 ///     async fn get_status(&self, ctx: SharedWorkflowContext<'_>) -> Result<String, HandlerError> {
 ///         Ok(ctx.get("status").await?.unwrap_or("unknown".to_string()))
 ///     }
-///
 /// }
 /// # async fn send_email_with_link(email: String, secret: String) -> Result<(), HandlerError> {
 /// #    Ok(())
@@ -422,7 +390,7 @@ pub use restate_sdk_macros::object;
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     HttpServer::new(Endpoint::builder().bind(SignupWorkflowImpl.serve()).build())
+///     HttpServer::new(Endpoint::builder().bind(SignupWorkflow).build())
 ///         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
 ///         .await;
 /// }
@@ -506,6 +474,31 @@ pub use restate_sdk_macros::object;
 /// For more details, check the [`service` macro](macro@crate::service) documentation.
 pub use restate_sdk_macros::workflow;
 
+/// Marks a method inside a `#[restate_sdk::service]`/`#[object]`/`#[workflow]` impl block as a
+/// Restate handler.
+///
+/// ```rust,no_run
+/// use restate_sdk::prelude::*;
+///
+/// struct Greeter;
+///
+/// #[restate_sdk::service]
+/// impl Greeter {
+///     #[handler]
+///     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
+///         Ok(format!("Greetings {name}"))
+///     }
+/// }
+/// ```
+///
+/// Handlers must be `async fn`, take `&self` and a context as their first two arguments, optionally
+/// a single input argument, and return `Result<T, E>` (or [`HandlerResult<T>`](crate::errors::HandlerResult)).
+/// The context type selects the handler kind: [`Context`](crate::context::Context) for services,
+/// [`ObjectContext`](crate::context::ObjectContext)/[`SharedObjectContext`](crate::context::SharedObjectContext)
+/// for virtual objects, [`WorkflowContext`](crate::context::WorkflowContext)/[`SharedWorkflowContext`](crate::context::SharedWorkflowContext)
+/// for workflows. Override the handler's Restate name with `#[handler(name = "..")]`.
+pub use restate_sdk_macros::handler;
+
 /// Prelude contains all the useful imports you need to get started with Restate.
 pub mod prelude {
     #[cfg(feature = "http_server")]
@@ -525,4 +518,7 @@ pub mod prelude {
     };
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
+    pub use crate::service::{IntoServiceDefinition, ServiceDefinition};
+
+    pub use restate_sdk_macros::{handler, object, service, workflow};
 }

@@ -1,6 +1,5 @@
-use crate::endpoint::{BoxedService, Endpoint, EndpointInner, Error};
-use crate::service::{Discoverable, Service};
-use futures::future::BoxFuture;
+use crate::endpoint::{BoxedService, Endpoint, EndpointInner};
+use crate::service::{IntoServiceDefinition, ServiceDefinition};
 use restate_sdk_shared_core::{IdentityVerifier, KeyError};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -307,43 +306,40 @@ impl Builder {
         Self::default()
     }
 
-    /// Add a [`Service`] to this endpoint.
+    /// Add a service to this endpoint.
     ///
-    /// When using the [`service`](macro@crate::service), [`object`](macro@crate::object) or [`workflow`](macro@crate::workflow) macros,
-    /// you need to pass the result of the `serve` method.
-    pub fn bind<
-        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
-            + Discoverable
-            + Send
-            + Sync
-            + 'static,
-    >(
-        self,
-        s: S,
-    ) -> Self {
-        self.bind_with_options(s, ServiceOptions::default())
+    /// Pass a type defined with the [`service`](macro@crate::service), [`object`](macro@crate::object)
+    /// or [`workflow`](macro@crate::workflow) macros (optionally with [`.options(..)`](crate::service::ServiceDefinition::options)),
+    /// or — with the deprecated trait-based API — the result of the `serve` method.
+    pub fn bind(self, definition: impl IntoServiceDefinition) -> Self {
+        self.bind_inner(definition, ServiceOptions::default())
     }
 
-    /// Like [`bind`], but providing options
-    pub fn bind_with_options<
-        S: Service<Future = BoxFuture<'static, Result<(), Error>>>
-            + Discoverable
-            + Send
-            + Sync
-            + 'static,
-    >(
-        mut self,
-        s: S,
+    /// Like [`bind`](Self::bind), but providing options.
+    #[deprecated(
+        note = "attach options to the service definition with `.options(..)`, then `bind(..)` it"
+    )]
+    pub fn bind_with_options(
+        self,
+        definition: impl IntoServiceDefinition,
         service_options: ServiceOptions,
     ) -> Self {
-        // Discover and apply options
-        let mut service_metadata = S::discover();
-        service_metadata.apply_options(service_options);
+        self.bind_inner(definition, service_options)
+    }
 
-        let boxed_service = BoxedService::new(s);
-        self.svcs
-            .insert(service_metadata.name.to_string(), boxed_service);
-        self.discovery_services.push(service_metadata);
+    fn bind_inner(
+        mut self,
+        definition: impl IntoServiceDefinition,
+        service_options: ServiceOptions,
+    ) -> Self {
+        let ServiceDefinition {
+            mut discovery,
+            dispatcher,
+        } = definition.into_service_definition();
+        discovery.apply_options(service_options);
+
+        self.svcs.insert(discovery.name.to_string(), dispatcher);
+        self.discovery_services.push(discovery);
         self
     }
 

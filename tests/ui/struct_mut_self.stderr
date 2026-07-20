@@ -1,0 +1,13 @@
+error: Restate handlers must take `&self`; the service value is shared (behind an Arc) across concurrent invocations, so use interior mutability for mutable state
+ --> tests/ui/struct_mut_self.rs:9:20
+  |
+9 |     async fn greet(&mut self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
+  |                    ^^^^^^^^^
+
+warning: unused import: `restate_sdk::prelude::*`
+ --> tests/ui/struct_mut_self.rs:1:5
+  |
+1 | use restate_sdk::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

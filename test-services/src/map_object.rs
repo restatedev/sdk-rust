@@ -10,33 +10,23 @@ pub(crate) struct Entry {
     value: String,
 }
 
-#[restate_sdk::object]
-#[name = "MapObject"]
-pub(crate) trait MapObject {
-    #[name = "set"]
-    async fn set(entry: Json<Entry>) -> HandlerResult<()>;
-    #[name = "get"]
-    async fn get(key: String) -> HandlerResult<String>;
-    #[name = "clearAll"]
-    async fn clear_all() -> HandlerResult<Json<Vec<Entry>>>;
-}
+pub(crate) struct MapObject;
 
-pub(crate) struct MapObjectImpl;
-
-impl MapObject for MapObjectImpl {
-    async fn set(
-        &self,
-        ctx: ObjectContext<'_>,
-        Json(Entry { key, value }): Json<Entry>,
-    ) -> HandlerResult<()> {
+#[restate_sdk::object(name = "MapObject")]
+impl MapObject {
+    #[handler(name = "set")]
+    async fn set(&self, ctx: ObjectContext<'_>, entry: Json<Entry>) -> HandlerResult<()> {
+        let Json(Entry { key, value }) = entry;
         ctx.set(&key, value);
         Ok(())
     }
 
+    #[handler(name = "get")]
     async fn get(&self, ctx: ObjectContext<'_>, key: String) -> HandlerResult<String> {
         Ok(ctx.get(&key).await?.unwrap_or_default())
     }
 
+    #[handler(name = "clearAll")]
     async fn clear_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<Entry>>> {
         let keys = ctx.get_keys().await?;
 

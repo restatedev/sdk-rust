@@ -3,31 +3,52 @@ use restate_sdk::prelude::*;
 use restate_sdk_testcontainers::TestEnvironment;
 use tracing::info;
 
+struct MyService;
+
 #[restate_sdk::service]
-trait MyService {
-    async fn my_handler() -> HandlerResult<String>;
-}
-
-#[restate_sdk::object]
-trait MyObject {
-    async fn my_handler(input: String) -> HandlerResult<String>;
-    #[shared]
-    async fn my_shared_handler(input: String) -> HandlerResult<String>;
-}
-
-#[restate_sdk::workflow]
-trait MyWorkflow {
-    async fn my_handler(input: String) -> HandlerResult<String>;
-    #[shared]
-    async fn my_shared_handler(input: String) -> HandlerResult<String>;
-}
-
-struct MyServiceImpl;
-
-impl MyService for MyServiceImpl {
-    async fn my_handler(&self, _: Context<'_>) -> HandlerResult<String> {
+impl MyService {
+    #[handler]
+    async fn my_handler(&self, _ctx: Context<'_>) -> HandlerResult<String> {
         let result = "hello!";
         Ok(result.to_string())
+    }
+}
+
+struct MyObject;
+
+#[restate_sdk::object]
+impl MyObject {
+    #[handler]
+    async fn my_handler(&self, _ctx: ObjectContext<'_>, input: String) -> HandlerResult<String> {
+        Ok(input)
+    }
+
+    #[handler]
+    async fn my_shared_handler(
+        &self,
+        _ctx: SharedObjectContext<'_>,
+        input: String,
+    ) -> HandlerResult<String> {
+        Ok(input)
+    }
+}
+
+struct MyWorkflow;
+
+#[restate_sdk::workflow]
+impl MyWorkflow {
+    #[handler]
+    async fn my_handler(&self, _ctx: WorkflowContext<'_>, input: String) -> HandlerResult<String> {
+        Ok(input)
+    }
+
+    #[handler]
+    async fn my_shared_handler(
+        &self,
+        _ctx: SharedWorkflowContext<'_>,
+        input: String,
+    ) -> HandlerResult<String> {
+        Ok(input)
     }
 }
 
@@ -37,7 +58,11 @@ async fn test_container() {
         .with_max_level(tracing::Level::INFO) // Set the maximum log level
         .init();
 
-    let endpoint = Endpoint::builder().bind(MyServiceImpl.serve()).build();
+    let endpoint = Endpoint::builder()
+        .bind(MyService)
+        .bind(MyObject)
+        .bind(MyWorkflow)
+        .build();
 
     // simple test container initialization with default configuration
     //let test_container = TestContainer::default().start(endpoint).await.unwrap();

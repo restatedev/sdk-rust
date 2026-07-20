@@ -13,20 +13,13 @@ pub(crate) enum BlockingOperation {
     Awakeable,
 }
 
-#[restate_sdk::object]
-#[name = "CancelTestRunner"]
-pub(crate) trait CancelTestRunner {
-    #[name = "startTest"]
-    async fn start_test(op: Json<BlockingOperation>) -> HandlerResult<()>;
-    #[name = "verifyTest"]
-    async fn verify_test() -> HandlerResult<bool>;
-}
-
-pub(crate) struct CancelTestRunnerImpl;
+pub(crate) struct CancelTestRunner;
 
 const CANCELED: &str = "canceled";
 
-impl CancelTestRunner for CancelTestRunnerImpl {
+#[restate_sdk::object(name = "CancelTestRunner")]
+impl CancelTestRunner {
+    #[handler(name = "startTest")]
     async fn start_test(
         &self,
         context: ObjectContext<'_>,
@@ -44,23 +37,17 @@ impl CancelTestRunner for CancelTestRunnerImpl {
         }
     }
 
+    #[handler(name = "verifyTest")]
     async fn verify_test(&self, context: ObjectContext<'_>) -> HandlerResult<bool> {
         Ok(context.get::<bool>(CANCELED).await?.unwrap_or(false))
     }
 }
 
-#[restate_sdk::object]
-#[name = "CancelTestBlockingService"]
-pub(crate) trait CancelTestBlockingService {
-    #[name = "block"]
-    async fn block(op: Json<BlockingOperation>) -> HandlerResult<()>;
-    #[name = "isUnlocked"]
-    async fn is_unlocked() -> HandlerResult<()>;
-}
+pub(crate) struct CancelTestBlockingService;
 
-pub(crate) struct CancelTestBlockingServiceImpl;
-
-impl CancelTestBlockingService for CancelTestBlockingServiceImpl {
+#[restate_sdk::object(name = "CancelTestBlockingService")]
+impl CancelTestBlockingService {
+    #[handler(name = "block")]
     async fn block(
         &self,
         context: ObjectContext<'_>,
@@ -92,6 +79,7 @@ impl CancelTestBlockingService for CancelTestBlockingServiceImpl {
         Ok(())
     }
 
+    #[handler(name = "isUnlocked")]
     async fn is_unlocked(&self, _: ObjectContext<'_>) -> HandlerResult<()> {
         // no-op
         Ok(())

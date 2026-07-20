@@ -258,7 +258,7 @@ fn is_lazy_state_attr(attr: &Attribute) -> bool {
         .is_ok_and(|i| i == "lazy_state")
 }
 
-fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
+pub(crate) fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
     attr.meta
         .require_name_value()
         .ok()
@@ -280,7 +280,7 @@ fn read_literal_attribute_name(attr: &Attribute) -> Result<Option<String>> {
         .transpose()
 }
 
-fn extract_handler_result_parameter(ty: &Type) -> Option<(Type, Type)> {
+pub(crate) fn extract_handler_result_parameter(ty: &Type) -> Option<(Type, Type)> {
     let path = match ty {
         Type::Path(ty) => &ty.path,
         _ => return None,

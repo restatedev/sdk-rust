@@ -66,37 +66,17 @@ pub(crate) struct RejectAwakeable {
     reason: String,
 }
 
-#[restate_sdk::object]
-#[name = "VirtualObjectCommandInterpreter"]
-pub(crate) trait VirtualObjectCommandInterpreter {
-    #[name = "interpretCommands"]
-    async fn interpret_commands(req: Json<InterpretRequest>) -> HandlerResult<String>;
+pub(crate) struct VirtualObjectCommandInterpreter;
 
-    #[name = "resolveAwakeable"]
-    #[shared]
-    async fn resolve_awakeable(req: Json<ResolveAwakeable>) -> HandlerResult<()>;
-
-    #[name = "rejectAwakeable"]
-    #[shared]
-    async fn reject_awakeable(req: Json<RejectAwakeable>) -> HandlerResult<()>;
-
-    #[name = "hasAwakeable"]
-    #[shared]
-    async fn has_awakeable(awakeable_key: String) -> HandlerResult<bool>;
-
-    #[name = "getResults"]
-    #[shared]
-    async fn get_results() -> HandlerResult<Json<Vec<String>>>;
-}
-
-pub(crate) struct VirtualObjectCommandInterpreterImpl;
-
-impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
+#[restate_sdk::object(name = "VirtualObjectCommandInterpreter")]
+impl VirtualObjectCommandInterpreter {
+    #[handler(name = "interpretCommands")]
     async fn interpret_commands(
         &self,
         context: ObjectContext<'_>,
-        Json(req): Json<InterpretRequest>,
+        req: Json<InterpretRequest>,
     ) -> HandlerResult<String> {
+        let Json(req) = req;
         let mut last_result: String = Default::default();
 
         for cmd in req.commands {
@@ -194,6 +174,7 @@ impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
         Ok(last_result)
     }
 
+    #[handler(name = "resolveAwakeable")]
     async fn resolve_awakeable(
         &self,
         context: SharedObjectContext<'_>,
@@ -217,6 +198,7 @@ impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
         Ok(())
     }
 
+    #[handler(name = "rejectAwakeable")]
     async fn reject_awakeable(
         &self,
         context: SharedObjectContext<'_>,
@@ -240,6 +222,7 @@ impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
         Ok(())
     }
 
+    #[handler(name = "hasAwakeable")]
     async fn has_awakeable(
         &self,
         context: SharedObjectContext<'_>,
@@ -251,6 +234,7 @@ impl VirtualObjectCommandInterpreter for VirtualObjectCommandInterpreterImpl {
             .is_some())
     }
 
+    #[handler(name = "getResults")]
     async fn get_results(
         &self,
         context: SharedObjectContext<'_>,

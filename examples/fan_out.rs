@@ -12,14 +12,11 @@ use std::time::Duration;
 /// ```shell
 /// $ curl -v http://localhost:8080/FanOut/fan_out
 /// ```
+struct FanOut;
+
 #[restate_sdk::service]
-trait FanOut {
-    async fn fan_out() -> Result<String, TerminalError>;
-}
-
-struct FanOutImpl;
-
-impl FanOut for FanOutImpl {
+impl FanOut {
+    #[handler]
     async fn fan_out(&self, ctx: Context<'_>) -> Result<String, TerminalError> {
         let labels = ["fast", "medium", "slow"];
 
@@ -43,7 +40,7 @@ impl FanOut for FanOutImpl {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(FanOutImpl.serve()).build())
+    HttpServer::new(Endpoint::builder().bind(FanOut).build())
         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
         .await;
 }

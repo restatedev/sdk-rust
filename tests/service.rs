@@ -1,3 +1,6 @@
+// This file exercises the deprecated trait-based API for back-compatibility coverage.
+#![allow(deprecated)]
+
 use restate_sdk::prelude::*;
 
 // Should compile
