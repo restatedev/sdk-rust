@@ -244,7 +244,7 @@ impl ContextInternal {
                 };
                 let _ = inner_lock.vm.sys_write_output(
                     NonEmptyValue::Failure(err.into()),
-                    PayloadOptions::stable_serialization(),
+                    PayloadOptions::default(),
                 );
                 let _ = inner_lock.vm.sys_end();
                 // This causes the trap, plus logs the error
@@ -268,7 +268,7 @@ impl ContextInternal {
             inner_lock,
             inner_lock
                 .vm
-                .sys_state_get(key.to_owned(), PayloadOptions::stable_serialization())
+                .sys_state_get(key.to_owned(), PayloadOptions::default())
         );
         inner_lock.maybe_flip_span_replaying_field();
 
@@ -314,11 +314,9 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         match t.serialize() {
             Ok(b) => {
-                let _ = inner_lock.vm.sys_state_set(
-                    key.to_owned(),
-                    b,
-                    PayloadOptions::stable_serialization(),
-                );
+                let _ = inner_lock
+                    .vm
+                    .sys_state_set(key.to_owned(), b, PayloadOptions::default());
                 inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
@@ -411,7 +409,7 @@ impl ContextInternal {
             .and_then(|input| {
                 inner_lock
                     .vm
-                    .sys_call(target, input, None, PayloadOptions::stable_serialization())
+                    .sys_call(target, input, None, PayloadOptions::default())
                     .map_err(Into::into)
             });
 
@@ -510,7 +508,7 @@ impl ContextInternal {
                     + delay
             }),
             None,
-            PayloadOptions::stable_serialization(),
+            PayloadOptions::default(),
         ) {
             Ok(h) => h,
             Err(e) => {
@@ -606,7 +604,7 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_complete_awakeable(
                     id.to_owned(),
                     NonEmptyValue::Success(b),
-                    PayloadOptions::stable_serialization(),
+                    PayloadOptions::default(),
                 );
             }
             Err(e) => {
@@ -619,7 +617,7 @@ impl ContextInternal {
         let _ = must_lock!(self.inner).vm.sys_complete_awakeable(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
-            PayloadOptions::stable_serialization(),
+            PayloadOptions::default(),
         );
     }
 
@@ -688,7 +686,7 @@ impl ContextInternal {
                 let _ = inner_lock.vm.sys_complete_promise(
                     name.to_owned(),
                     NonEmptyValue::Success(b),
-                    PayloadOptions::stable_serialization(),
+                    PayloadOptions::default(),
                 );
             }
             Err(e) => {
@@ -707,7 +705,7 @@ impl ContextInternal {
         let _ = must_lock!(self.inner).vm.sys_complete_promise(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
-            PayloadOptions::stable_serialization(),
+            PayloadOptions::default(),
         );
     }
 
@@ -753,7 +751,7 @@ impl ContextInternal {
 
         let _ = inner_lock
             .vm
-            .sys_write_output(res_to_write, PayloadOptions::stable_serialization());
+            .sys_write_output(res_to_write, PayloadOptions::default());
         inner_lock.maybe_flip_span_replaying_field();
     }
 
