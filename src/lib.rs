@@ -211,6 +211,14 @@ pub mod hyper;
 pub mod lambda;
 pub mod serde;
 
+/// Re-export of the [`rand`] crate this SDK depends on.
+#[cfg(feature = "rand")]
+pub use rand;
+
+/// Re-export of the [`uuid`] crate this SDK depends on.
+#[cfg(feature = "uuid")]
+pub use uuid;
+
 /// Entry-point macro to define a Restate [Service](https://docs.restate.dev/concepts/services#services-1).
 ///
 /// Apply it to an inherent `impl` block of a `struct`, and annotate each handler with
@@ -523,6 +531,9 @@ pub mod prelude {
     pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
     pub use crate::serde::Json;
     pub use crate::service::{IntoServiceDefinition, ServiceDefinition};
+
+    #[cfg(feature = "rand")]
+    pub use rand::{Rng, RngExt};
 
     pub use restate_sdk_macros::{handler, object, service, workflow};
 }
