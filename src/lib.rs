@@ -528,7 +528,7 @@ pub mod prelude {
     pub use crate::endpoint::{
         Endpoint, HandleOptions, HandlerOptions, ProtocolMode, ServiceOptions,
     };
-    pub use crate::errors::{HandlerError, HandlerResult, TerminalError};
+    pub use crate::errors::{HandlerError, HandlerResult, TerminalError, TerminalErrorExt};
     pub use crate::serde::Json;
     pub use crate::service::{IntoServiceDefinition, ServiceDefinition};
 
