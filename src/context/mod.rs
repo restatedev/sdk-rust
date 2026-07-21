@@ -983,11 +983,8 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     ///
     /// Return a [`rand::RngExt`] instance inherently predictable, seeded with [`ContextSideEffects::random_seed`].
     ///
-    /// For example, you can use this to generate a random number:
-    ///
     /// ```rust,no_run
     /// # use restate_sdk::prelude::*;
-    /// # use rand::RngExt;
     /// async fn rand_generate(mut ctx: Context<'_>) {
     /// let x: u32 = ctx.rand().random();
     /// # }
