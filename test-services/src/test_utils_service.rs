@@ -1,5 +1,3 @@
-use futures::FutureExt;
-use futures::future::BoxFuture;
 use restate_sdk::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -7,7 +5,6 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -58,25 +55,6 @@ impl TestUtilsService {
         }
 
         Ok(headers.into())
-    }
-
-    #[handler(name = "sleepConcurrently")]
-    async fn sleep_concurrently(
-        &self,
-        context: Context<'_>,
-        millis_durations: Json<Vec<u64>>,
-    ) -> HandlerResult<()> {
-        let mut futures: Vec<BoxFuture<'_, Result<(), TerminalError>>> = vec![];
-
-        for duration in millis_durations.into_inner() {
-            futures.push(context.sleep(Duration::from_millis(duration)).boxed());
-        }
-
-        for fut in futures {
-            fut.await?;
-        }
-
-        Ok(())
     }
 
     #[handler(name = "countExecutedSideEffects")]
