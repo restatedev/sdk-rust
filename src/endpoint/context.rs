@@ -1027,6 +1027,13 @@ where
                         .sys_run(this.name.to_owned())
                         .map_err(ErrorInner::from)?;
 
+                    // TODO this is a mitigation for https://github.com/restatedev/sdk-rust/issues/72
+                    // Should be removed once we correctly support run async
+                    let b = inner_ctx.vm.take_output();
+                    if !b.is_empty() && !inner_ctx.write.send(b) {
+                        return Poll::Ready(Err(ErrorInner::Suspended.into()));
+                    }
+
                     // Now we do progress once to check whether this closure should be executed or not.
                     match inner_ctx.vm.do_await(UnresolvedFuture::Single(handle)) {
                         Ok(AwaitResponse::ExecuteRun(handle_to_run)) => {
