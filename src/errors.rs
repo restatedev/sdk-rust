@@ -20,7 +20,7 @@
 //! ## Converting Errors to Terminal Errors
 //!
 //! The [`TerminalErrorExt`] trait provides a convenient way to convert any `Result` error
-//! into a terminal error using the `.terminal()` or `.terminal_with_code()` methods:
+//! into a terminal error using the `.terminal()` method:
 //!
 //! ```rust,no_run
 //! # use restate_sdk::prelude::*;
@@ -124,6 +124,19 @@ impl TerminalError {
         })
     }
 
+    /// Set the status code for this [`TerminalError`].
+    ///
+    /// ```rust,no_run
+    /// use restate_sdk::prelude::TerminalError;
+    ///
+    /// let error = TerminalError::new("Bad request").with_code(400);
+    /// assert_eq!(error.code(), 400);
+    /// ```
+    pub fn with_code(mut self, code: u16) -> Self {
+        self.0.code = code;
+        self
+    }
+
     pub fn code(&self) -> u16 {
         self.0.code
     }
@@ -192,23 +205,9 @@ pub type HandlerResult<T> = Result<T, HandlerError>;
 ///     Ok(())
 /// }
 /// ```
-///
-/// You can also specify a custom HTTP status code:
-///
-/// ```rust,no_run
-/// use restate_sdk::prelude::*;
-/// use restate_sdk::TerminalErrorExt;
-///
-/// async fn handle() -> Result<(), HandlerError> {
-///     let parsed: i32 = "not a number".parse().terminal_with_code(400)?;
-///     Ok(())
-/// }
-/// ```
 pub trait TerminalErrorExt<T, E> {
     /// Convert the error into a [`TerminalError`] with the default status code (500).
     fn terminal(self) -> Result<T, HandlerError>;
-    /// Convert the error into a [`TerminalError`] with a custom status code.
-    fn terminal_with_code(self, code: u16) -> Result<T, HandlerError>;
 }
 
 impl<T, E> TerminalErrorExt<T, E> for Result<T, E>
@@ -217,9 +216,5 @@ where
 {
     fn terminal(self) -> Result<T, HandlerError> {
         self.map_err(|err| TerminalError::new(err.to_string()).into())
-    }
-
-    fn terminal_with_code(self, code: u16) -> Result<T, HandlerError> {
-        self.map_err(|err| TerminalError::new_with_code(code, err.to_string()).into())
     }
 }
