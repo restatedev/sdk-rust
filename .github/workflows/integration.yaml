@@ -20,6 +20,11 @@ on:
         required: false
         default: "ghcr.io/restatedev/restate:main"
         type: string
+      serviceImage:
+        description: "service image, if provided it will skip building the image from sdk main branch"
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       restateCommit:
@@ -32,6 +37,24 @@ on:
         required: false
         default: "ghcr.io/restatedev/restate:main"
         type: string
+      serviceImage:
+        description: "service image, if provided it will skip building the image from sdk main branch"
+        required: false
+        default: ""
+        type: string
+      envVars:
+        required: false
+        type: string
+        description: list of vars and values used when running the test tool
+      testArtifactOutput:
+        required: false
+        type: string
+        description: name of the test artifact output
+      sdkRepoRef:
+        required: false
+        default: ""
+        type: string
+        description: REF to the sdk repo branch/commit, passed to github action ref
 
 jobs:
   sdk-test-suite:
@@ -49,6 +72,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: restatedev/sdk-rust
+          ref: ${{ inputs.sdkRepoRef }}
 
       - name: Set up Docker containerd snapshotter
         uses: docker/setup-docker-action@v4
@@ -95,7 +119,14 @@ jobs:
           driver-opts: |
             network=host
 
+      # Pre-emptively pull the test-services image, to avoid affecting execution time
+      - name: Pull test services image
+        if: ${{ inputs.serviceImage != '' }}
+        shell: bash
+        run: docker pull ${{ inputs.serviceImage }}
+
       - name: Build Rust test-services image
+        if: ${{ inputs.serviceImage == '' }}
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -108,9 +139,10 @@ jobs:
           cache-to: type=gha,url=http://127.0.0.1:49160/,mode=max,version=1,scope=${{ github.workflow }}
 
       - name: Run test tool
-        uses: restatedev/e2e/sdk-tests@v1.0
+        uses: restatedev/e2e/sdk-tests@v2.2
         with:
           restateContainerImage: ${{ inputs.restateCommit != '' && 'localhost/restatedev/restate-commit-download:latest' || (inputs.restateImage != '' && inputs.restateImage || 'ghcr.io/restatedev/restate:main') }}
-          serviceContainerImage: "restatedev/rust-test-services"
+          serviceContainerImage: ${{ inputs.serviceImage != '' && inputs.serviceImage || 'restatedev/rust-test-services' }}
           exclusionsFile: "test-services/exclusions.yaml"
-          testArtifactOutput: "sdk-rust-integration-test-report"
+          envVars: ${{ inputs.envVars }}
+          testArtifactOutput: ${{ inputs.testArtifactOutput != '' && inputs.testArtifactOutput || 'sdk-rust-integration-test-report' }}

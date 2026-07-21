@@ -8,11 +8,13 @@ use std::time::Duration;
 
 #[doc(hidden)]
 pub mod macro_support;
+mod map;
 mod request;
 mod run;
 mod select;
 mod select_any;
 
+pub use map::{MapDurableFuture, MapErrDurableFuture, MapOkDurableFuture};
 pub use request::{CallFuture, InvocationHandle, Request, RequestTarget, SendHandle, SignalHandle};
 pub use run::{RunClosure, RunFuture, RunRetryPolicy};
 pub use select_any::DurableFuturesUnordered;
@@ -397,7 +399,7 @@ pub trait ContextTimers<'ctx>: private::SealedContext<'ctx> {
     fn sleep(
         &self,
         duration: Duration,
-    ) -> impl DurableFuture<Output = Result<(), TerminalError>> + 'ctx {
+    ) -> impl DurableFuture<Output = Result<(), TerminalError>> + Send + 'ctx {
         private::SealedContext::inner_context(self).sleep(duration)
     }
 }
@@ -1186,7 +1188,54 @@ impl<'ctx, CTX: private::SealedContext<'ctx> + private::SealedCanUsePromises> Co
 {
 }
 
-pub trait DurableFuture: Future + macro_support::SealedDurableFuture {}
+/// A future returned by a Restate operation, which can participate in combinators such as
+/// [`select!`](crate::select) and [`DurableFuturesUnordered`].
+///
+/// The [`map`](DurableFuture::map)/[`map_ok`](DurableFuture::map_ok)/[`map_err`](DurableFuture::map_err)
+/// combinators transform the output while keeping the result a [`DurableFuture`], so it can still be
+/// used in combinators.
+pub trait DurableFuture: Future + macro_support::SealedDurableFuture {
+    /// Map the output of this durable future.
+    fn map<U, M>(self, mapper: M) -> MapDurableFuture<Self, M>
+    where
+        Self: Sized,
+        M: FnOnce(Self::Output) -> U,
+    {
+        MapDurableFuture::new(self, mapper)
+    }
+
+    /// Map the success value of this durable future, leaving terminal errors untouched.
+    fn map_ok<T, U, M>(self, mapper: M) -> MapOkDurableFuture<Self, M>
+    where
+        Self: Sized + Future<Output = Result<T, TerminalError>>,
+        M: FnOnce(T) -> U,
+    {
+        MapOkDurableFuture::new(self, mapper)
+    }
+
+    /// Map the terminal error of this durable future, leaving success values untouched.
+    fn map_err<T, M>(self, mapper: M) -> MapErrDurableFuture<Self, M>
+    where
+        Self: Sized + Future<Output = Result<T, TerminalError>>,
+        M: FnOnce(TerminalError) -> TerminalError,
+    {
+        MapErrDurableFuture::new(self, mapper)
+    }
+}
+
+impl<'a, O> macro_support::SealedDurableFuture
+    for std::pin::Pin<Box<dyn DurableFuture<Output = O> + Send + 'a>>
+{
+    fn inner_context(&self) -> ContextInternal {
+        (**self).inner_context()
+    }
+
+    fn handle(&self) -> restate_sdk_shared_core::NotificationHandle {
+        (**self).handle()
+    }
+}
+
+impl<'a, O> DurableFuture for std::pin::Pin<Box<dyn DurableFuture<Output = O> + Send + 'a>> {}
 
 pub(crate) mod private {
     use super::*;
