@@ -24,7 +24,6 @@
 //!
 //! ```rust,no_run
 //! # use restate_sdk::prelude::*;
-//! # use restate_sdk::TerminalErrorExt;
 //! # async fn handle() -> Result<(), HandlerError> {
 //! let parsed: i32 = "not a number".parse().terminal()?;
 //! # Ok(())
@@ -127,7 +126,7 @@ impl TerminalError {
     /// Set the status code for this [`TerminalError`].
     ///
     /// ```rust,no_run
-    /// use restate_sdk::prelude::TerminalError;
+    /// use restate_sdk::prelude::*;
     ///
     /// let error = TerminalError::new("Bad request").with_code(400);
     /// assert_eq!(error.code(), 400);
@@ -198,7 +197,6 @@ pub type HandlerResult<T> = Result<T, HandlerError>;
 ///
 /// ```rust,no_run
 /// use restate_sdk::prelude::*;
-/// use restate_sdk::TerminalErrorExt;
 ///
 /// async fn handle() -> Result<(), HandlerError> {
 ///     let parsed: i32 = "not a number".parse().terminal()?;
