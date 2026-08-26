@@ -15,7 +15,7 @@ use crate::ast::ServiceType;
 use crate::struct_ast::{CommonOptions, OnMaxAttempts, StructHandler, StructService};
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::quote;
-use syn::PatType;
+use syn::{PatType, ext::IdentExt};
 
 /// `Some(<v>)` if set, else `None`, for a primitive that `quote!` can interpolate directly.
 fn opt_lit<T: quote::ToTokens>(v: Option<T>) -> TokenStream2 {
@@ -68,11 +68,13 @@ pub(crate) fn generate(svc: &StructService) -> TokenStream2 {
     let stripped_impl = &svc.stripped_impl;
     let dispatcher = dispatcher_block(svc);
     let client = client(svc);
+    let ingress_client = ingress_client(svc);
 
     quote! {
         #stripped_impl
         #dispatcher
         #client
+        #ingress_client
     }
 }
 
@@ -302,32 +304,7 @@ fn client(svc: &StructService) -> TokenStream2 {
     client_generics.params.insert(0, syn::parse_quote!('ctx));
     let (client_impl_generics, client_ty_generics, client_where) = client_generics.split_for_impl();
 
-    // A `PhantomData` marker so the service's generic params are considered "used" on the client
-    // even when they don't appear in any handler input/output type.
-    let marker_types: Vec<TokenStream2> = svc
-        .generics
-        .params
-        .iter()
-        .filter_map(|p| match p {
-            syn::GenericParam::Type(t) => {
-                let id = &t.ident;
-                Some(quote! { fn() -> #id })
-            }
-            syn::GenericParam::Lifetime(l) => {
-                let lt = &l.lifetime;
-                Some(quote! { & #lt () })
-            }
-            syn::GenericParam::Const(_) => None,
-        })
-        .collect();
-    let (marker_field, marker_init) = if marker_types.is_empty() {
-        (quote! {}, quote! {})
-    } else {
-        (
-            quote! { __restate_marker: ::core::marker::PhantomData<(#(#marker_types,)*)>, },
-            quote! { __restate_marker: ::core::marker::PhantomData, },
-        )
-    };
+    let (marker_field, marker_init) = client_marker(&svc.generics);
 
     let key_field = match svc.service_ty {
         ServiceType::Service => quote! {},
@@ -359,22 +336,14 @@ fn client(svc: &StructService) -> TokenStream2 {
     };
 
     let handler_fns = svc.handlers.iter().map(|handler| {
-        let handler_ident = &handler.ident;
-        let handler_literal = Literal::string(&handler.restate_name);
-
-        let argument = match &handler.arg {
-            None => quote! {},
-            Some(PatType { ty, .. }) => quote! { req: #ty },
-        };
-        let argument_ty = match &handler.arg {
-            None => quote! { () },
-            Some(PatType { ty, .. }) => quote! { #ty },
-        };
-        let res_ty = &handler.output_ok;
-        let input = match &handler.arg {
-            None => quote! { () },
-            Some(_) => quote! { req },
-        };
+        let HandlerClientParts {
+            handler_ident,
+            handler_literal,
+            argument,
+            argument_ty,
+            res_ty,
+            input,
+        } = handler_client_parts(handler);
         let request_target = match svc.service_ty {
             ServiceType::Service => quote! {
                 ::restate_sdk::context::RequestTarget::service(#service_literal, #handler_literal)
@@ -410,6 +379,176 @@ fn client(svc: &StructService) -> TokenStream2 {
         #into_client_impl
 
         impl #client_impl_generics #client_ident #client_ty_generics #client_where {
+            #( #handler_fns )*
+        }
+    }
+}
+
+/// The pieces of a handler signature and invocation that are shared by the durable and ingress
+/// generated clients. Handler parameter patterns intentionally do not leak into either client API:
+/// callers always pass a naturally named `req` value.
+struct HandlerClientParts<'a> {
+    handler_ident: &'a syn::Ident,
+    handler_literal: Literal,
+    argument: TokenStream2,
+    argument_ty: TokenStream2,
+    res_ty: &'a syn::Type,
+    input: TokenStream2,
+}
+
+fn handler_client_parts(handler: &StructHandler) -> HandlerClientParts<'_> {
+    let (argument, argument_ty, input) = match &handler.arg {
+        None => (quote! {}, quote! { () }, quote! { () }),
+        Some(PatType { ty, .. }) => (quote! { req: #ty }, quote! { #ty }, quote! { req }),
+    };
+
+    HandlerClientParts {
+        handler_ident: &handler.ident,
+        handler_literal: Literal::string(&handler.restate_name),
+        argument,
+        argument_ty,
+        res_ty: &handler.output_ok,
+        input,
+    }
+}
+
+/// A `PhantomData` marker so service generic parameters remain used even when no handler wire type
+/// mentions them. The executor parameter of an ingress client is used by its `Client` field and is
+/// therefore deliberately not included here.
+fn client_marker(generics: &syn::Generics) -> (TokenStream2, TokenStream2) {
+    let marker_types: Vec<TokenStream2> = generics
+        .params
+        .iter()
+        .filter_map(|p| match p {
+            syn::GenericParam::Type(t) => {
+                let id = &t.ident;
+                Some(quote! { fn() -> #id })
+            }
+            syn::GenericParam::Lifetime(l) => {
+                let lt = &l.lifetime;
+                Some(quote! { & #lt () })
+            }
+            syn::GenericParam::Const(_) => None,
+        })
+        .collect();
+
+    if marker_types.is_empty() {
+        (quote! {}, quote! {})
+    } else {
+        (
+            quote! { __restate_marker: ::core::marker::PhantomData<(#(#marker_types,)*)>, },
+            quote! { __restate_marker: ::core::marker::PhantomData, },
+        )
+    }
+}
+
+/// Pick an executor type parameter that cannot collide with a generic declared by the user's
+/// service impl. The deliberately uncommon base still gets checked because proc-macro output must
+/// remain correct for adversarial (and generated) Rust source.
+fn ingress_executor_ident(generics: &syn::Generics) -> syn::Ident {
+    let mut candidate = "__RestateIngressExecutor".to_owned();
+    while generics.params.iter().any(|param| match param {
+        syn::GenericParam::Type(ty) => ty.ident.unraw() == candidate,
+        syn::GenericParam::Const(konst) => konst.ident.unraw() == candidate,
+        syn::GenericParam::Lifetime(_) => false,
+    }) {
+        candidate.push('_');
+    }
+    quote::format_ident!("{candidate}")
+}
+
+/// The `XIngressClient` generated alongside the durable `XClient` for the struct-based macro API.
+/// It is transport-neutral: no dependency feature is referenced in downstream macro output.
+fn ingress_client(svc: &StructService) -> TokenStream2 {
+    let vis = &svc.vis;
+    let client_ident = quote::format_ident!("{}IngressClient", svc.self_ident);
+    let service_literal = Literal::string(&svc.restate_name);
+    let executor_ident = ingress_executor_ident(&svc.generics);
+
+    // Ingress client generics = the service's generics followed by a fresh executor parameter.
+    let mut client_generics = svc.generics.clone();
+    client_generics.params.push(syn::parse_quote! {
+        #executor_ident: ::restate_sdk::ingress::RequestExecutor
+    });
+    let (client_impl_generics, client_ty_generics, client_where) = client_generics.split_for_impl();
+
+    let (marker_field, marker_init) = client_marker(&svc.generics);
+    let (key_field, constructor_argument, key_init) = match svc.service_ty {
+        ServiceType::Service => (quote! {}, quote! {}, quote! {}),
+        ServiceType::Object | ServiceType::Workflow => (
+            quote! { key: ::std::string::String, },
+            quote! { key: impl ::core::convert::Into<::std::string::String>, },
+            quote! { key: key.into(), },
+        ),
+    };
+
+    let handler_fns = svc.handlers.iter().map(|handler| {
+        let HandlerClientParts {
+            handler_ident,
+            handler_literal,
+            argument,
+            argument_ty,
+            res_ty,
+            input,
+        } = handler_client_parts(handler);
+        let request_target = match svc.service_ty {
+            ServiceType::Service => quote! {
+                ::restate_sdk::ingress::RequestTarget::service(
+                    #service_literal,
+                    #handler_literal,
+                )
+            },
+            ServiceType::Object => quote! {
+                ::restate_sdk::ingress::RequestTarget::object(
+                    #service_literal,
+                    self.key.clone(),
+                    #handler_literal,
+                )
+            },
+            ServiceType::Workflow => quote! {
+                ::restate_sdk::ingress::RequestTarget::workflow(
+                    #service_literal,
+                    self.key.clone(),
+                    #handler_literal,
+                )
+            },
+        };
+
+        quote! {
+            #vis fn #handler_ident(
+                &self,
+                #argument
+            ) -> ::restate_sdk::ingress::Request<#executor_ident, #argument_ty, #res_ty> {
+                self.client.request(#request_target, #input)
+            }
+        }
+    });
+
+    let doc_msg = format!(
+        "Client to invoke the `{}` service through Restate ingress.",
+        svc.self_ident
+    );
+
+    quote! {
+        #[doc = #doc_msg]
+        #vis struct #client_ident #client_impl_generics #client_where {
+            client: ::restate_sdk::ingress::Client<#executor_ident>,
+            #key_field
+            #marker_field
+        }
+
+        impl #client_impl_generics #client_ident #client_ty_generics #client_where {
+            #vis fn from_client(
+                client: ::restate_sdk::ingress::Client<#executor_ident>,
+                #constructor_argument
+            ) -> Self {
+                Self {
+                    client,
+                    #key_init
+                    #marker_init
+                }
+            }
+
             #( #handler_fns )*
         }
     }

@@ -1,4 +1,4 @@
-use reqwest::StatusCode;
+use restate_sdk::ingress::ReqwestClient;
 use restate_sdk::prelude::*;
 use restate_sdk_testcontainers::TestEnvironment;
 use tracing::info;
@@ -82,18 +82,17 @@ async fn test_container() {
 
     let ingress_url = test_environment.ingress_url();
 
-    // call container ingress url for /MyService/my_handler
-    let response = reqwest::Client::new()
-        .post(format!("{}/MyService/my_handler", ingress_url))
-        .header("idempotency-key", "abc")
-        .send()
+    let client = ReqwestClient::connect(ingress_url.parse().unwrap()).unwrap();
+    let client = MyServiceIngressClient::from_client(client);
+
+    let response = client
+        .my_handler()
+        .idempotency_key("abc")
+        .call()
         .await
         .unwrap();
+    let output = response.into_body().unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-
-    info!(
-        "/MyService/my_handler response: {:?}",
-        response.text().await.unwrap()
-    );
+    assert_eq!(output, "hello!");
+    info!("MyService/my_handler response: {output:?}");
 }

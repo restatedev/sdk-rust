@@ -11,7 +11,7 @@ use std::time::Duration;
 /// To start it:
 ///
 /// ```shell
-/// $ curl -v http://localhost:8080/PeriodicTask/my-periodic-task/start
+/// $ curl -v -X POST http://localhost:8080/restate/call/PeriodicTask/my-periodic-task/start
 /// ```
 struct PeriodicTask;
 

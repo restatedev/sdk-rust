@@ -23,6 +23,8 @@
 //! - [SDK Overview](#sdk-overview): Overview of the SDK and how to implement services, virtual objects, and workflows.
 //! - [Configuration][crate::configuration]: Configure services, objects, workflows and their handlers — timeouts, retention, private-ness and the invocation retry policy — via attribute arguments.
 //! - [Service Communication][crate::context::ContextClient]: Durable RPC and messaging between services (optionally with a delay).
+//! - [Ingress Client][crate::ingress]: Invoke handlers from external applications with generated,
+//!   typed clients or a custom buffered HTTP transport.
 //! - [Journaling Results][crate::context::ContextSideEffects]: Persist results in Restate's log to avoid re-execution on retries
 //! - State: [read][crate::context::ContextReadState] and [write](crate::context::ContextWriteState): Store and retrieve state in Restate's key-value store
 //! - [Scheduling & Timers][crate::context::ContextTimers]: Let a handler pause for a certain amount of time. Restate durably tracks the timer across failures.
@@ -72,7 +74,7 @@
 //!     - Handlers take `&self`, a [`Context`](crate::context::Context), and optionally one input parameter, and return a [`Result`].
 //!     - The type of the input parameter of the handler needs to implement [`Serialize`](crate::serde::Deserialize) and [`Deserialize`](crate::serde::Deserialize). See [`crate::serde`].
 //!     - The Result contains the return value or a [`HandlerError`][crate::errors::HandlerError], which can be a [`TerminalError`](crate::errors::TerminalError) or any other Rust's [`std::error::Error`].
-//!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/MyService/my_handler`. You can optionally override the handler name used via `#[handler(name = "myHandler")]`, and the service name via `#[restate_sdk::service(name = "MyService")]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
+//!     - The service handler can now be called at `<RESTATE_INGRESS_URL>/restate/call/MyService/my_handler`. You can optionally override the handler name used via `#[handler(name = "myHandler")]`, and the service name via `#[restate_sdk::service(name = "MyService")]`. More details on handler invocations can be found in the [docs](https://docs.restate.dev/invoke/http).
 //! - Store dependencies (e.g. clients, config) as fields on the `struct` and access them via `&self`. The struct is shared (behind an [`Arc`](std::sync::Arc)) across all concurrent invocations, so use interior mutability (e.g. a [`Mutex`](std::sync::Mutex) or atomics) for any mutable state.
 //! - The parameter after `&self` is always a [`Context`](crate::context::Context) to interact with Restate.
 //!   The SDK stores the actions you do on the context in the Restate journal to make them durable.
@@ -173,6 +175,44 @@
 //! - [Virtual Object](object)
 //! - [Workflow](workflow)
 //!
+//! ### Calling handlers through ingress
+//!
+//! The SDK generates a typed `<Type>IngressClient` for every impl-block service, virtual object,
+//! and workflow. Ingress clients invoke handlers from outside a Restate service and require Restate
+//! 1.7 or newer.
+//!
+//! Enable the `reqwest-client` feature to use the built-in reqwest client:
+//!
+//! ```rust,no_run
+//! # use restate_sdk::prelude::*;
+//! # struct Greeter;
+//! # #[restate_sdk::service]
+//! # impl Greeter {
+//! #     #[handler]
+//! #     async fn greet(&self, _ctx: Context<'_>, name: String) -> HandlerResult<String> {
+//! #         Ok(format!("Hello, {name}!"))
+//! #     }
+//! # }
+//! # #[cfg(feature = "reqwest-client")]
+//! # async fn call_greeter() -> Result<(), Box<dyn std::error::Error>> {
+//! use restate_sdk::ingress::ReqwestClient;
+//!
+//! let client = ReqwestClient::connect("http://localhost:8080".parse()?)?;
+//! let greeter = GreeterIngressClient::from_client(client);
+//! let greeting = greeter
+//!     .greet("Ada".to_owned())
+//!     .call()
+//!     .await?
+//!     .into_body()?;
+//!
+//! println!("{greeting}");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! To use another HTTP client, implement [`ingress::RequestExecutor`] and pass it to
+//! [`ingress::Client::new`].
+//!
 //!
 //! ### Logging
 //!
@@ -207,6 +247,7 @@ pub mod filter;
 pub mod http_server;
 #[cfg(feature = "hyper")]
 pub mod hyper;
+pub mod ingress;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod serde;
@@ -457,11 +498,11 @@ pub use restate_sdk_macros::object;
 /// [**Submit/query/signal**](https://docs.restate.dev/invoke/http#request-response-calls-over-http):
 /// Call any handler of the workflow in the same way as for Services and Virtual Objects.
 /// This returns the result of the handler once it has finished.
-/// Add `/send` to the path for one-way calls.
+/// Use `/restate/send` instead of `/restate/call` for one-way calls.
 /// You can only call the `run` handler once per workflow ID (here `"someone"`).
 ///
 /// ```shell
-/// curl localhost:8080/SignupWorkflow/someone/run \
+/// curl localhost:8080/restate/call/SignupWorkflow/someone/run \
 ///     -H 'content-type: application/json' \
 ///     -d '"someone@restate.dev"'
 /// ```
@@ -470,8 +511,8 @@ pub use restate_sdk_macros::object;
 /// This lets you retrieve the result of a workflow or check if it's finished.
 ///
 /// ```shell
-/// curl localhost:8080/restate/workflow/SignupWorkflow/someone/attach
-/// curl localhost:8080/restate/workflow/SignupWorkflow/someone/output
+/// curl localhost:8080/restate/attach/<invocation-id>
+/// curl localhost:8080/restate/output/<invocation-id>
 /// ```
 ///
 /// ## Inspecting workflows

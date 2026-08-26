@@ -55,6 +55,49 @@ async fn main() {
 }
 ```
 
+## Calling services through ingress
+
+The impl-block service macros also generate a typed ingress client for each service. Enable the
+`reqwest-client` feature to use the SDK's built-in HTTP transport:
+
+```toml
+[dependencies]
+restate-sdk = { version = "0.11", features = ["reqwest-client"] }
+```
+
+`ReqwestClient` is an alias for the transport-neutral `Client<reqwest::Client>`. Connect it to a
+Restate ingress base URI, then wrap it in the generated `<Service>IngressClient`:
+
+```rust
+use restate_sdk::ingress::ReqwestClient;
+
+let client = ReqwestClient::connect("http://localhost:8080".parse().unwrap()).unwrap();
+let greeter = GreeterIngressClient::from_client(client);
+
+// Wait for the invocation to complete and decode its typed result.
+let response = greeter
+    .greet("Ada".to_owned())
+    .idempotency_key("greet-ada")
+    .call()
+    .await
+    .unwrap();
+let invocation = response.invocation_handle();
+assert_eq!(response.into_body().unwrap(), "Greetings Ada");
+println!("invocation ID: {}", invocation.invocation_id());
+
+// Enqueue an invocation without waiting for its result.
+let response = greeter
+    .greet("Grace".to_owned())
+    .send()
+    .await
+    .unwrap();
+println!("send status: {:?}", response.send_status());
+```
+
+Generated object and workflow ingress clients additionally take their key in `from_client`. The
+generic `Client<E>` and generated clients are available without `reqwest-client`; implement
+`RequestExecutor` to use another buffered HTTP transport.
+
 ## Running on Lambda
 
 The Restate Rust SDK supports running services on AWS Lambda using Lambda Function URLs. This allows you to deploy your Restate services as serverless functions.
@@ -132,6 +175,8 @@ The SDK uses [Testcontainers](https://rust.testcontainers.org/) to support integ
 The `restate-sdk-testcontainers` crate provides a framework for initializing the test environment, and an integration test example in `testcontainers/tests/test_container.rs`.
 
 ```rust
+use restate_sdk::ingress::ReqwestClient;
+
 #[tokio::test]
 async fn test_container() {
     tracing_subscriber::fmt::fmt()
@@ -140,41 +185,37 @@ async fn test_container() {
 
     let endpoint = Endpoint::builder().bind(MyService).build();
 
-    // simple test container intialization with default configuration
-    //let test_container = TestContainer::default().start(endpoint).await.unwrap();
+    // simple test environment initialization with default configuration
+    // let test_environment = TestEnvironment::default().start(endpoint).await.unwrap();
 
-    // custom test container initialization with builder
-    let test_container = TestContainer::builder()
-        // optional passthrough logging from the resstate server testcontainer
+    // custom test environment initialization
+    let test_environment = TestEnvironment::new()
+        // optional passthrough logging from the Restate server testcontainer
         // prints container logs to tracing::info level
         .with_container_logging()
         .with_container(
-            "docker.io/restatedev/restate".to_string(),
-            "latest".to_string(),
+            "docker.restate.dev/restatedev/restate".to_string(),
+            "1.7.2".to_string(),
         )
-        .build()
         .start(endpoint)
         .await
         .unwrap();
 
-    let ingress_url = test_container.ingress_url();
+    let ingress_url = test_environment.ingress_url();
 
-    // call container ingress url for /MyService/my_handler
-    let response = reqwest::Client::new()
-        .post(format!("{}/MyService/my_handler", ingress_url))
-        .header("Accept", "application/json")
-        .header("Content-Type", "*/*")
-        .header("idempotency-key", "abc")
-        .send()
+    let client = ReqwestClient::connect(ingress_url.parse().unwrap()).unwrap();
+    let client = MyServiceIngressClient::from_client(client);
+
+    let response = client
+        .my_handler()
+        .idempotency_key("abc")
+        .call()
         .await
         .unwrap();
+    let output = response.into_body().unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-
-    info!(
-        "/MyService/my_handler response: {:?}",
-        response.text().await.unwrap()
-    );
+    assert_eq!(output, "hello!");
+    info!("MyService/my_handler response: {output:?}");
 }
 ```
 
@@ -191,6 +232,8 @@ The compatibility with Restate is described in the following table:
 
 Some features require a minimum version of both Restate and the SDK:
 
+- **Typed ingress client and the new `/restate/` invocation routes**: requires Restate >= 1.7 with
+  sdk-rust >= 0.11
 - **Scope and limit key**: requires Restate >= 1.7 with sdk-rust >= 0.11
 
 ## Contributing
@@ -246,4 +289,3 @@ If everything looks good run with `--execute`
 ```
 cargo +nightly release <VERSION> --exclude test-services --workspace --execute
 ```
-

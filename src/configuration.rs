@@ -61,8 +61,8 @@
 //!
 //! Two options are attribute-specific:
 //!
-//! * `client_visibility = "pub(crate)"` — service attribute only; sets the visibility of the
-//!   generated client (defaults to `pub`).
+//! * `client_visibility = "pub(crate)"` — service attribute only; sets the visibility of both
+//!   generated client kinds (the durable and ingress clients; defaults to `pub`).
 //! * `workflow_completion_retention` — `#[workflow]` attribute only (see
 //!   [below](#workflow-completion-retention)).
 //!

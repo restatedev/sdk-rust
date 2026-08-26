@@ -1,0 +1,5 @@
+error: handler name `from_client` is reserved for the generated ingress client constructor
+ --> tests/ui/struct_handler_named_from_client.rs:8:14
+  |
+8 |     async fn from_client(&self, _ctx: Context<'_>) -> HandlerResult<()> {
+  |              ^^^^^^^^^^^

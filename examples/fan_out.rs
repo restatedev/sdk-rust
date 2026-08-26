@@ -10,7 +10,7 @@ use std::time::Duration;
 /// To try it:
 ///
 /// ```shell
-/// $ curl -v http://localhost:8080/FanOut/fan_out
+/// $ curl -v -X POST http://localhost:8080/restate/call/FanOut/fan_out
 /// ```
 struct FanOut;
 

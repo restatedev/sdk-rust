@@ -17,9 +17,15 @@ name = "schema"
 path = "examples/schema.rs"
 required-features = ["schemars"]
 
+[[example]]
+name = "ingress_client"
+path = "examples/ingress_client.rs"
+required-features = ["reqwest-client"]
+
 [features]
 default = ["http_server", "rand", "uuid", "tracing-span-filter", "rust_crypto"]
-hyper = ["dep:hyper", "http-body-util", "restate-sdk-shared-core/http"]
+reqwest-client = ["dep:reqwest"]
+hyper = ["dep:hyper", "restate-sdk-shared-core/http"]
 http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
 tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
@@ -33,12 +39,14 @@ bytes = "1.11"
 futures = "0.3"
 http = "1.4"
 http-body = "1.0.1"
-http-body-util = { version = "0.1", optional = true }
+http-body-util = "0.1"
 hyper = { version = "1.8", optional = true}
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http2"], optional = true }
 pin-project-lite = "0.2"
+percent-encoding = "2.3"
 rand = { version = "0.10", optional = true }
 regress = "0.10"
+reqwest = { version = "0.13", optional = true }
 restate-sdk-macros = { version = "0.11", path = "macros" }
 restate-sdk-shared-core = { version = "=7.0.3", features = ["request_identity", "sha2_random_seed", "http"] }
 schemars = { version = "1.2", optional = true }
