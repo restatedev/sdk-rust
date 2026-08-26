@@ -98,6 +98,37 @@ Generated object and workflow ingress clients additionally take their key in `fr
 generic `Client<E>` and generated clients are available without `reqwest-client`; implement
 `RequestExecutor` to use another buffered HTTP transport.
 
+## Connecting through a Restate Cloud tunnel
+
+The optional Unix-only in-process tunnel lets a service connect outbound to Restate Cloud, so the
+service does not need to expose an inbound HTTP port. Enable the `tunnel` feature:
+
+```toml
+[dependencies]
+restate-sdk = { version = "0.11", features = ["tunnel"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+When default features are disabled, select a crypto provider explicitly by adding either
+`rust_crypto` or `aws_lc_rs` alongside `tunnel`. If both are enabled, `rust_crypto` is selected
+deterministically.
+
+The Restate operator injects the discovery and authentication settings, so an operator-managed
+deployment needs no application-side tunnel configuration:
+
+```rust
+use restate_sdk::prelude::*;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let endpoint = Endpoint::builder().bind(Greeter).build();
+    Tunnel::new(endpoint).run().await?;
+    Ok(())
+}
+```
+
+See the [complete tunnel example](examples/tunnel.rs).
+
 ## Running on Lambda
 
 The Restate Rust SDK supports running services on AWS Lambda using Lambda Function URLs. This allows you to deploy your Restate services as serverless functions.

@@ -22,7 +22,10 @@ impl MyVirtualObject {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    HttpServer::new(Endpoint::builder().bind(MyVirtualObject).build())
-        .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-        .await;
+    #[cfg(feature = "http_server")]
+    {
+        HttpServer::new(Endpoint::builder().bind(MyVirtualObject).build())
+            .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+            .await;
+    }
 }
