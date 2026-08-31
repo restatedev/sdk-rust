@@ -52,7 +52,7 @@ use http::header::{AUTHORIZATION, CONTENT_TYPE, InvalidHeaderValue};
 use http::uri::PathAndQuery;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Method, Request as HttpRequest, Response as HttpResponse,
-    StatusCode, Uri,
+    Response, StatusCode, Uri,
 };
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -385,7 +385,7 @@ impl<E, Req, Res> Request<E, Req, Res> {
 
     async fn call_with_metadata(
         self,
-        metadata: Option<RequestMetadataProvider>,
+        metadata: Option<RequestMetadata>,
     ) -> Result<CallResponse<E, Res>, ClientError>
     where
         E: RequestExecutor,
@@ -409,7 +409,7 @@ impl<E, Req, Res> Request<E, Req, Res> {
     async fn send_with_delay_and_metadata(
         self,
         delay: Option<Duration>,
-        metadata: Option<RequestMetadataProvider>,
+        metadata: Option<RequestMetadata>,
     ) -> Result<SendResponse<E, Res>, ClientError>
     where
         E: RequestExecutor,
@@ -421,7 +421,7 @@ impl<E, Req, Res> Request<E, Req, Res> {
             return Err(status_error(response));
         }
 
-        let header_id = match invocation_id_header(&response) {
+        let invocation_id = match invocation_id_header(&response) {
             Ok(invocation_id) => invocation_id,
             Err(message) => {
                 return Err(ClientError::Protocol {
@@ -445,15 +445,9 @@ impl<E, Req, Res> Request<E, Req, Res> {
                 response: Box::new(response),
             });
         }
-        if acknowledgement.invocation_id != header_id.as_str() {
-            return Err(ClientError::Protocol {
-                message: "send acknowledgement invocationId does not match x-restate-id".to_owned(),
-                response: Box::new(response),
-            });
-        }
 
         Ok(SendResponse {
-            handle: client.invocation_handle(header_id),
+            handle: client.invocation_handle(invocation_id),
             status: acknowledgement.status.into(),
         })
     }
@@ -462,7 +456,7 @@ impl<E, Req, Res> Request<E, Req, Res> {
         self,
         invoke_type: InvokeType,
         delay: Option<Duration>,
-        metadata: Option<RequestMetadataProvider>,
+        metadata: Option<RequestMetadata>,
     ) -> Result<(Client<E>, HttpRequest<Bytes>), ClientError>
     where
         E: RequestExecutor,
@@ -509,7 +503,6 @@ impl<E, Req, Res> Request<E, Req, Res> {
         }
 
         if let Some(metadata) = metadata {
-            let metadata = metadata();
             let should_set_content_type = !body.is_empty()
                 || metadata.set_content_type_if_empty
                 || metadata.input_is_required;
@@ -549,8 +542,6 @@ struct RequestMetadata {
     input_is_required: bool,
 }
 
-type RequestMetadataProvider = fn() -> RequestMetadata;
-
 impl RequestMetadata {
     fn for_payload<T: PayloadMetadata>() -> Self {
         let output = T::output_metadata();
@@ -571,7 +562,7 @@ where
     where
         E: RequestExecutor,
     {
-        self.call_with_metadata(Some(RequestMetadata::for_payload::<Req>))
+        self.call_with_metadata(Some(RequestMetadata::for_payload::<Req>()))
             .await
     }
 
@@ -580,7 +571,7 @@ where
     where
         E: RequestExecutor,
     {
-        self.send_with_delay_and_metadata(None, Some(RequestMetadata::for_payload::<Req>))
+        self.send_with_delay_and_metadata(None, Some(RequestMetadata::for_payload::<Req>()))
             .await
     }
 
@@ -589,7 +580,7 @@ where
     where
         E: RequestExecutor,
     {
-        self.send_with_delay_and_metadata(Some(delay), Some(RequestMetadata::for_payload::<Req>))
+        self.send_with_delay_and_metadata(Some(delay), Some(RequestMetadata::for_payload::<Req>()))
             .await
     }
 }
@@ -878,15 +869,12 @@ fn decode_body<T: Deserialize>(response: HttpResponse<Bytes>) -> Result<T, Clien
 fn decode_response<T: Deserialize>(
     response: HttpResponse<Bytes>,
 ) -> Result<HttpResponse<T>, ClientError> {
-    let mut body = response.body().clone();
+    let (parts, mut body) = response.into_parts();
     match T::deserialize(&mut body) {
-        Ok(body) => {
-            let (parts, _) = response.into_parts();
-            Ok(HttpResponse::from_parts(parts, body))
-        }
+        Ok(body) => Ok(HttpResponse::from_parts(parts, body)),
         Err(source) => Err(ClientError::PayloadDecode {
             source: Box::new(source),
-            response: Box::new(response),
+            response: Box::new(Response::from_parts(parts, body)),
         }),
     }
 }
