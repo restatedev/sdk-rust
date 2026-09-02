@@ -1,6 +1,6 @@
 [package]
 name = "restate-sdk"
-version = "0.11.1"
+version = "0.12.0"
 edition = "2024"
 description = "Restate SDK for Rust"
 license = "MIT"
@@ -128,7 +128,7 @@ percent-encoding = "2.3"
 rand = { version = "0.10", optional = true }
 regress = "0.10"
 reqwest = { version = "0.13", optional = true }
-restate-sdk-macros = { version = "0.11", path = "macros" }
+restate-sdk-macros = { version = "0.12", path = "macros" }
 restate-sdk-shared-core = { version = "=7.0.3", features = ["request_identity", "sha2_random_seed", "http"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
