@@ -64,9 +64,12 @@
 //! // Start the HTTP server to expose services
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyService).build())
-//!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-//!         .await;
+//!     #[cfg(feature = "http_server")]
+//!     {
+//!         HttpServer::new(Endpoint::builder().bind(MyService).build())
+//!             .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+//!             .await;
+//!     }
 //! }
 //! ```
 //!
@@ -111,9 +114,12 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyVirtualObject).build())
-//!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-//!         .await;
+//!     #[cfg(feature = "http_server")]
+//!     {
+//!         HttpServer::new(Endpoint::builder().bind(MyVirtualObject).build())
+//!             .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+//!             .await;
+//!     }
 //! }
 //! ```
 //!
@@ -153,9 +159,12 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     HttpServer::new(Endpoint::builder().bind(MyWorkflow).build())
-//!         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-//!         .await;
+//!     #[cfg(feature = "http_server")]
+//!     {
+//!         HttpServer::new(Endpoint::builder().bind(MyWorkflow).build())
+//!             .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+//!             .await;
+//!     }
 //! }
 //! ```
 //!
@@ -251,6 +260,11 @@ pub mod ingress;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod serde;
+#[cfg(all(feature = "tunnel", unix))]
+pub mod tunnel;
+
+#[cfg(all(feature = "tunnel", not(unix)))]
+compile_error!("the `tunnel` feature is supported only on Unix platforms");
 
 /// Re-export of the [`rand`] crate this SDK depends on.
 #[cfg(feature = "rand")]
@@ -442,9 +456,12 @@ pub use restate_sdk_macros::object;
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     HttpServer::new(Endpoint::builder().bind(SignupWorkflow).build())
-///         .listen_and_serve("0.0.0.0:9080".parse().unwrap())
-///         .await;
+///     #[cfg(feature = "http_server")]
+///     {
+///         HttpServer::new(Endpoint::builder().bind(SignupWorkflow).build())
+///             .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+///             .await;
+///     }
 /// }
 /// ```
 ///
@@ -558,6 +575,9 @@ pub mod prelude {
 
     #[cfg(feature = "lambda")]
     pub use crate::lambda::LambdaEndpoint;
+
+    #[cfg(all(feature = "tunnel", unix))]
+    pub use crate::tunnel::Tunnel;
 
     pub use crate::context::{
         CallFuture, Context, ContextAwakeables, ContextClient, ContextPromises, ContextReadState,

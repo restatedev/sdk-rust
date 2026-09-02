@@ -10,38 +10,119 @@ rust-version = "1.90.0"
 [[example]]
 name = "tracing"
 path = "examples/tracing.rs"
-required-features = ["tracing-span-filter"]
+required-features = ["http_server", "tracing-span-filter"]
 
 [[example]]
 name = "schema"
 path = "examples/schema.rs"
-required-features = ["schemars"]
+required-features = ["http_server", "schemars"]
+
+[[example]]
+name = "counter"
+path = "examples/counter.rs"
+required-features = ["http_server"]
+
+[[example]]
+name = "cron"
+path = "examples/cron.rs"
+required-features = ["http_server"]
+
+[[example]]
+name = "failures"
+path = "examples/failures.rs"
+required-features = ["http_server"]
+
+[[example]]
+name = "fan_out"
+path = "examples/fan_out.rs"
+required-features = ["http_server"]
+
+[[example]]
+name = "greeter"
+path = "examples/greeter.rs"
+required-features = ["http_server"]
+
+[[example]]
+name = "run"
+path = "examples/run.rs"
+required-features = ["http_server"]
+
+[[example]]
+name = "signals"
+path = "examples/signals.rs"
+required-features = ["http_server"]
 
 [[example]]
 name = "ingress_client"
 path = "examples/ingress_client.rs"
 required-features = ["reqwest-client"]
 
+[[example]]
+name = "tunnel"
+path = "examples/tunnel.rs"
+required-features = ["tunnel", "tracing-span-filter"]
+
 [features]
 default = ["http_server", "rand", "uuid", "tracing-span-filter", "rust_crypto"]
 reqwest-client = ["dep:reqwest"]
+rand = ["dep:rand"]
+uuid = ["dep:uuid"]
 hyper = ["dep:hyper", "restate-sdk-shared-core/http"]
-http_server = ["hyper", "hyper/server", "hyper/http2", "hyper-util", "tokio/net", "tokio/signal", "tokio/macros"]
+http_server = [
+    "hyper",
+    "hyper/server",
+    "hyper/http2",
+    "dep:hyper-util",
+    "hyper-util/tokio",
+    "hyper-util/server",
+    "hyper-util/server-graceful",
+    "hyper-util/http2",
+    "tokio/net",
+    "tokio/signal",
+    "tokio/macros",
+]
 tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
 # jsonwebtoken crypto backend pass-through for request identity verification.
 # Enable exactly one (or call jsonwebtoken's CryptoProvider::install_default yourself).
-rust_crypto = ["restate-sdk-shared-core/rust_crypto"]
-aws_lc_rs = ["restate-sdk-shared-core/aws_lc_rs"]
+rust_crypto = ["restate-sdk-shared-core/rust_crypto", "jsonwebtoken?/rust_crypto", "rustls?/ring"]
+aws_lc_rs = ["restate-sdk-shared-core/aws_lc_rs", "jsonwebtoken?/aws_lc_rs", "rustls?/aws_lc_rs"]
+tunnel = [
+    "hyper",
+    "hyper/server",
+    "hyper/http2",
+    "dep:hickory-resolver",
+    "dep:hostname",
+    "dep:hyper-util",
+    "dep:jsonwebtoken",
+    "hyper-util/tokio",
+    "rand",
+    "dep:rustls",
+    "dep:rustls-native-certs",
+    "dep:socket2",
+    "dep:tokio-rustls",
+    "dep:tokio-util",
+    "dep:url",
+    "tokio/io-util",
+    "tokio/macros",
+    "tokio/net",
+    "tokio/rt",
+    "tokio/signal",
+    "uuid",
+    "uuid/v4",
+]
 
 [dependencies]
 bytes = "1.11"
 futures = "0.3"
+hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"], optional = true }
+hostname = { version = "0.4", optional = true }
 http = "1.4"
 http-body = "1.0.1"
 http-body-util = "0.1"
 hyper = { version = "1.8", optional = true}
-hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http2"], optional = true }
+hyper-util = { version = "0.1", default-features = false, optional = true }
+jsonwebtoken = { version = "10.3", default-features = false, optional = true }
 pin-project-lite = "0.2"
 percent-encoding = "2.3"
 rand = { version = "0.10", optional = true }
@@ -49,19 +130,29 @@ regress = "0.10"
 reqwest = { version = "0.13", optional = true }
 restate-sdk-macros = { version = "0.11", path = "macros" }
 restate-sdk-shared-core = { version = "=7.0.3", features = ["request_identity", "sha2_random_seed", "http"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 schemars = { version = "1.2", optional = true }
 serde = "1.0"
 serde_json = "1.0"
+socket2 = { version = "0.6", optional = true }
 thiserror = "2.0"
 tokio = { version = "1.49", default-features = false, features = ["sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"], optional = true }
+tokio-util = { version = "0.7", default-features = false, features = ["rt"], optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"], optional = true }
+url = { version = "2.5", optional = true }
 uuid = { version = "1.20", optional = true }
 http-serde = { version = "2.1.1", optional = true }
 aws_lambda_events = { version = "1.0", optional = true }
 lambda_runtime = { version = "1.0", optional = true }
 
 [dev-dependencies]
+base64 = "0.22"
+bs58 = "0.5"
+ed25519-dalek = "2"
+hyper = { version = "1.8", default-features = false, features = ["client", "http2"] }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 trybuild = "1.0"

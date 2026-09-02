@@ -207,11 +207,39 @@ impl Endpoint {
         req: http::Request<B>,
         options: HandleOptions,
     ) -> http::Response<ResponseBody> {
+        self.handle_with_verifier(req, options, &self.0.identity_verifier)
+    }
+
+    #[cfg(feature = "tunnel")]
+    pub(crate) fn handle_tunnel<
+        B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static,
+    >(
+        &self,
+        req: http::Request<B>,
+        identity_verifier: &IdentityVerifier,
+    ) -> http::Response<ResponseBody> {
+        self.handle_with_verifier(
+            req,
+            HandleOptions {
+                protocol_mode: ProtocolMode::BidiStream,
+            },
+            identity_verifier,
+        )
+    }
+
+    fn handle_with_verifier<
+        B: Body<Data = Bytes, Error: Into<BoxError> + Send> + Send + 'static,
+    >(
+        &self,
+        req: http::Request<B>,
+        options: HandleOptions,
+        identity_verifier: &IdentityVerifier,
+    ) -> http::Response<ResponseBody> {
         let (parts, body) = req.into_parts();
         let path = parts.uri.path();
         let headers = parts.headers;
 
-        if let Err(e) = self.0.identity_verifier.verify_identity(&headers, path) {
+        if let Err(e) = identity_verifier.verify_identity(&headers, path) {
             return error_response(ErrorInner::IdentityVerification(e));
         }
 
@@ -658,5 +686,61 @@ impl Body for InvocationRunnerBody {
 
     fn is_end_stream(&self) -> bool {
         self.end_stream
+    }
+}
+
+#[cfg(all(test, feature = "tunnel"))]
+mod tests {
+    use super::*;
+    use http::header::ACCEPT;
+
+    const IDENTITY_KEY: &str = "publickeyv1_ChjENKeMvCtRnqG2mrBK1HmPKufgFUc98K8B3ononQvp";
+
+    struct EmptyBody;
+
+    impl Body for EmptyBody {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            Poll::Ready(None)
+        }
+    }
+
+    fn discovery_request() -> http::Request<EmptyBody> {
+        http::Request::builder()
+            .uri("/discover")
+            .header(ACCEPT, DISCOVERY_CONTENT_TYPE_V2)
+            .body(EmptyBody)
+            .unwrap()
+    }
+
+    #[test]
+    fn tunnel_uses_only_its_identity_verifier() {
+        let endpoint = Endpoint::builder()
+            .identity_key(IDENTITY_KEY)
+            .unwrap()
+            .build();
+
+        let response = endpoint.handle_tunnel(discovery_request(), &IdentityVerifier::default());
+        assert_eq!(response.status(), 200);
+
+        let response = endpoint.handle(discovery_request());
+        assert_eq!(response.status(), 401);
+    }
+
+    #[test]
+    fn tunnel_applies_its_identity_verifier() {
+        let endpoint = Endpoint::builder().build();
+        let identity_verifier = IdentityVerifier::new(&[IDENTITY_KEY]).unwrap();
+
+        let response = endpoint.handle_tunnel(discovery_request(), &identity_verifier);
+        assert_eq!(response.status(), 401);
+
+        let response = endpoint.handle(discovery_request());
+        assert_eq!(response.status(), 200);
     }
 }

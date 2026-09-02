@@ -52,10 +52,18 @@ check-fmt:
     cargo fmt --all -- --check
 
 clippy: (_target-installed target)
-    cargo clippy {{ _target-option }} --all-targets --workspace -- -D warnings
+    cargo clippy {{ _target-option }} --all-targets --all-features --workspace -- -D warnings
 
 # Runs all lints (fmt, clippy, deny)
 lint: check-fmt clippy
+
+# Checks the SDK's minimal build and both tunnel crypto-provider configurations.
+check-sdk-features: (_target-installed target)
+    cargo check {{ _target-option }} -p restate-sdk --no-default-features
+    cargo check {{ _target-option }} -p restate-sdk --no-default-features --features tunnel,rust_crypto
+    cargo check {{ _target-option }} -p restate-sdk --no-default-features --features tunnel,aws_lc_rs
+    cargo check {{ _target-option }} -p restate-sdk --features tunnel --example tunnel
+    cargo tree -p restate-sdk --no-default-features
 
 build *flags: (_target-installed target)
     cargo build {{ _target-option }} {{ _features }} {{ flags }}
@@ -66,11 +74,16 @@ print-target:
 test: (_target-installed target)
     cargo nextest run {{ _target-option }} --all-features --workspace
 
-doctest:
-    cargo test --doc
+test-tunnel: (_target-installed target)
+    cargo test {{ _target-option }} -p restate-sdk --no-default-features --features tunnel,rust_crypto
+    cargo test {{ _target-option }} -p restate-sdk --no-default-features --features tunnel,aws_lc_rs
+    cargo test {{ _target-option }} -p restate-sdk --doc --features tunnel
+
+doctest: (_target-installed target)
+    cargo test {{ _target-option }} --doc --workspace --all-features
 
 # Runs lints and tests
-verify: lint test doctest
+verify: lint check-sdk-features test-tunnel test doctest
 
 udeps *flags:
     RUSTC_BOOTSTRAP=1 cargo udeps --all-features --all-targets {{ flags }}
