@@ -233,3 +233,81 @@ fn binds_without_serve() {
         .bind(MyWf)
         .build();
 }
+
+// ---------------------------------------------------------------------------
+// Generated ingress clients
+// ---------------------------------------------------------------------------
+
+/// Deliberately has the same name as the ingress generator's preferred executor type parameter.
+/// The generated parameter must be made fresh rather than shadowing this service generic.
+#[allow(dead_code)]
+struct GenericIngressNames<'a, r#__RestateIngressExecutor> {
+    _marker: std::marker::PhantomData<&'a r#__RestateIngressExecutor>,
+}
+
+#[service(name = "RenamedGenericIngress", client_visibility = "pub(crate)")]
+impl<'a, r#__RestateIngressExecutor> GenericIngressNames<'a, r#__RestateIngressExecutor>
+where
+    'a: 'static,
+    r#__RestateIngressExecutor: Greeting,
+{
+    // `new` remains a valid handler name because ingress clients use `from_client` as their
+    // constructor. The configured Restate handler name is independent of the Rust method name.
+    #[handler(name = "renamedNew")]
+    #[allow(dead_code, clippy::wrong_self_convention, clippy::new_ret_no_self)]
+    async fn new(&self, _ctx: Context<'_>, value: String) -> HandlerResult<String> {
+        Ok(value)
+    }
+}
+
+struct MacroTestExecutor;
+
+impl restate_sdk::ingress::RequestExecutor for MacroTestExecutor {
+    type Error = std::convert::Infallible;
+
+    async fn execute(
+        &self,
+        _request: http::Request<bytes::Bytes>,
+    ) -> Result<http::Response<bytes::Bytes>, Self::Error> {
+        Ok(http::Response::new(bytes::Bytes::new()))
+    }
+}
+
+fn macro_test_ingress_client() -> restate_sdk::ingress::Client<MacroTestExecutor> {
+    restate_sdk::ingress::Client::new("http://localhost:8080".parse().unwrap(), MacroTestExecutor)
+        .unwrap()
+}
+
+#[test]
+fn generated_ingress_clients_have_typed_natural_apis() {
+    // `MacroTestExecutor` intentionally does not implement Clone: cloning the base client must not
+    // impose that bound, and every generated client owns its clone.
+    let client = macro_test_ingress_client();
+
+    let service = MySvcIngressClient::from_client(client.clone());
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, String, String> =
+        service.greet("Ada".to_owned());
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, (), ()> = service.no_input();
+
+    let object = MyObjIngressClient::from_client(client.clone(), "object-key");
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, u64, u64> = object.add(1);
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, (), u64> = object.get();
+
+    let workflow = MyWfIngressClient::from_client(client.clone(), String::from("workflow-key"));
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, String, String> =
+        workflow.run("input".to_owned());
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, (), ()> = workflow.signal();
+
+    // Covers service lifetimes, type generics, a where-clause, configured visibility/name, the
+    // collision-free executor identifier, and a handler actually named `new`.
+    let generic =
+        GenericIngressNamesIngressClient::<'static, English, MacroTestExecutor>::from_client(
+            client.clone(),
+        );
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, String, String> =
+        generic.new("hello".to_owned());
+
+    // `client_visibility` applies to both generated client kinds.
+    let restricted = RestrictedIngressClient::from_client(client);
+    let _: restate_sdk::ingress::Request<MacroTestExecutor, (), ()> = restricted.ping();
+}

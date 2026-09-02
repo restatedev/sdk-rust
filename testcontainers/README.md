@@ -8,8 +8,11 @@
 
 The SDK uses [Testcontainers](https://rust.testcontainers.org/) to support integration testing using a Docker-deployed restate server.
 The `restate-sdk-testcontainers` crate provides a framework for initializing the test environment, and an integration test example in `testcontainers/tests/test_container.rs`.
+The typed HTTP client shown below requires the `reqwest-client` feature on `restate-sdk`.
 
 ```rust
+use restate_sdk::ingress::ReqwestClient;
+
 #[tokio::test]
 async fn test_container() {
     tracing_subscriber::fmt::fmt()
@@ -18,40 +21,36 @@ async fn test_container() {
 
     let endpoint = Endpoint::builder().bind(MyService).build();
 
-    // simple test container intialization with default configuration
-    //let test_container = TestContainer::default().start(endpoint).await.unwrap();
+    // simple test environment initialization with default configuration
+    // let test_environment = TestEnvironment::default().start(endpoint).await.unwrap();
 
-    // custom test container initialization with builder
-    let test_container = TestContainer::builder()
-        // optional passthrough logging from the resstate server testcontainer
+    // custom test environment initialization
+    let test_environment = TestEnvironment::new()
+        // optional passthrough logging from the Restate server testcontainer
         // prints container logs to tracing::info level
         .with_container_logging()
         .with_container(
             "docker.io/restatedev/restate".to_string(),
             "latest".to_string(),
         )
-        .build()
         .start(endpoint)
         .await
         .unwrap();
 
-    let ingress_url = test_container.ingress_url();
+    let ingress_url = test_environment.ingress_url();
 
-    // call container ingress url for /MyService/my_handler
-    let response = reqwest::Client::new()
-        .post(format!("{}/MyService/my_handler", ingress_url))
-        .header("Accept", "application/json")
-        .header("Content-Type", "*/*")
-        .header("idempotency-key", "abc")
-        .send()
+    let client = ReqwestClient::connect(ingress_url.parse().unwrap()).unwrap();
+    let client = MyServiceIngressClient::from_client(client);
+
+    let response = client
+        .my_handler()
+        .idempotency_key("abc")
+        .call()
         .await
         .unwrap();
+    let output = response.into_body().unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-
-    info!(
-        "/MyService/my_handler response: {:?}",
-        response.text().await.unwrap()
-    );
+    assert_eq!(output, "hello!");
+    info!("MyService/my_handler response: {output:?}");
 }
 ```

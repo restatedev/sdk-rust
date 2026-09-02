@@ -12,6 +12,7 @@
 //! applied to an inherent `impl` block, with handlers annotated `#[handler]`.
 
 use crate::ast::{ServiceType, extract_handler_result_parameter};
+use syn::ext::IdentExt;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
@@ -499,6 +500,13 @@ fn parse_handler(
     documentation: Option<String>,
 ) -> Result<StructHandler> {
     let sig = &f.sig;
+
+    if sig.ident.unraw() == "from_client" {
+        return Err(Error::new_spanned(
+            &sig.ident,
+            "handler name `from_client` is reserved for the generated ingress client constructor",
+        ));
+    }
 
     if sig.asyncness.is_none() {
         return Err(Error::new_spanned(
