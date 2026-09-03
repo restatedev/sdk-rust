@@ -3,7 +3,7 @@ name = "restate-sdk-wasm-check"
 version = "0.0.0"
 edition = "2024"
 publish = false
-description = "CI-only: wasm32-unknown-unknown lint + no-std-clock binary check for restate-sdk. See src/lib.rs."
+description = "CI-only: wasm32-unknown-unknown no-std-clock binary check for restate-sdk. See src/lib.rs."
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -13,7 +13,3 @@ restate-sdk = { path = "..", default-features = false, features = ["rand", "uuid
 bytes = "1"
 http = "1"
 http-body-util = "0.1"
-
-[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
-getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }   # jsonwebtoken (request identity)
-getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] } # rand 0.10

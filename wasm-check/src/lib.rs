@@ -1,16 +1,12 @@
 //! CI-only crate; see Cargo.toml.
 //!
-//! Two jobs:
-//!
-//! 1. Supply the `getrandom` backends so `cargo clippy -p restate-sdk -p
-//!    restate-sdk-wasm-check --target wasm32-unknown-unknown` resolves, which
-//!    lets the `disallowed-methods` lint in `wasm-check/clippy.toml` (selected
-//!    via `CLIPPY_CONF_DIR` in `just check-wasm32`) run against the SDK.
-//! 2. Export one function that reaches every clock-touching SDK path (`ctx.run`,
-//!    `sleep`, `send_after`, `drain_input`), so a release build of this crate for
-//!    wasm32 retains them and the binary can be searched for the
-//!    "time not implemented on this platform" panic that `std::time` compiles to
-//!    on that target. Unlike the lint, this sees through dependencies.
+//! Exports one function that reaches every clock-touching SDK path (`ctx.run`,
+//! `sleep`, `send_after`, `drain_input`), so a release build of this crate for
+//! wasm32-unknown-unknown retains them and the binary can be searched for the
+//! "time not implemented on this platform" / "there is no reactor running" panics
+//! that `std::time` / `tokio::time` compile to on that target. Unlike the
+//! `disallowed-methods` lint (`wasm-check/clippy.toml`, selected via
+//! `CLIPPY_CONF_DIR` in `just check-wasm32`), this sees through dependencies.
 
 use std::time::Duration;
 

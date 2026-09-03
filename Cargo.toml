@@ -148,6 +148,17 @@ http-serde = { version = "2.1.1", optional = true }
 aws_lambda_events = { version = "1.0", optional = true }
 lambda_runtime = { version = "1.0", optional = true }
 
+# wasm32-unknown-unknown (browsers, Cloudflare Workers, ...) has no std clock and no OS
+# entropy source: `std::time::{Instant, SystemTime}::now()` abort at runtime and
+# `getrandom` needs a backend selected. `web-time` provides std-compatible clocks backed
+# by `performance.now()` / `Date.now()`. The getrandom backends cover jsonwebtoken via
+# shared-core (0.2) and rand 0.10 (0.4); consumers can still override the latter with
+# `--cfg getrandom_backend="..."`. Guarded by `just check-wasm32`.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+web-time = "1.1"
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+
 [dev-dependencies]
 base64 = "0.22"
 bs58 = "0.5"
