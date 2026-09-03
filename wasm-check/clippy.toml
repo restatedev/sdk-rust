@@ -1,0 +1,13 @@
+# Clocks that panic on wasm32-unknown-unknown ("time not implemented on this
+# platform") or need a Tokio runtime. Deliberately NOT at the repo root: clippy
+# config applies to every crate beneath it, and the SDK's native tests use these
+# clocks legitimately. `just check-wasm32` selects this file via CLIPPY_CONF_DIR,
+# so the ban is active only when linting for that target.
+disallowed-methods = [
+  { path = "std::time::Instant::now",      reason = "panics on wasm32-unknown-unknown; use web_time::Instant" },
+  { path = "std::time::SystemTime::now",   reason = "panics on wasm32-unknown-unknown; use web_time::SystemTime" },
+  { path = "tokio::time::timeout",         reason = "needs a Tokio runtime; cfg it off or use a JS timer on wasm32-unknown-unknown" },
+  { path = "tokio::time::sleep",           reason = "needs a Tokio runtime; cfg it off or use a JS timer on wasm32-unknown-unknown" },
+  { path = "tokio::time::interval",        reason = "needs a Tokio runtime" },
+  { path = "tokio::time::Instant::now",    reason = "panics on wasm32-unknown-unknown" },
+]
