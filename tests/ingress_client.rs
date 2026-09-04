@@ -1485,7 +1485,7 @@ async fn workflow_handle_collision_renames_user_method() {
     let (client, capture) = client("http://example.test");
     let workflow = HandleNamedWorkflowIngressClient::from_client(client, "k");
 
-    // The user's `handle` handler is reachable via the renamed `handle_handle` method and still
+    // The user's `handle` handler is reachable via the renamed `_handle` method and still
     // targets the `handle` handler on the wire.
     capture.respond(invocation_response(
         StatusCode::OK,
@@ -1493,7 +1493,7 @@ async fn workflow_handle_collision_renames_user_method() {
         br#""echo""#.as_slice(),
     ));
     let echoed = workflow
-        .handle_handle("echo".to_owned())
+        ._handle("echo".to_owned())
         .call()
         .await
         .unwrap()
