@@ -491,6 +491,18 @@ fn ingress_client(svc: &StructService) -> TokenStream2 {
             res_ty,
             input,
         } = handler_client_parts(handler);
+
+        // The workflow ingress client injects a `handle` lookup method (see below). If the user
+        // named a handler `handle`, its generated method is renamed to `handle_handle` so the
+        // injected lookup method keeps the plain `handle` name. The Restate handler name on the
+        // wire is unchanged.
+        let method_ident =
+            if svc.service_ty == ServiceType::Workflow && handler_ident.unraw() == "handle" {
+                quote::format_ident!("_handle")
+            } else {
+                handler_ident.clone()
+            };
+
         let request_target = match svc.service_ty {
             ServiceType::Service => quote! {
                 ::restate_sdk::ingress::RequestTarget::service(
@@ -515,29 +527,81 @@ fn ingress_client(svc: &StructService) -> TokenStream2 {
         };
 
         quote! {
-            #vis fn #handler_ident(
+            #vis fn #method_ident(
                 &self,
                 #argument
             ) -> ::restate_sdk::ingress::Request<#executor_ident, #argument_ty, #res_ty> {
-                self.client.request(#request_target, #input)
+                let request = self.client.request(#request_target, #input);
+                match &self.scope {
+                    ::core::option::Option::Some(scope) => {
+                        request.scope(::std::string::String::clone(scope))
+                    }
+                    ::core::option::Option::None => request,
+                }
             }
         }
     });
+
+    // Workflows additionally expose a `handle()` lookup: it resolves the invocation handle for this
+    // workflow (keyed by the client's key, in the client's scope) through the ingress lookup path.
+    // The handle is typed to the workflow's exclusive (`run`) handler output, so `attach`/`output`
+    // decode that result.
+    let workflow_handle_fn = if svc.service_ty == ServiceType::Workflow {
+        let run_res_ty = svc
+            .handlers
+            .iter()
+            .find(|handler| !handler.is_shared)
+            .map(|handler| {
+                let ty = &handler.output_ok;
+                quote! { #ty }
+            })
+            .unwrap_or_else(|| quote! { () });
+        let handle_doc = format!(
+            "Looks up the [`InvocationHandle`](::restate_sdk::ingress::InvocationHandle) for this \
+             `{}` workflow invocation, keyed by the client's key. The lookup is scoped to the \
+             client's scope, if any (see `scoped_client`).",
+            svc.self_ident
+        );
+        quote! {
+            #[doc = #handle_doc]
+            #vis async fn handle(
+                &self,
+            ) -> ::core::result::Result<
+                ::restate_sdk::ingress::InvocationHandle<#executor_ident, #run_res_ty>,
+                ::restate_sdk::ingress::ClientError,
+            > {
+                self.client
+                    .lookup_workflow(
+                        #service_literal,
+                        self.key.clone(),
+                        ::core::clone::Clone::clone(&self.scope),
+                    )
+                    .await
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     let doc_msg = format!(
         "Client to invoke the `{}` service through Restate ingress.",
         svc.self_ident
     );
+    let from_client_doc = "Builds a client that issues unscoped requests.";
+    let scoped_client_doc = "Builds a client whose requests (and workflow `handle` lookups) all \
+                             run in the given Restate Cloud scope.";
 
     quote! {
         #[doc = #doc_msg]
         #vis struct #client_ident #client_impl_generics #client_where {
             client: ::restate_sdk::ingress::Client<#executor_ident>,
             #key_field
+            scope: ::core::option::Option<::std::string::String>,
             #marker_field
         }
 
         impl #client_impl_generics #client_ident #client_ty_generics #client_where {
+            #[doc = #from_client_doc]
             #vis fn from_client(
                 client: ::restate_sdk::ingress::Client<#executor_ident>,
                 #constructor_argument
@@ -545,11 +609,28 @@ fn ingress_client(svc: &StructService) -> TokenStream2 {
                 Self {
                     client,
                     #key_init
+                    scope: ::core::option::Option::None,
+                    #marker_init
+                }
+            }
+
+            #[doc = #scoped_client_doc]
+            #vis fn scoped_client(
+                client: ::restate_sdk::ingress::Client<#executor_ident>,
+                #constructor_argument
+                scope: impl ::core::convert::Into<::std::string::String>,
+            ) -> Self {
+                Self {
+                    client,
+                    #key_init
+                    scope: ::core::option::Option::Some(scope.into()),
                     #marker_init
                 }
             }
 
             #( #handler_fns )*
+
+            #workflow_handle_fn
         }
     }
 }
