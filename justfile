@@ -57,6 +57,27 @@ clippy: (_target-installed target)
 # Runs all lints (fmt, clippy, deny)
 lint: check-fmt clippy
 
+# wasm32-unknown-unknown has no std clock and no Tokio runtime: `std::time::{Instant,
+# SystemTime}::now()` and `tokio::time::*` compile but abort at runtime. Two guards:
+# the `disallowed-methods` lint in wasm-check/clippy.toml over the SDK's own source
+# (selected via CLIPPY_CONF_DIR so native clippy is unaffected), and a release build
+# of `wasm-check` — which reaches every SDK path — searched for the panic strings
+# those calls compile to, catching them inside dependencies too.
+# Run by its own CI job, not by `verify`.
+check-wasm32: (_target-installed "wasm32-unknown-unknown")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CLIPPY_CONF_DIR="$PWD/wasm-check" cargo clippy --target wasm32-unknown-unknown -p restate-sdk -p restate-sdk-wasm-check \
+        --no-default-features --features restate-sdk/rand,restate-sdk/uuid,restate-sdk/rust_crypto -- -D warnings
+    cargo build --release --target wasm32-unknown-unknown -p restate-sdk-wasm-check
+    wasm=target/wasm32-unknown-unknown/release/restate_sdk_wasm_check.wasm
+    for needle in 'time not implemented on this platform' 'there is no reactor running'; do
+        if grep -a -q "$needle" "$wasm"; then
+            echo "error: '$needle' reachable in $wasm — a std::time / tokio::time clock is on a wasm32 path" >&2
+            exit 1
+        fi
+    done
+
 # Checks the SDK's minimal build and both tunnel crypto-provider configurations.
 check-sdk-features: (_target-installed target)
     cargo check {{ _target-option }} -p restate-sdk --no-default-features

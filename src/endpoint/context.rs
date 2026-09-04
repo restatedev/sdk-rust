@@ -27,7 +27,14 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
+// wasm32-unknown-unknown has no std clock: `std::time::{Instant, SystemTime}::now()`
+// abort with "time not implemented on this platform". `web_time` exposes the same API
+// backed by `performance.now()` / `Date.now()`. Guarded by `just check-wasm32`.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use std::time::{Instant, SystemTime};
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+use web_time::{Instant, SystemTime};
 
 pub struct ContextInternalInner {
     pub(crate) vm: CoreVM,
@@ -879,7 +886,7 @@ impl ContextInternal {
     /// This ensures we don't close the HTTP/2 response stream before the request
     /// stream is done, which causes connection errors on proxies like Google Cloud Run.
     pub(crate) async fn drain_input(&self) -> Result<(), ErrorInner> {
-        tokio::time::timeout(Duration::from_secs(60), async {
+        let drain = async {
             loop {
                 let result = poll_fn(|cx| {
                     let mut inner = must_lock!(self.inner);
@@ -892,13 +899,22 @@ impl ContextInternal {
                     Some(Err(e)) => return Err(ErrorInner::InputDrain(e)),
                 }
             }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(ErrorInner::InputDrain(
-                "Timed out draining input stream after 60s".into(),
-            ))
-        })
+        };
+
+        // wasm32-unknown-unknown has no Tokio runtime to drive the timer, so the drain
+        // is bounded by the host's request lifetime there instead.
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        let drain = async {
+            tokio::time::timeout(Duration::from_secs(60), drain)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(ErrorInner::InputDrain(
+                        "Timed out draining input stream after 60s".into(),
+                    ))
+                })
+        };
+
+        drain.await
     }
 
     pub(super) fn fail(&self, e: Error) {
