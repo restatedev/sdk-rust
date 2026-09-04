@@ -81,6 +81,12 @@ http_server = [
     "tokio/signal",
     "tokio/macros",
 ]
+opentelemetry = [
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-http",
+    "dep:tracing-opentelemetry",
+    "dep:opentelemetry",
+]
 tracing-span-filter = ["dep:tracing-subscriber"]
 lambda = [ "dep:http-serde", "dep:lambda_runtime", "dep:aws_lambda_events"]
 # jsonwebtoken crypto backend pass-through for request identity verification.
@@ -147,6 +153,11 @@ uuid = { version = "1.20", optional = true }
 http-serde = { version = "2.1.1", optional = true }
 aws_lambda_events = { version = "1.0", optional = true }
 lambda_runtime = { version = "1.0", optional = true }
+# Opentelemetry deps
+opentelemetry-http = { version = "0.32.0", optional = true, default-features = false }
+opentelemetry_sdk = { version = "0.32.1", optional = true, default-features = false, features = ["trace"] }
+tracing-opentelemetry = { version = "0.33.0", optional = true, default-features = false }
+opentelemetry = { version = "0.32.0", default-features = false, optional = true }
 
 [dev-dependencies]
 base64 = "0.22"
