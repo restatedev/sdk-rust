@@ -7,14 +7,16 @@ license = "MIT"
 repository = "https://github.com/restatedev/sdk-rust"
 rust-version = "1.90.0"
 
-
 [dependencies]
 anyhow = "1.0"
 futures = "0.3"
 reqwest = { version= "0.13", features = ["json"] }
-restate-sdk = { version = "0.12.0", path = "../", features = ["reqwest-client"] }
+restate-sdk = { version = "0.12.0", path = "../", features = ["opentelemetry", "reqwest-client"] }
 serde = "1.0"
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
 testcontainers = { version = "0.27", features = ["http_wait"] }
 tokio = "1.49"
 tracing = "0.1"
+tracing-opentelemetry = "0.33"
 tracing-subscriber = "0.3"
