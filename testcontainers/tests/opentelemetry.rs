@@ -22,6 +22,9 @@ struct TraceService;
 
 #[service]
 impl TraceService {
+    /// This handler fails once to get a second attempt for the same invocation from the restate
+    /// server, allowing the test to verify that the trace_id is propagated to the handler and also
+    /// is the same on subsequent retries of the same invocation.
     #[handler]
     async fn retry_trace_id(&self, _ctx: Context<'_>) -> HandlerResult<Json<Vec<String>>> {
         let trace_id = tracing::Span::current()
@@ -33,10 +36,10 @@ impl TraceService {
         retry_trace_ids().push(trace_id);
 
         if RETRY_ATTEMPTS.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(std::io::Error::other("retry once").into());
+            Err(std::io::Error::other("retry once").into())
+        } else {
+            Ok(Json(retry_trace_ids().clone()))
         }
-
-        Ok(Json(retry_trace_ids().clone()))
     }
 }
 
