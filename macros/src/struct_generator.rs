@@ -493,7 +493,7 @@ fn ingress_client(svc: &StructService) -> TokenStream2 {
         } = handler_client_parts(handler);
 
         // The workflow ingress client injects a `handle` lookup method (see below). If the user
-        // named a handler `handle`, its generated method is renamed to `handle_handle` so the
+        // named a handler `handle`, its generated method is renamed to `_handle` so the
         // injected lookup method keeps the plain `handle` name. The Restate handler name on the
         // wire is unchanged.
         let method_ident =
