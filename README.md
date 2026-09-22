@@ -98,6 +98,26 @@ Generated object and workflow ingress clients additionally take their key in `fr
 generic `Client<E>` and generated clients are available without `reqwest-client`; implement
 `RequestExecutor` to use another buffered HTTP transport.
 
+Generated workflow ingress clients also expose `handle()`, which resolves the invocation handle for
+the workflow keyed by the client's key. Use it to re-attach to a running or completed workflow by key
+alone, without persisting the invocation ID returned at submission time:
+
+```rust
+let workflow = MyWorkflowIngressClient::from_client(client, "order-42");
+workflow.run("input".to_owned()).send().await.unwrap();
+
+// Later, from anywhere, re-attach by key and await the result.
+let handle = workflow.handle().await.unwrap();
+let result = handle.attach().await.unwrap().into_body();
+```
+
+To target a Restate Cloud scope, build the client with `scoped_client` instead of `from_client`.
+Every request the scoped client issues (and its workflow `handle()` lookup) runs in that scope:
+
+```rust
+let greeter = GreeterIngressClient::scoped_client(client, "prod");
+```
+
 ## Connecting through a Restate Cloud tunnel
 
 The optional Unix-only in-process tunnel lets a service connect outbound to Restate Cloud, so the

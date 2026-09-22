@@ -245,6 +245,44 @@ impl<E: RequestExecutor> Client<E> {
         }
     }
 
+    /// Looks up the invocation handle for a workflow by name and key.
+    ///
+    /// `scope` optionally restricts the lookup to a Restate Cloud scope; pass `None` outside Cloud.
+    pub async fn lookup_workflow<Res>(
+        &self,
+        workflow_name: impl Into<String>,
+        workflow_key: impl Into<String>,
+        scope: Option<String>,
+    ) -> Result<InvocationHandle<E, Res>, ClientError> {
+        let body = serde_json::to_vec(&LookupRequest::Workflow {
+            workflow_name: workflow_name.into(),
+            workflow_key: workflow_key.into(),
+            scope,
+        })
+        .map_err(|source| ClientError::Serialization {
+            source: Box::new(source),
+        })?;
+
+        let response = self
+            .post_json("/restate/lookup".to_owned(), body.into())
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(status_error(response));
+        }
+
+        let lookup: LookupResponse = match serde_json::from_slice(response.body()) {
+            Ok(lookup) => lookup,
+            Err(source) => {
+                return Err(ClientError::PayloadDecode {
+                    source: Box::new(source),
+                    response: Box::new(response),
+                });
+            }
+        };
+
+        Ok(self.invocation_handle(lookup.invocation_id))
+    }
+
     fn uri(&self, path_and_query: String) -> Result<Uri, ClientError> {
         let path_and_query = PathAndQuery::try_from(path_and_query).map_err(request_error)?;
         Uri::builder()
@@ -279,6 +317,22 @@ impl<E: RequestExecutor> Client<E> {
             .body(Bytes::new())
             .map_err(request_error)?;
         *request.headers_mut() = self.default_headers.as_ref().clone();
+        self.execute(request).await
+    }
+
+    async fn post_json(
+        &self,
+        path: String,
+        body: Bytes,
+    ) -> Result<HttpResponse<Bytes>, ClientError> {
+        let mut request = HttpRequest::builder()
+            .method(Method::POST)
+            .uri(self.uri(self.path(&path))?)
+            .body(body)
+            .map_err(request_error)?;
+        let headers = request.headers_mut();
+        *headers = self.default_headers.as_ref().clone();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         self.execute(request).await
     }
 }
@@ -675,6 +729,27 @@ impl<E, Res> CallResponse<E, Res> {
 pub enum SendStatus {
     Accepted,
     PreviouslyAccepted,
+}
+
+#[derive(serde::Serialize)]
+#[serde(
+    tag = "target",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum LookupRequest {
+    Workflow {
+        workflow_name: String,
+        workflow_key: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LookupResponse {
+    invocation_id: InvocationId,
 }
 
 #[derive(serde::Deserialize)]

@@ -1120,6 +1120,105 @@ async fn attach_and_output_errors_retain_raw_responses() {
     );
 }
 
+#[tokio::test]
+async fn workflow_handle_resolves_invocation_id_through_lookup() {
+    let capture = Capture::default();
+    let client = Client::builder(
+        "http://example.test/proxy/".parse().unwrap(),
+        capture.executor(),
+    )
+    .default_header(
+        HeaderName::from_static("x-default"),
+        HeaderValue::from_static("on-every-request"),
+    )
+    .build()
+    .unwrap();
+
+    capture.respond(raw_response(
+        StatusCode::OK,
+        serde_json::json!({ "invocationId": "inv_workflow_123" }).to_string(),
+    ));
+
+    let handle = client
+        .lookup_workflow::<String>("MyWorkflow", "wf-key /\u{e9}", None)
+        .await
+        .unwrap();
+    assert_eq!(handle.invocation_id().as_str(), "inv_workflow_123");
+
+    // A scoped lookup adds the `scope` field to the body.
+    capture.respond(raw_response(
+        StatusCode::OK,
+        serde_json::json!({ "invocationId": "inv_workflow_456" }).to_string(),
+    ));
+    let scoped = client
+        .lookup_workflow::<String>("MyWorkflow", "wf-key", Some("my-scope".to_owned()))
+        .await
+        .unwrap();
+    assert_eq!(scoped.invocation_id().as_str(), "inv_workflow_456");
+
+    let requests = capture.take_requests();
+    assert_eq!(requests.len(), 2);
+
+    let request = &requests[0];
+    assert_eq!(request.method(), Method::POST);
+    assert_eq!(request.uri().path(), "/proxy/restate/lookup");
+    assert_eq!(request.headers()[CONTENT_TYPE], "application/json");
+    assert_eq!(request.headers()["x-default"], "on-every-request");
+    let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "target": "workflow",
+            "workflowName": "MyWorkflow",
+            "workflowKey": "wf-key /\u{e9}",
+        })
+    );
+
+    let scoped_body: serde_json::Value = serde_json::from_slice(requests[1].body()).unwrap();
+    assert_eq!(
+        scoped_body,
+        serde_json::json!({
+            "target": "workflow",
+            "workflowName": "MyWorkflow",
+            "workflowKey": "wf-key",
+            "scope": "my-scope",
+        })
+    );
+}
+
+#[tokio::test]
+async fn workflow_handle_surfaces_lookup_errors() {
+    let (client, capture) = client("http://example.test");
+
+    let body = b"workflow not found";
+    capture.respond(invocation_response(
+        StatusCode::NOT_FOUND,
+        "ignored",
+        body.as_slice(),
+    ));
+    let error = expect_error(
+        client
+            .lookup_workflow::<u64>("MyWorkflow", "missing", None)
+            .await,
+    );
+    assert!(matches!(error, ClientError::Status { .. }));
+    assert_preserved_response(error, StatusCode::NOT_FOUND, body);
+
+    let malformed = b"not-json";
+    capture.respond(invocation_response(
+        StatusCode::OK,
+        "ignored",
+        malformed.as_slice(),
+    ));
+    let error = expect_error(
+        client
+            .lookup_workflow::<u64>("MyWorkflow", "key", None)
+            .await,
+    );
+    assert!(matches!(error, ClientError::PayloadDecode { .. }));
+    assert_preserved_response(error, StatusCode::OK, malformed);
+}
+
 #[allow(dead_code)]
 struct GeneratedService;
 
@@ -1170,6 +1269,28 @@ impl GeneratedWorkflow {
     #[handler(name = "notifySignal")]
     async fn notify(&self, _context: SharedWorkflowContext<'_>) -> HandlerResult<()> {
         Ok(())
+    }
+}
+
+// A workflow whose handler is literally named `handle`, colliding with the injected lookup method.
+#[allow(dead_code)]
+struct HandleNamedWorkflow;
+
+#[allow(dead_code)]
+#[restate_sdk::workflow(name = "HandleNamedWorkflow")]
+impl HandleNamedWorkflow {
+    #[handler]
+    async fn run(&self, _context: WorkflowContext<'_>) -> HandlerResult<()> {
+        Ok(())
+    }
+
+    #[handler]
+    async fn handle(
+        &self,
+        _context: SharedWorkflowContext<'_>,
+        value: String,
+    ) -> HandlerResult<String> {
+        Ok(value)
     }
 }
 
@@ -1249,6 +1370,151 @@ async fn generated_clients_emit_configured_service_object_and_workflow_targets()
     assert!(requests[1].body().is_empty());
     assert_eq!(requests[2].body().as_ref(), b"7");
     assert_eq!(requests[3].body().as_ref(), br#""start""#);
+}
+
+#[tokio::test]
+async fn generated_workflow_client_exposes_handle_lookup() {
+    let (client, capture) = client("http://example.test");
+    let workflow = GeneratedWorkflowIngressClient::from_client(client.clone(), "workflow/key");
+
+    capture.respond(raw_response(
+        StatusCode::OK,
+        serde_json::json!({ "invocationId": "wf-inv" }).to_string(),
+    ));
+    let handle = workflow.handle().await.unwrap();
+    assert_eq!(handle.invocation_id().as_str(), "wf-inv");
+
+    // The handle is typed to the workflow's `run` output (String), so attach decodes a String.
+    capture.respond(invocation_response(
+        StatusCode::OK,
+        "ignored",
+        br#""done""#.as_slice(),
+    ));
+    assert_eq!(handle.attach().await.unwrap().into_body(), "done");
+
+    // A scoped client forwards its scope to the lookup body.
+    let scoped_workflow =
+        GeneratedWorkflowIngressClient::scoped_client(client, "workflow/key", "prod");
+    capture.respond(raw_response(
+        StatusCode::OK,
+        serde_json::json!({ "invocationId": "wf-inv-2" }).to_string(),
+    ));
+    let scoped_handle = scoped_workflow.handle().await.unwrap();
+    assert_eq!(scoped_handle.invocation_id().as_str(), "wf-inv-2");
+
+    let requests = capture.take_requests();
+    assert_eq!(requests[0].method(), Method::POST);
+    assert_eq!(requests[0].uri().path(), "/restate/lookup");
+    let body: serde_json::Value = serde_json::from_slice(requests[0].body()).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "target": "workflow",
+            "workflowName": "ConfiguredWorkflow",
+            "workflowKey": "workflow/key",
+        })
+    );
+    assert_eq!(requests[1].method(), Method::GET);
+    assert_eq!(requests[1].uri().path(), "/restate/attach/wf-inv");
+    let scoped: serde_json::Value = serde_json::from_slice(requests[2].body()).unwrap();
+    assert_eq!(
+        scoped,
+        serde_json::json!({
+            "target": "workflow",
+            "workflowName": "ConfiguredWorkflow",
+            "workflowKey": "workflow/key",
+            "scope": "prod",
+        })
+    );
+}
+
+#[tokio::test]
+async fn scoped_client_prefixes_requests_with_its_scope() {
+    let (client, capture) = client("http://example.test");
+
+    // A scoped service client routes through the `/restate/scope/{scope}/...` prefix.
+    capture.respond(invocation_response(
+        StatusCode::OK,
+        "svc",
+        br#""ok""#.as_slice(),
+    ));
+    let service = GeneratedServiceIngressClient::scoped_client(client.clone(), "prod");
+    service
+        .new("in".to_owned())
+        .call()
+        .await
+        .unwrap()
+        .into_body()
+        .unwrap();
+
+    // Objects and workflows carry both their key and the scope.
+    capture.respond(invocation_response(StatusCode::OK, "obj", b"7".as_slice()));
+    let object = GeneratedObjectIngressClient::scoped_client(client.clone(), "object/key", "prod");
+    object.read(7).call().await.unwrap().into_body().unwrap();
+
+    capture.respond(invocation_response(
+        StatusCode::OK,
+        "wf",
+        br#""done""#.as_slice(),
+    ));
+    let workflow = GeneratedWorkflowIngressClient::scoped_client(client, "workflow/key", "prod");
+    workflow
+        .run("in".to_owned())
+        .call()
+        .await
+        .unwrap()
+        .into_body()
+        .unwrap();
+
+    let requests = capture.take_requests();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.uri().path())
+            .collect::<Vec<_>>(),
+        [
+            "/restate/scope/prod/call/ConfiguredService/renamedNew",
+            "/restate/scope/prod/call/ConfiguredObject/object%2Fkey/readValue",
+            "/restate/scope/prod/call/ConfiguredWorkflow/workflow%2Fkey/run",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn workflow_handle_collision_renames_user_method() {
+    let (client, capture) = client("http://example.test");
+    let workflow = HandleNamedWorkflowIngressClient::from_client(client, "k");
+
+    // The user's `handle` handler is reachable via the renamed `_handle` method and still
+    // targets the `handle` handler on the wire.
+    capture.respond(invocation_response(
+        StatusCode::OK,
+        "ignored",
+        br#""echo""#.as_slice(),
+    ));
+    let echoed = workflow
+        ._handle("echo".to_owned())
+        .call()
+        .await
+        .unwrap()
+        .into_body()
+        .unwrap();
+    assert_eq!(echoed, "echo");
+
+    // The injected lookup method occupies the plain `handle` name.
+    capture.respond(raw_response(
+        StatusCode::OK,
+        serde_json::json!({ "invocationId": "hc-inv" }).to_string(),
+    ));
+    let handle = workflow.handle().await.unwrap();
+    assert_eq!(handle.invocation_id().as_str(), "hc-inv");
+
+    let requests = capture.take_requests();
+    assert_eq!(
+        requests[0].uri().path(),
+        "/restate/call/HandleNamedWorkflow/k/handle"
+    );
+    assert_eq!(requests[1].uri().path(), "/restate/lookup");
 }
 
 #[tokio::test]
