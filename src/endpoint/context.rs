@@ -16,8 +16,8 @@ use futures::{FutureExt, TryFutureExt};
 use pin_project_lite::pin_project;
 use restate_sdk_shared_core::{
     AttachInvocationTarget, AwaitResponse, AwakeableHandle, CoreVM, Error as CoreError, Header,
-    NonEmptyValue, NotificationHandle, OnMaxAttempts, PayloadOptions, RetryPolicy, RunExitResult,
-    RunHandle, Target, TerminalFailure, UnresolvedFuture, VM, Value,
+    Input, NonEmptyValue, NotificationHandle, OnMaxAttempts, PayloadOptions, RetryPolicy,
+    RunExitResult, RunHandle, Target, TerminalFailure, UnresolvedFuture, VM, Value,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -38,21 +38,26 @@ pub struct ContextInternalInner {
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
     /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
     pub(super) span_replaying_field_state: bool,
+    /// The input is pre-read before invocation and then put into the Context for one-time consumption
+    input: Option<Result<Input, Error>>,
 }
 
 impl ContextInternalInner {
     fn new(
         vm: CoreVM,
+        input: Result<Input, Error>,
         read: InputReceiver,
         write: OutputSender,
         handler_state: HandlerStateNotifier,
+        span_replaying_field_state: bool,
     ) -> Self {
         Self {
             vm,
+            input: Some(input),
             read,
             write,
             handler_state,
-            span_replaying_field_state: false,
+            span_replaying_field_state,
         }
     }
 
@@ -173,20 +178,24 @@ pub struct ContextInternal {
 impl ContextInternal {
     pub(super) fn new(
         vm: CoreVM,
+        input: Result<Input, Error>,
         svc_name: String,
         handler_name: String,
         read: InputReceiver,
         write: OutputSender,
         handler_state: HandlerStateNotifier,
+        span_replaying_field_state: bool,
     ) -> Self {
         Self {
             svc_name,
             handler_name,
             inner: Arc::new(Mutex::new(ContextInternalInner::new(
                 vm,
+                input,
                 read,
                 write,
                 handler_state,
+                span_replaying_field_state,
             ))),
         }
     }
@@ -201,41 +210,41 @@ impl ContextInternal {
 
     pub fn input<T: Deserialize>(&self) -> impl Future<Output = (T, InputMetadata)> {
         let mut inner_lock = must_lock!(self.inner);
-        let input_result =
-            inner_lock
-                .vm
-                .sys_input()
-                .map_err(ErrorInner::VM)
-                .map(|mut raw_input| {
-                    let headers = http::HeaderMap::<String>::try_from(
-                        &raw_input
-                            .headers
-                            .into_iter()
-                            .map(|h| (h.key.to_string(), h.value.to_string()))
-                            .collect::<HashMap<String, String>>(),
-                    )
-                    .map_err(|e| {
-                        TerminalError::new_with_code(400, format!("Cannot decode headers: {e:?}"))
-                    })?;
-
-                    Ok::<_, TerminalError>((
-                        T::deserialize(&mut (raw_input.input)).map_err(|e| {
-                            TerminalError::new_with_code(
-                                400,
-                                format!("Cannot decode input payload: {e:?}"),
-                            )
-                        })?,
-                        InputMetadata {
-                            invocation_id: raw_input.invocation_id,
-                            random_seed: raw_input.random_seed,
-                            key: raw_input.key,
-                            headers,
-                            scope: raw_input.scope,
-                            limit_key: raw_input.limit_key,
-                            idempotency_key: raw_input.idempotency_key,
-                        },
-                    ))
-                });
+        // It is impossible for `input` to be `None` here, however rather than inserting a footgun
+        // with `Option::expect` that could bring trouble later down the road we register an Error and
+        // return
+        let Some(raw_input) = inner_lock.input.take() else {
+            inner_lock.fail(ErrorInner::InputAlreadyConsumed.into());
+            drop(inner_lock);
+            return Either::Right(TrapFuture::default());
+        };
+        let input_result = raw_input.map(|mut raw_input| {
+            http::HeaderMap::<String>::try_from(
+                &raw_input
+                    .headers
+                    .into_iter()
+                    .map(|h| (h.key.to_string(), h.value.to_string()))
+                    .collect::<HashMap<String, String>>(),
+            )
+            .map_err(|e| TerminalError::new_with_code(400, format!("Cannot decode headers: {e:?}")))
+            .and_then(|headers| {
+                let input = T::deserialize(&mut (raw_input.input)).map_err(|e| {
+                    TerminalError::new_with_code(400, format!("Cannot decode input payload: {e:?}"))
+                })?;
+                Ok((
+                    input,
+                    InputMetadata {
+                        invocation_id: raw_input.invocation_id,
+                        random_seed: raw_input.random_seed,
+                        key: raw_input.key,
+                        headers,
+                        scope: raw_input.scope,
+                        limit_key: raw_input.limit_key,
+                        idempotency_key: raw_input.idempotency_key,
+                    },
+                ))
+            })
+        });
         inner_lock.maybe_flip_span_replaying_field();
 
         match input_result {
@@ -257,8 +266,8 @@ impl ContextInternal {
                 inner_lock.handler_state.mark_error(error_inner.into());
                 drop(inner_lock);
             }
-            Err(e) => {
-                inner_lock.fail(e.into());
+            Err(error) => {
+                inner_lock.fail(error);
                 drop(inner_lock);
             }
         }

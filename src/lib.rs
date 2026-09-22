@@ -263,6 +263,9 @@ pub mod serde;
 #[cfg(all(feature = "tunnel", unix))]
 pub mod tunnel;
 
+#[cfg(feature = "opentelemetry")]
+pub(crate) mod opentelemetry;
+
 #[cfg(all(feature = "tunnel", not(unix)))]
 compile_error!("the `tunnel` feature is supported only on Unix platforms");
 

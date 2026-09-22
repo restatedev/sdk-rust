@@ -66,7 +66,8 @@ impl Error {
             | ErrorInner::Deserialization { .. }
             | ErrorInner::Serialization { .. }
             | ErrorInner::HandlerResult { .. }
-            | ErrorInner::InputDrain(_) => 500,
+            | ErrorInner::InputDrain(_)
+            | ErrorInner::InputAlreadyConsumed => 500,
             ErrorInner::FieldRequiresMinimumVersion { .. } => 500,
             ErrorInner::BadDiscoveryVersion(_) => 415,
             ErrorInner::Header { .. } | ErrorInner::BadPath { .. } => 400,
@@ -99,6 +100,8 @@ pub(crate) enum ErrorInner {
     BadPath(String),
     #[error("Suspended")]
     Suspended,
+    #[error("Invocation input was consumed more than once")]
+    InputAlreadyConsumed,
     #[error("Unexpected value variant {variant} for syscall '{syscall}'")]
     UnexpectedValueVariantForSyscall {
         variant: &'static str,
@@ -586,43 +589,46 @@ async fn handle_invocation(
     mut input_rx: InputReceiver,
     output_tx: OutputSender,
 ) -> Result<(), Error> {
-    // Retrieve the service from the Arc
     let svc = endpoint
         .svcs
         .get(&svc_name)
         .expect("service must exist at this point");
+
+    init_loop_vm(&mut vm, &mut input_rx).await?;
+    let raw_input = vm.sys_input().map_err(Error::from);
+    let is_replaying = vm.state().is_replaying();
 
     let span = info_span!(
         "restate_sdk_endpoint_handle",
         "rpc.system" = "restate",
         "rpc.service" = svc_name,
         "rpc.method" = handler_name,
-        "restate.sdk.is_replaying" = false
+        "restate.sdk.is_replaying" = is_replaying
     );
-    async move {
-        init_loop_vm(&mut vm, &mut input_rx).await?;
+    #[cfg(feature = "opentelemetry")]
+    if let Ok(input) = &raw_input {
+        crate::opentelemetry::set_opentelemetry_parent(&span, &input.headers);
+    }
 
-        // Initialize handler context
+    async move {
         let (handler_state_tx, handler_state_rx) = HandlerStateNotifier::new();
         let ctx = ContextInternal::new(
             vm,
+            raw_input,
             svc_name,
             handler_name,
             input_rx,
             output_tx,
             handler_state_tx,
+            is_replaying,
         );
 
-        // Start user code
         let user_code_fut = InterceptErrorFuture::new(ctx.clone(), svc.handle(ctx.clone()));
-
-        // Wrap it in handler state aware future
         let result =
             HandlerStateAwareFuture::new(ctx.clone(), handler_state_rx, user_code_fut).await;
 
-        // Drain the request input stream before returning. This ensures we don't
-        // close the HTTP/2 response stream before the request stream is done,
-        // which causes connection errors on proxies like Google Cloud Run.
+        // The receiver remains in ContextInternal while user code runs because durable
+        // futures consume completion and notification messages from this stream.
         ctx.drain_input().await?;
 
         result

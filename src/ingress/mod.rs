@@ -301,6 +301,12 @@ impl<E: RequestExecutor> Client<E> {
         &self,
         request: HttpRequest<Bytes>,
     ) -> Result<HttpResponse<Bytes>, ClientError> {
+        #[cfg(feature = "opentelemetry")]
+        let request = {
+            let mut request = request;
+            crate::opentelemetry::inject_opentelemetry_headers(&mut request.headers_mut());
+            request
+        };
         self.state
             .executor
             .execute(request)
