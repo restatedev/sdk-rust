@@ -276,10 +276,10 @@ The Rust SDK is currently in active development, and might break across releases
 
 The compatibility with Restate is described in the following table:
 
-| Restate Server\sdk-rust | 0.7 - 0.10 | 0.11 |
-|-------------------------|------------|------|
-| 1.6                     | ✅         | ✅   |
-| 1.7                     | ✅         | ✅   |
+| Restate Server\sdk-rust | 0.7 - 0.10 | 0.11 - 0.12 |
+|-------------------------|------------|-------------|
+| 1.6                     | ✅         | ✅          |
+| 1.7                     | ✅         | ✅          |
 
 Some features require a minimum version of both Restate and the SDK:
 
@@ -328,15 +328,14 @@ Before releasing you need to log into crates.io for which you have to create an 
 cargo login
 ```
 
-You might have to use the `+nightly` toolchain because of releasing multiple crates at once.
 First try the dry-run:
 
 ```
-cargo +nightly release <VERSION> --exclude test-services --workspace
+cargo release <VERSION> --exclude test-services --workspace
 ```
 
 If everything looks good run with `--execute`
 
 ```
-cargo +nightly release <VERSION> --exclude test-services --workspace --execute
+cargo release <VERSION> --exclude test-services --workspace --execute
 ```
