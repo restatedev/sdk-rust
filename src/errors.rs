@@ -206,14 +206,14 @@ pub type HandlerResult<T> = Result<T, HandlerError>;
 /// ```
 pub trait TerminalErrorExt<T, E> {
     /// Convert the error into a [`TerminalError`] with the default status code (500).
-    fn terminal(self) -> Result<T, HandlerError>;
+    fn terminal(self) -> Result<T, TerminalError>;
 }
 
 impl<T, E> TerminalErrorExt<T, E> for Result<T, E>
 where
     E: std::fmt::Display + Send + Sync + 'static,
 {
-    fn terminal(self) -> Result<T, HandlerError> {
-        self.map_err(|err| TerminalError::new(err.to_string()).into())
+    fn terminal(self) -> Result<T, TerminalError> {
+        self.map_err(|err| TerminalError::new(err.to_string()))
     }
 }
