@@ -6,7 +6,7 @@ use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::progress::{
-    ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
+    CancellationLedger, ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
 };
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -23,7 +23,7 @@ use restate_sdk_shared_core::{
     RunHandle, Target, TerminalFailure, UnresolvedFuture, VM, Value,
 };
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::{Future, poll_fn, ready};
 use std::marker::PhantomData;
 use std::mem;
@@ -41,7 +41,7 @@ pub(crate) struct ContextInternalInner {
     pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
     pub(super) progress_wakers: Arc<ProgressWakers>,
     pub(super) cancellation_generation: Arc<AtomicUsize>,
-    pub(super) cancelled_runs: HashSet<NotificationHandle>,
+    pub(super) notifications: CancellationLedger,
 
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
     /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
@@ -55,6 +55,7 @@ impl ContextInternalInner {
         write: OutputSender,
         handler_state: HandlerStateNotifier,
         cancellation_generation: Arc<AtomicUsize>,
+        notifications: CancellationLedger,
     ) -> Self {
         Self {
             vm,
@@ -64,7 +65,7 @@ impl ContextInternalInner {
             runs: HashMap::new(),
             progress_wakers: Arc::default(),
             cancellation_generation,
-            cancelled_runs: HashSet::new(),
+            notifications,
             span_replaying_field_state: false,
         }
     }
@@ -185,6 +186,7 @@ pub struct ContextInternal {
     handler_name: String,
     inner: Arc<Mutex<ContextInternalInner>>,
     cancellation_generation: Arc<AtomicUsize>,
+    notifications: CancellationLedger,
 }
 
 impl ContextInternal {
@@ -197,6 +199,7 @@ impl ContextInternal {
         handler_state: HandlerStateNotifier,
     ) -> Self {
         let cancellation_generation = Arc::new(AtomicUsize::new(0));
+        let notifications = Arc::new(Mutex::new(HashMap::new()));
         Self {
             svc_name,
             handler_name,
@@ -206,8 +209,10 @@ impl ContextInternal {
                 write,
                 handler_state,
                 Arc::clone(&cancellation_generation),
+                Arc::clone(&notifications),
             ))),
             cancellation_generation,
+            notifications,
         }
     }
 
@@ -302,6 +307,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
@@ -331,6 +337,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -409,6 +416,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(())),
@@ -485,6 +493,7 @@ impl ContextInternal {
                 Arc::clone(&self.inner),
                 call_handle.invocation_id_notification_handle,
                 self.cancellation_generation.load(Ordering::Relaxed),
+                Arc::clone(&self.notifications),
             )
             .map(|res| match res {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -501,6 +510,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             call_handle.call_notification_handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(
@@ -582,6 +592,7 @@ impl ContextInternal {
                 Arc::clone(&self.inner),
                 send_handle.invocation_id_notification_handle,
                 self.cancellation_generation.load(Ordering::Relaxed),
+                Arc::clone(&self.notifications),
             )
             .map(|res| match res {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -631,6 +642,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(T::deserialize(&mut s)
@@ -665,6 +677,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => {
@@ -741,6 +754,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(
@@ -802,6 +816,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => {
@@ -833,6 +848,7 @@ impl ContextInternal {
             Arc::clone(&self.inner),
             handle,
             self.cancellation_generation.load(Ordering::Relaxed),
+            Arc::clone(&self.notifications),
         )
         .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
@@ -1094,7 +1110,8 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
     where
         Ret: Deserialize,
     {
-        get_async_result(Arc::clone(&ctx), handle, generation)
+        let notifications = Arc::clone(&must_lock!(ctx).notifications);
+        get_async_result(Arc::clone(&ctx), handle, generation, notifications)
             .map(|res| match res {
                 Ok(Value::Success(mut s)) => {
                     let t =
@@ -1166,6 +1183,12 @@ where
                         .sys_run(this.name.to_owned())
                         .map_err(ErrorInner::from)?;
 
+                    inner_ctx
+                        .notifications
+                        .lock()
+                        .unwrap()
+                        .insert(handle, generation);
+
                     // Flush the registered command before executing the borrowing closure.
                     let b = inner_ctx.vm.take_output();
                     if !b.is_empty() && !inner_ctx.write.send(b) {
@@ -1189,7 +1212,6 @@ where
                             });
                         }
                         Ok(AwaitResponse::CancelSignalReceived) => {
-                            inner_ctx.cancelled_runs.insert(handle);
                             crate::endpoint::futures::progress::cancel_runs(&mut inner_ctx);
                             let wakers = Arc::clone(&inner_ctx.progress_wakers);
                             drop(inner_ctx);
@@ -1418,6 +1440,7 @@ fn get_async_result(
     ctx: Arc<Mutex<ContextInternalInner>>,
     handle: NotificationHandle,
     generation: usize,
+    notifications: CancellationLedger,
 ) -> impl Future<Output = Result<Value, Error>> + Send {
-    VmAsyncResultPollFuture::new(ctx, handle, generation).map_err(Error::from)
+    VmAsyncResultPollFuture::new(ctx, handle, generation, notifications).map_err(Error::from)
 }

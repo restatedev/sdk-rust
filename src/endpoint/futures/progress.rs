@@ -3,12 +3,17 @@ use crate::endpoint::context::ContextInternalInner;
 use futures::future::BoxFuture;
 use futures::task::{ArcWake, waker_ref};
 use restate_sdk_shared_core::{
-    AwaitResponse, Error as CoreError, RetryPolicy, RunExitResult, UnresolvedFuture, VM,
+    AwaitResponse, Error as CoreError, NotificationHandle, RetryPolicy, RunExitResult,
+    UnresolvedFuture, VM,
 };
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
+
+/// Outstanding notifications retain their registration epoch until consumed,
+/// including run results whose completion proposal has already been submitted.
+pub(crate) type CancellationLedger = Arc<Mutex<HashMap<NotificationHandle, usize>>>;
 
 /// One input stream and all owned run closures share a wakeup source. Input may
 /// satisfy a sibling future, so its consumer must wake every registered waiter.
@@ -114,20 +119,25 @@ pub(crate) fn cancel_runs(inner: &mut ContextInternalInner) {
     inner
         .cancellation_generation
         .fetch_add(1, Ordering::Relaxed);
-    inner.cancelled_runs.extend(inner.runs.keys().copied());
     inner.runs.clear();
 }
 
-fn includes_cancelled_run(future: &UnresolvedFuture, inner: &ContextInternalInner) -> bool {
+fn includes_cancelled_notification(
+    future: &UnresolvedFuture,
+    notifications: &HashMap<NotificationHandle, usize>,
+    generation: usize,
+) -> bool {
     match future {
-        UnresolvedFuture::Single(handle) => inner.cancelled_runs.contains(handle),
+        UnresolvedFuture::Single(handle) => notifications
+            .get(handle)
+            .is_some_and(|registered| *registered != generation),
         UnresolvedFuture::Unknown(futures)
         | UnresolvedFuture::FirstCompleted(futures)
         | UnresolvedFuture::AllCompleted(futures)
         | UnresolvedFuture::FirstSucceededOrAllFailed(futures)
         | UnresolvedFuture::AllSucceededOrFirstFailed(futures) => futures
             .iter()
-            .any(|future| includes_cancelled_run(future, inner)),
+            .any(|future| includes_cancelled_notification(future, notifications, generation)),
         _ => false,
     }
 }
@@ -144,8 +154,13 @@ pub(crate) fn poll_progress(
         let inner = ctx
             .try_lock()
             .expect("Concurrent access to the Restate context");
-        if waiter.generation != inner.cancellation_generation.load(Ordering::Relaxed)
-            || includes_cancelled_run(&awaited, &inner)
+        let generation = inner.cancellation_generation.load(Ordering::Relaxed);
+        if waiter.generation != generation
+            || includes_cancelled_notification(
+                &awaited,
+                &inner.notifications.lock().unwrap(),
+                generation,
+            )
         {
             return Poll::Ready(Ok(AwaitResponse::CancelSignalReceived));
         }

@@ -1,6 +1,6 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::ContextInternalInner;
-use crate::endpoint::futures::progress::{ProgressWaiter, poll_progress};
+use crate::endpoint::futures::progress::{CancellationLedger, ProgressWaiter, poll_progress};
 use restate_sdk_shared_core::{
     AwaitResponse, NotificationHandle, TerminalFailure, UnresolvedFuture, VM, Value,
 };
@@ -20,7 +20,13 @@ impl VmAsyncResultPollFuture {
         ctx: Arc<Mutex<ContextInternalInner>>,
         handle: NotificationHandle,
         generation: usize,
+        notifications: CancellationLedger,
     ) -> Self {
+        notifications
+            .lock()
+            .unwrap()
+            .entry(handle)
+            .or_insert(generation);
         Self {
             ctx,
             handle,
@@ -45,10 +51,12 @@ impl Future for VmAsyncResultPollFuture {
                     .ctx
                     .try_lock()
                     .expect("Concurrent access to the Restate context");
-                Poll::Ready(Ok(inner
+                let notification = inner
                     .vm
                     .take_notification(self.handle)?
-                    .expect("Completed handle has a notification")))
+                    .expect("Completed handle has a notification");
+                inner.notifications.lock().unwrap().remove(&self.handle);
+                Poll::Ready(Ok(notification))
             }
             AwaitResponse::CancelSignalReceived => {
                 Poll::Ready(Ok(Value::Failure(TerminalFailure {
