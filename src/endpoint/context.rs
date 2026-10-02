@@ -38,6 +38,8 @@ pub(crate) struct ContextInternalInner {
     pub(super) write: OutputSender,
     pub(super) handler_state: HandlerStateNotifier,
     pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
+    pub(super) executing_runs: Vec<(NotificationHandle, RegisteredRun)>,
+    pub(super) progress_version: usize,
     pub(super) progress_wakers: Arc<ProgressWakers>,
     pub(super) cancellation_generation: usize,
     /// Notifications keep their registration epoch until consumed, including
@@ -62,6 +64,8 @@ impl ContextInternalInner {
             write,
             handler_state,
             runs: HashMap::new(),
+            executing_runs: Vec::new(),
+            progress_version: 0,
             progress_wakers: Arc::default(),
             cancellation_generation: 0,
             notifications: HashMap::new(),
@@ -72,11 +76,13 @@ impl ContextInternalInner {
     fn register_notification(&mut self, handle: NotificationHandle) -> usize {
         let generation = self.cancellation_generation;
         self.notifications.entry(handle).or_insert(generation);
+        self.progress_version += 1;
         generation
     }
 
     pub(super) fn fail(&mut self, e: Error) {
         self.runs.clear();
+        self.executing_runs.clear();
         self.maybe_flip_span_replaying_field();
         self.vm.notify_error(
             CoreError::new(500u16, e.0.to_string())
@@ -930,6 +936,7 @@ impl ContextInternal {
     pub fn end(&self) {
         let mut inner = must_lock!(self.inner);
         inner.runs.clear();
+        inner.executing_runs.clear();
         let _ = inner.vm.sys_end();
     }
 
@@ -1158,7 +1165,7 @@ where
                         .sys_run(this.name.to_owned())
                         .map_err(ErrorInner::from)?;
 
-                    inner_ctx.notifications.insert(handle, generation);
+                    inner_ctx.register_notification(handle);
 
                     // Flush the registered command before executing the borrowing closure.
                     let b = inner_ctx.vm.take_output();
@@ -1286,11 +1293,11 @@ where
                     let handle = *handle;
 
                     let _ = {
-                        must_lock!(ctx).vm.propose_run_completion(
-                            handle,
-                            res,
-                            mem::take(this.retry_policy),
-                        )
+                        let mut inner = must_lock!(ctx);
+                        inner.progress_version += 1;
+                        inner
+                            .vm
+                            .propose_run_completion(handle, res, mem::take(this.retry_policy))
                     };
 
                     this.state.set(RunState::WaitingResultFut {

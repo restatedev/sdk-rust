@@ -370,6 +370,42 @@ async fn starting_an_already_polled_unpin_run_panics() {
     }
 }
 
+struct ParkedOperation {
+    timer: bool,
+}
+
+#[service]
+impl ParkedOperation {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>) -> HandlerResult<()> {
+        if self.timer {
+            ctx.sleep(Duration::from_secs(10)).await?;
+        } else {
+            ctx.run(|| async { Ok(()) }).await?;
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn repeated_parked_polls_do_not_emit_more_awaiting_messages() {
+    for timer in [false, true] {
+        let endpoint = Endpoint::builder().bind(ParkedOperation { timer }).build();
+        let mut invocation = Invocation::new(&endpoint, "ParkedOperation", 7, &[input()], 0);
+        invocation.through(AWAITING).await;
+        poll_fn(|cx| {
+            for _ in 0..32 {
+                assert!(
+                    Pin::new(&mut invocation.body).poll_frame(cx).is_pending(),
+                    "An unchanged input wait emitted another response frame"
+                );
+            }
+            Poll::Ready(())
+        })
+        .await;
+    }
+}
+
 #[derive(Default)]
 struct RunStats {
     starts: [AtomicUsize; 3],
@@ -408,6 +444,7 @@ enum Mode {
     Retry,
     Terminal,
     BoundedRetry,
+    BatchedSibling,
 }
 struct StartedRuns {
     stats: Arc<RunStats>,
@@ -471,6 +508,18 @@ impl StartedRuns {
                 let second = make(1).start();
                 let second_error = second.await.unwrap_err().code();
                 Ok(Json(vec![second_error as u32, first.await?]))
+            }
+            Mode::BatchedSibling => {
+                let mut first = Box::pin(make(0).start());
+                let mut second = Box::pin(make(1).start());
+                poll_fn(|cx| {
+                    assert!(first.as_mut().poll(cx).is_pending());
+                    assert!(second.as_mut().poll(cx).is_pending());
+                    Poll::Ready(())
+                })
+                .await;
+                let second_value = second.await?;
+                Ok(Json(vec![first.await?, second_value]))
             }
             Mode::CancelSelectReady => {
                 let first = make(0).start();
@@ -849,6 +898,55 @@ async fn input_consumer_wakes_sibling_result_futures() {
         }
         // Keep input open until output; EOF must not rescue a stranded sibling.
         assert_eq!(values(finish(&mut invocation).await), vec![0, 1, 2]);
+    }
+}
+
+#[tokio::test]
+async fn a_parked_sibling_drives_notifications_buffered_by_another_waiter() {
+    for version in [6, 7] {
+        let (endpoint, stats) = started(Mode::BatchedSibling);
+        let mut invocation = Invocation::new(&endpoint, "StartedRuns", version, &[input()], 0);
+        invocation.drive_until(|| stats.counts() == [1, 1, 0]).await;
+        let mut proposals = Vec::new();
+        for index in [1, 0] {
+            stats.gates[index].notify_one();
+            proposals.push(invocation.through(PROPOSAL).await);
+        }
+        let mut batch = BytesMut::new();
+        for proposal in &proposals {
+            let message = if proposal.requests_ack {
+                encode(
+                    ACK,
+                    &Ack {
+                        completion_id: proposal.decode::<Proposal>().completion_id,
+                    },
+                )
+            } else {
+                completion(&proposal.decode::<Proposal>())
+            };
+            batch.extend_from_slice(&message);
+        }
+        invocation.send(batch.freeze());
+        // The second waiter consumes the whole batch and resolves first. The
+        // first waiter must drive its buffered notification with input still open.
+        assert_eq!(values(finish(&mut invocation).await), vec![0, 1]);
+    }
+}
+
+#[tokio::test]
+async fn handler_completion_drops_executing_runs_before_input_eof() {
+    for version in [6, 7] {
+        let (endpoint, stats) = started(Mode::DropFirst);
+        let mut invocation = Invocation::new(&endpoint, "StartedRuns", version, &[input()], 0);
+        invocation.drive_until(|| stats.counts() == [1, 1, 0]).await;
+        stats.gates[1].notify_one();
+        let proposal = invocation.through(PROPOSAL).await;
+        invocation.acknowledge(&proposal);
+        assert_eq!(values(invocation.through(OUTPUT).await.decode()), vec![1]);
+        assert!(invocation.input.is_some());
+        assert_eq!(stats.drops(), [1, 1, 0]);
+        invocation.close_input();
+        invocation.through(END).await;
     }
 }
 
