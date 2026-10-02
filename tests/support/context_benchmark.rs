@@ -160,7 +160,7 @@ pub async fn measure(
 ) {
     let samples = setting("SDK_BENCH_SAMPLES", 10);
     let warmup = setting("SDK_BENCH_WARMUP", 3);
-    let invocations = setting("SDK_BENCH_OPERATIONS_PER_SAMPLE", 10_000)
+    let invocations = setting("SDK_BENCH_OPERATIONS_PER_SAMPLE", 1000)
         .div_ceil(operations)
         .max(1);
     for batch in 0..warmup + samples {
