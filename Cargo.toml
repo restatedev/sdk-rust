@@ -149,6 +149,7 @@ aws_lambda_events = { version = "1.0", optional = true }
 lambda_runtime = { version = "1.0", optional = true }
 
 [dev-dependencies]
+prost = "0.14"
 base64 = "0.22"
 bs58 = "0.5"
 ed25519-dalek = "2"
