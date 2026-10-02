@@ -11,14 +11,26 @@ pin_project! {
     pub struct DurableFutureImpl<F>{
         #[pin]
         fut: F,
-        handle: NotificationHandle,
+        handle: Option<NotificationHandle>,
         ctx: ContextInternal
     }
 }
 
 impl<F> DurableFutureImpl<F> {
     pub fn new(ctx: ContextInternal, handle: NotificationHandle, fut: F) -> Self {
-        Self { fut, handle, ctx }
+        Self {
+            fut,
+            handle: Some(handle),
+            ctx,
+        }
+    }
+
+    pub(crate) fn trapping(ctx: ContextInternal, fut: F) -> Self {
+        Self {
+            fut,
+            handle: None,
+            ctx,
+        }
     }
 }
 
@@ -51,7 +63,7 @@ impl<F> crate::context::macro_support::SealedDurableFuture for DurableFutureImpl
         self.ctx.clone()
     }
 
-    fn handle(&self) -> NotificationHandle {
+    fn handle(&self) -> Option<NotificationHandle> {
         self.handle
     }
 }

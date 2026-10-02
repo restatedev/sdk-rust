@@ -1,5 +1,5 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::ContextInternalInner;
+use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
 use futures::future::BoxFuture;
 use futures::task::{ArcWake, waker_ref};
 use restate_sdk_shared_core::{
@@ -151,9 +151,7 @@ pub(crate) fn poll_progress(
     awaited: UnresolvedFuture,
 ) -> Poll<Result<AwaitResponse, ErrorInner>> {
     let wakers = {
-        let inner = ctx
-            .try_lock()
-            .expect("Concurrent access to the Restate context");
+        let inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
         let generation = inner.cancellation_generation.load(Ordering::Relaxed);
         if waiter.generation != generation
             || includes_cancelled_notification(
@@ -172,9 +170,7 @@ pub(crate) fn poll_progress(
 
     loop {
         let mut executing = {
-            let mut inner = ctx
-                .try_lock()
-                .expect("Concurrent access to the Restate context");
+            let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
             let handles: Vec<_> = inner
                 .runs
                 .iter()
@@ -189,9 +185,7 @@ pub(crate) fn poll_progress(
         for (handle, mut run) in executing.drain() {
             match run.future.as_mut().poll(&mut shared_cx) {
                 Poll::Ready(result) => {
-                    let mut inner = ctx
-                        .try_lock()
-                        .expect("Concurrent access to the Restate context");
+                    let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
                     inner
                         .vm
                         .propose_run_completion(handle, result?, run.retry_policy)?;
@@ -202,16 +196,14 @@ pub(crate) fn poll_progress(
                 }
                 Poll::Pending => {
                     ctx.try_lock()
-                        .expect("Concurrent access to the Restate context")
+                        .expect(CONTEXT_LOCK_ERROR)
                         .runs
                         .insert(handle, run);
                 }
             }
         }
 
-        let mut inner = ctx
-            .try_lock()
-            .expect("Concurrent access to the Restate context");
+        let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
         flush(&mut inner)?;
         let mut futures = vec![awaited.clone()];
         futures.extend(inner.runs.keys().copied().map(UnresolvedFuture::Single));

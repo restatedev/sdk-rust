@@ -1,5 +1,5 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::ContextInternalInner;
+use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
 use crate::endpoint::futures::progress::{
     CancellationLedger, ProgressWaiter, flush, poll_progress,
 };
@@ -43,9 +43,7 @@ fn take_completed_result(
     ctx: &Arc<Mutex<ContextInternalInner>>,
     handle: NotificationHandle,
 ) -> Result<Option<Value>, ErrorInner> {
-    let mut inner = ctx
-        .try_lock()
-        .expect("Concurrent access to the Restate context");
+    let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
     if !inner.vm.is_completed(handle) {
         return Ok(None);
     }

@@ -1240,7 +1240,7 @@ impl<'a, O> macro_support::SealedDurableFuture
         (**self).inner_context()
     }
 
-    fn handle(&self) -> restate_sdk_shared_core::NotificationHandle {
+    fn handle(&self) -> Option<restate_sdk_shared_core::NotificationHandle> {
         (**self).handle()
     }
 }

@@ -83,6 +83,11 @@ where
     ///
     /// Cancellation fails existing pending result futures with code 409 and drops their
     /// pending closures. New context operations can still be used for cleanup.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this run has already been polled. This can only occur when the run
+    /// is [`Unpin`], because `start` consumes it by value and a pinned run cannot be moved.
     pub fn start(
         self,
     ) -> impl DurableFuture<Output = Result<R::Output, TerminalError>> + Send + 'static

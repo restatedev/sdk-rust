@@ -6,10 +6,12 @@ use futures::stream;
 use http_body::Body;
 use http_body_util::{BodyExt, StreamBody};
 use protocol::*;
+use restate_sdk::context::DurableFuture;
 use restate_sdk::endpoint::ResponseBody;
 use restate_sdk::prelude::*;
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::future::Future;
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -248,6 +250,107 @@ async fn legacy_partial_replay_reproduces_journal_mismatch() {
         };
         assert_eq!(error.code, 570);
         assert!(counts.iter().all(|count| count.load(Ordering::SeqCst) == 0));
+    }
+}
+
+struct InvalidStartedRun {
+    starts: Arc<AtomicUsize>,
+    select: bool,
+}
+
+#[service]
+impl InvalidStartedRun {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>) -> HandlerResult<u32> {
+        let starts = self.starts.clone();
+        let run = ctx
+            .run(move || async move {
+                starts.fetch_add(1, Ordering::SeqCst);
+                Ok(42u32)
+            })
+            .name("different-from-journal")
+            .start();
+        assert!(restate_sdk::context::macro_support::SealedDurableFuture::handle(&run).is_none());
+        if self.select {
+            let run: Pin<Box<dyn DurableFuture<Output = Result<u32, TerminalError>> + Send>> =
+                Box::pin(
+                    run.map_ok(|value| value + 1).map_err(|error| {
+                        TerminalError::new_with_code(error.code(), "mapped error")
+                    }),
+                );
+            let mut runs = DurableFuturesUnordered::new();
+            runs.push(run);
+            runs.next().await?;
+            unreachable!("Failed registration must trap durable selection");
+        }
+        Ok(run.await?)
+    }
+}
+
+#[tokio::test]
+async fn failed_started_registration_traps_await_and_selection_without_a_handle() {
+    for version in [6, 7] {
+        for select in [false, true] {
+            let starts = Arc::new(AtomicUsize::new(0));
+            let endpoint = Endpoint::builder()
+                .bind(InvalidStartedRun {
+                    starts: starts.clone(),
+                    select,
+                })
+                .build();
+            let mut invocation = Invocation::new(
+                &endpoint,
+                "InvalidStartedRun",
+                version,
+                &partial_journal(),
+                0,
+            );
+            invocation.close_input();
+            let mut errors = Vec::new();
+            while let Some(frame) = invocation.next().await {
+                match frame.kind {
+                    ERROR => errors.push(frame.decode::<protocol::Error>()),
+                    PROPOSAL | OUTPUT => panic!("Failed registration made progress"),
+                    _ => {}
+                }
+            }
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].code, 570);
+            assert_eq!(starts.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+struct PolledRun;
+
+#[service]
+impl PolledRun {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>) -> HandlerResult<u32> {
+        let mut run = ctx.run(|| std::future::ready(Ok(42u32)));
+        poll_fn(|cx| {
+            assert!(Pin::new(&mut run).poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run.start()))
+            .err()
+            .expect("Starting an already-polled Unpin run must panic");
+        assert_eq!(
+            panic.downcast_ref::<&str>().copied(),
+            Some("An action cannot be started after it has been polled")
+        );
+        Ok(42)
+    }
+}
+
+#[tokio::test]
+async fn starting_an_already_polled_unpin_run_panics() {
+    for version in [6, 7] {
+        let endpoint = Endpoint::builder().bind(PolledRun).build();
+        let mut invocation = Invocation::new(&endpoint, "PolledRun", version, &[input()], 0);
+        let output = finish(&mut invocation).await;
+        assert_eq!(output.value.unwrap().content, Bytes::from_static(b"42"));
     }
 }
 

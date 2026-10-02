@@ -1,5 +1,5 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::ContextInternalInner;
+use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
 use crate::endpoint::futures::progress::{ProgressWaiter, flush, poll_progress};
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{
@@ -35,10 +35,7 @@ impl Future for VmSelectAsyncResultPollFuture {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         {
-            let mut inner = self
-                .ctx
-                .try_lock()
-                .expect("Concurrent access to the Restate context");
+            let mut inner = self.ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
             if let Some(index) = self
                 .handles
                 .iter()
@@ -58,10 +55,7 @@ impl Future for VmSelectAsyncResultPollFuture {
         let this = self.as_mut().get_mut();
         match ready!(poll_progress(&this.ctx, cx, &mut this.waiter, unresolved))? {
             AwaitResponse::AnyCompleted => {
-                let inner = self
-                    .ctx
-                    .try_lock()
-                    .expect("Concurrent access to the Restate context");
+                let inner = self.ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
                 Poll::Ready(Ok(Ok(self
                     .handles
                     .iter()

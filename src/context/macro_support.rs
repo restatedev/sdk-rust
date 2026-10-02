@@ -5,5 +5,6 @@ use restate_sdk_shared_core::NotificationHandle;
 #[doc(hidden)]
 pub trait SealedDurableFuture {
     fn inner_context(&self) -> ContextInternal;
-    fn handle(&self) -> NotificationHandle;
+    /// Registration failures trap without a notification handle.
+    fn handle(&self) -> Option<NotificationHandle>;
 }

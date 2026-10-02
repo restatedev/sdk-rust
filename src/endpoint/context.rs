@@ -96,11 +96,11 @@ impl ContextInternalInner {
 const fn is_send_sync<T: Send + Sync>() {}
 const _: () = is_send_sync::<ContextInternal>();
 
+pub(crate) const CONTEXT_LOCK_ERROR: &str = "Concurrent access to the Restate context. Do not call context operations from inside a run closure or poll the context from two tasks at once.";
+
 macro_rules! must_lock {
     ($mutex:expr) => {
-        $mutex
-            .try_lock()
-            .expect("Concurrent access to the Restate context")
+        $mutex.try_lock().expect(CONTEXT_LOCK_ERROR)
     };
 }
 
@@ -122,9 +122,8 @@ macro_rules! unwrap_or_trap_durable_future {
             Ok(t) => t,
             Err(e) => {
                 $inner_lock.fail(e.into());
-                return DurableFutureImpl::new(
+                return DurableFutureImpl::trapping(
                     $ctx.clone(),
-                    NotificationHandle::from(u32::MAX),
                     Either::Right(TrapFuture::default()),
                 );
             }
@@ -382,9 +381,12 @@ impl ContextInternal {
 
     pub fn select(
         &self,
-        handles: Vec<NotificationHandle>,
+        handles: Vec<Option<NotificationHandle>>,
     ) -> impl Future<Output = Result<usize, TerminalError>> + Send {
-        InterceptErrorFuture::new(
+        let Some(handles) = handles.into_iter().collect::<Option<Vec<_>>>() else {
+            return Either::Right(TrapFuture::default());
+        };
+        Either::Left(InterceptErrorFuture::new(
             self.clone(),
             VmSelectAsyncResultPollFuture::new(
                 self.inner.clone(),
@@ -392,7 +394,7 @@ impl ContextInternal {
                 self.cancellation_generation.load(Ordering::Relaxed),
             )
             .map_err(Error::from),
-        )
+        ))
     }
 
     pub fn sleep(
@@ -740,11 +742,7 @@ impl ContextInternal {
                     // TODO NOW this is REALLY BAD. The reason for this is that we would need to return a future of a future instead, which is not nice.
                     //  we assume for the time being this works because no user should use the awakeable without doing any other syscall first, which will prevent this invalid awakeable id to work in the first place.
                     "invalid".to_owned(),
-                    DurableFutureImpl::new(
-                        self.clone(),
-                        NotificationHandle::from(u32::MAX),
-                        Either::Right(TrapFuture::default()),
-                    ),
+                    DurableFutureImpl::trapping(self.clone(), Either::Right(TrapFuture::default())),
                 );
             }
         };
@@ -1053,52 +1051,42 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
         let closure = closure.expect("Unpolled run has a closure");
         let mut guard = must_lock!(inner);
         let generation = guard.cancellation_generation.load(Ordering::Relaxed);
-        let result = guard.vm.sys_run(self.name);
+        let RunHandle { handle, replayed } =
+            unwrap_or_trap_durable_future!(ctx, guard, guard.vm.sys_run(self.name));
         guard.maybe_flip_span_replaying_field();
-        let handle = match result {
-            Ok(RunHandle { handle, replayed }) => {
-                if !replayed {
-                    let future = async move {
-                        let start = Instant::now();
-                        match closure.run().await {
-                            Ok(value) => {
-                                Ok(RunExitResult::Success(Ret::serialize(&value).map_err(
-                                    |err| ErrorInner::Serialization {
-                                        syscall: "run",
-                                        err: Box::new(err),
-                                    },
-                                )?))
-                            }
-                            Err(error) => match error.0 {
-                                HandlerErrorInner::Retryable(error) => {
-                                    Ok(RunExitResult::RetryableFailure {
-                                        attempt_duration: start.elapsed(),
-                                        error: CoreError::new(500u16, error.to_string()),
-                                    })
-                                }
-                                HandlerErrorInner::Terminal(error) => {
-                                    Ok(RunExitResult::TerminalFailure(TerminalError(error).into()))
-                                }
-                            },
+        if !replayed {
+            let future = async move {
+                let start = Instant::now();
+                match closure.run().await {
+                    Ok(value) => Ok(RunExitResult::Success(Ret::serialize(&value).map_err(
+                        |err| ErrorInner::Serialization {
+                            syscall: "run",
+                            err: Box::new(err),
+                        },
+                    )?)),
+                    Err(error) => match error.0 {
+                        HandlerErrorInner::Retryable(error) => {
+                            Ok(RunExitResult::RetryableFailure {
+                                attempt_duration: start.elapsed(),
+                                error: CoreError::new(500u16, error.to_string()),
+                            })
                         }
-                    }
-                    .boxed();
-                    guard
-                        .runs
-                        .insert(handle, RegisteredRun::new(future, self.retry_policy));
+                        HandlerErrorInner::Terminal(error) => {
+                            Ok(RunExitResult::TerminalFailure(TerminalError(error).into()))
+                        }
+                    },
                 }
-                handle
             }
-            Err(error) => {
-                guard.fail(error.into());
-                NotificationHandle::from(u32::MAX)
-            }
-        };
+            .boxed();
+            guard
+                .runs
+                .insert(handle, RegisteredRun::new(future, self.retry_policy));
+        }
         drop(guard);
         DurableFutureImpl::new(
             ctx,
             handle,
-            Self::boxed_result_fut(inner, handle, generation),
+            Either::Left(Self::boxed_result_fut(inner, handle, generation)),
         )
     }
 
@@ -1400,8 +1388,8 @@ where
         self.ctx.clone()
     }
 
-    fn handle(&self) -> NotificationHandle {
-        self.call_notification_handle
+    fn handle(&self) -> Option<NotificationHandle> {
+        Some(self.call_notification_handle)
     }
 }
 
