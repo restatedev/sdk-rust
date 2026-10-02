@@ -6,7 +6,7 @@ use futures::stream;
 use http_body::Body;
 use http_body_util::{BodyExt, StreamBody};
 use protocol::*;
-use restate_sdk::context::DurableFuture;
+use restate_sdk::context::{DurableFuture, RequestTarget};
 use restate_sdk::endpoint::ResponseBody;
 use restate_sdk::prelude::*;
 use std::collections::VecDeque;
@@ -256,12 +256,27 @@ async fn legacy_partial_replay_reproduces_journal_mismatch() {
 struct InvalidStartedRun {
     starts: Arc<AtomicUsize>,
     select: bool,
+    call: bool,
 }
 
 #[service]
 impl InvalidStartedRun {
     #[handler]
     async fn run(&self, ctx: Context<'_>) -> HandlerResult<u32> {
+        if self.call {
+            let call = ctx
+                .request::<_, u32>(RequestTarget::service("Sibling", "run"), ())
+                .call();
+            assert!(
+                restate_sdk::context::macro_support::SealedDurableFuture::handle(&call).is_none()
+            );
+            if self.select {
+                return restate_sdk::select! {
+                    value = call => Ok(value?),
+                };
+            }
+            return Ok(call.await?);
+        }
         let starts = self.starts.clone();
         let run = ctx
             .run(move || async move {
@@ -288,14 +303,15 @@ impl InvalidStartedRun {
 }
 
 #[tokio::test]
-async fn failed_started_registration_traps_await_and_selection_without_a_handle() {
+async fn failed_durable_registration_traps_await_and_selection_without_a_handle() {
     for version in [6, 7] {
-        for select in [false, true] {
+        for (select, call) in [(false, false), (true, false), (false, true), (true, true)] {
             let starts = Arc::new(AtomicUsize::new(0));
             let endpoint = Endpoint::builder()
                 .bind(InvalidStartedRun {
                     starts: starts.clone(),
                     select,
+                    call,
                 })
                 .build();
             let mut invocation = Invocation::new(

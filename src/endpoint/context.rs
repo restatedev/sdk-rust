@@ -474,7 +474,7 @@ impl ContextInternal {
                 return CallFutureImpl {
                     invocation_id_future: Either::Right(TrapFuture::default()).shared(),
                     result_future: Either::Right(TrapFuture::default()),
-                    call_notification_handle: NotificationHandle::from(u32::MAX),
+                    call_notification_handle: None,
                     ctx: self.clone(),
                 };
             }
@@ -526,7 +526,7 @@ impl ContextInternal {
         CallFutureImpl {
             invocation_id_future: Either::Left(invocation_id_fut).shared(),
             result_future: Either::Left(result_future),
-            call_notification_handle: call_handle.call_notification_handle,
+            call_notification_handle: Some(call_handle.call_notification_handle),
             ctx: self.clone(),
         }
     }
@@ -1309,7 +1309,7 @@ pin_project! {
         invocation_id_future: Shared<InvIdFut>,
         #[pin]
         result_future: ResultFut,
-        call_notification_handle: NotificationHandle,
+        call_notification_handle: Option<NotificationHandle>,
         ctx: ContextInternal,
     }
 }
@@ -1372,7 +1372,7 @@ where
     }
 
     fn handle(&self) -> Option<NotificationHandle> {
-        Some(self.call_notification_handle)
+        self.call_notification_handle
     }
 }
 
