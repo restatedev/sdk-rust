@@ -1,6 +1,6 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::ContextInternalInner;
-use crate::endpoint::futures::progress::poll_progress;
+use crate::endpoint::futures::progress::{ProgressWaiter, poll_progress};
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{
     AwaitResponse, NotificationHandle, TerminalFailure, UnresolvedFuture, VM,
@@ -13,18 +13,27 @@ use std::task::{Poll, ready};
 pub(crate) struct VmSelectAsyncResultPollFuture {
     ctx: Arc<Mutex<ContextInternalInner>>,
     handles: Vec<NotificationHandle>,
+    waiter: ProgressWaiter,
 }
 
 impl VmSelectAsyncResultPollFuture {
-    pub fn new(ctx: Arc<Mutex<ContextInternalInner>>, handles: Vec<NotificationHandle>) -> Self {
-        Self { ctx, handles }
+    pub fn new(
+        ctx: Arc<Mutex<ContextInternalInner>>,
+        handles: Vec<NotificationHandle>,
+        generation: usize,
+    ) -> Self {
+        Self {
+            ctx,
+            handles,
+            waiter: ProgressWaiter::new(generation),
+        }
     }
 }
 
 impl Future for VmSelectAsyncResultPollFuture {
     type Output = Result<Result<usize, TerminalError>, ErrorInner>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let unresolved = UnresolvedFuture::FirstCompleted(
             self.handles
                 .iter()
@@ -32,7 +41,8 @@ impl Future for VmSelectAsyncResultPollFuture {
                 .map(UnresolvedFuture::Single)
                 .collect(),
         );
-        match ready!(poll_progress(&self.ctx, cx, unresolved))? {
+        let this = self.as_mut().get_mut();
+        match ready!(poll_progress(&this.ctx, cx, &mut this.waiter, unresolved))? {
             AwaitResponse::AnyCompleted => {
                 let inner = self
                     .ctx
