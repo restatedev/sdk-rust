@@ -18,6 +18,10 @@ impl<F> InterceptErrorFuture<F> {
     pub fn new(ctx: ContextInternal, fut: F) -> Self {
         Self { fut, ctx }
     }
+
+    pub(crate) fn into_parts(self) -> (ContextInternal, F) {
+        (self.ctx, self.fut)
+    }
 }
 
 impl<F, R> Future for InterceptErrorFuture<F>

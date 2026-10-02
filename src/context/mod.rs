@@ -16,7 +16,7 @@ mod select_any;
 
 pub use map::{MapDurableFuture, MapErrDurableFuture, MapOkDurableFuture};
 pub use request::{CallFuture, InvocationHandle, Request, RequestTarget, SendHandle, SignalHandle};
-pub use run::{RunClosure, RunFuture, RunRetryPolicy};
+pub use run::{Run, RunClosure, RunFuture, RunRetryPolicy};
 pub use select_any::DurableFuturesUnordered;
 
 pub type HeaderMap = http::HeaderMap<String>;
@@ -959,13 +959,23 @@ pub trait ContextSideEffects<'ctx>: private::SealedContext<'ctx> {
     /// If you set a maximum number of attempts, then the `ctx.run` block will fail with a [TerminalError] once the retries are exhausted.
     /// Have a look at the [Sagas guide](https://docs.restate.dev/guides/sagas) to learn how to undo previous actions of the handler to keep the system in a consistent state.
     ///
-    /// **Caution: Immediately await journaled actions:**
-    /// Always immediately await `ctx.run`, before doing any other context calls.
-    /// If not, you might bump into non-determinism errors during replay,
-    /// because the journaled result can get interleaved with the other context calls in the journal in a non-deterministic way.
+    /// Await the action immediately, or use [`Run::start`] before other context calls.
+    /// Unstarted actions register their command on the first poll, so polling them concurrently
+    /// can change command order during replay. `start` registers each command synchronously:
+    ///
+    /// ```rust,no_run
+    /// # use restate_sdk::prelude::*;
+    /// # async fn handle(ctx: Context<'_>) -> Result<(), HandlerError> {
+    /// let first = ctx.run(|| async { Ok(1u32) }).name("first").start();
+    /// let second = ctx.run(|| async { Ok(2u32) }).name("second").start();
+    /// let (first, second) = futures::join!(first, second);
+    /// assert_eq!((first?, second?), (1, 2));
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     #[must_use]
-    fn run<R, F, T>(&self, run_closure: R) -> impl RunFuture<Result<T, TerminalError>> + 'ctx
+    fn run<R, F, T>(&self, run_closure: R) -> Run<R>
     where
         R: RunClosure<Fut = F, Output = T> + Send + 'ctx,
         F: Future<Output = HandlerResult<T>> + Send + 'ctx,

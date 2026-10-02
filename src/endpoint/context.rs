@@ -5,6 +5,7 @@ use crate::context::{
 use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
+use crate::endpoint::futures::progress::{ProgressWakers, RegisteredRun};
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
@@ -29,11 +30,13 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant, SystemTime};
 
-pub struct ContextInternalInner {
-    pub(crate) vm: CoreVM,
-    pub(crate) read: InputReceiver,
-    pub(crate) write: OutputSender,
+pub(crate) struct ContextInternalInner {
+    pub(super) vm: CoreVM,
+    pub(super) read: InputReceiver,
+    pub(super) write: OutputSender,
     pub(super) handler_state: HandlerStateNotifier,
+    pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
+    pub(super) progress_wakers: Arc<ProgressWakers>,
 
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
     /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
@@ -52,11 +55,14 @@ impl ContextInternalInner {
             read,
             write,
             handler_state,
+            runs: HashMap::new(),
+            progress_wakers: Arc::default(),
             span_replaying_field_state: false,
         }
     }
 
     pub(super) fn fail(&mut self, e: Error) {
+        self.runs.clear();
         self.maybe_flip_span_replaying_field();
         self.vm.notify_error(
             CoreError::new(500u16, e.0.to_string())
@@ -815,17 +821,14 @@ impl ContextInternal {
         );
     }
 
-    pub fn run<'a, Run, Fut, Out>(
-        &'a self,
-        run_closure: Run,
-    ) -> impl RunFuture<Result<Out, TerminalError>> + Send + 'a
+    pub fn run<'a, Run, Fut, Out>(&'a self, run_closure: Run) -> crate::context::Run<Run>
     where
         Run: RunClosure<Fut = Fut, Output = Out> + Send + 'a,
         Fut: Future<Output = HandlerResult<Out>> + Send + 'a,
         Out: Serialize + Deserialize + 'static,
     {
         let this = Arc::clone(&self.inner);
-        InterceptErrorFuture::new(self.clone(), RunFutureImpl::new(this, run_closure))
+        crate::context::Run::new(self.clone(), RunFutureImpl::new(this, run_closure))
     }
 
     // Used by codegen
@@ -862,7 +865,9 @@ impl ContextInternal {
     }
 
     pub fn end(&self) {
-        let _ = must_lock!(self.inner).vm.sys_end();
+        let mut inner = must_lock!(self.inner);
+        inner.runs.clear();
+        let _ = inner.vm.sys_end();
     }
 
     pub(crate) fn consume_to_end(&self) {
@@ -907,7 +912,7 @@ impl ContextInternal {
 }
 
 pin_project! {
-    struct RunFutureImpl<Run, Ret, RunFnFut> {
+    pub(crate) struct RunFutureImpl<Run, Ret, RunFnFut> {
         name: String,
         retry_policy: RetryPolicy,
         phantom_data: PhantomData<fn() -> Ret>,
@@ -947,6 +952,70 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
                 closure: Some(closure),
             },
         }
+    }
+
+    pub(crate) fn start(
+        self,
+        ctx: ContextInternal,
+    ) -> impl DurableFuture<Output = Result<Ret, TerminalError>> + Send + 'static
+    where
+        Run: RunClosure<Fut = RunFnFut, Output = Ret> + Send + 'static,
+        RunFnFut: Future<Output = HandlerResult<Ret>> + Send + 'static,
+        Ret: Serialize + Deserialize + 'static,
+    {
+        let RunState::New {
+            ctx: inner,
+            closure,
+        } = self.state
+        else {
+            panic!("An action cannot be started after it has been polled");
+        };
+        let inner = inner.expect("Unpolled run has a context");
+        let closure = closure.expect("Unpolled run has a closure");
+        let mut guard = must_lock!(inner);
+        let result = guard.vm.sys_run(self.name);
+        guard.maybe_flip_span_replaying_field();
+        let handle = match result {
+            Ok(RunHandle { handle, replayed }) => {
+                if !replayed {
+                    let future = async move {
+                        let start = Instant::now();
+                        match closure.run().await {
+                            Ok(value) => {
+                                Ok(RunExitResult::Success(Ret::serialize(&value).map_err(
+                                    |err| ErrorInner::Serialization {
+                                        syscall: "run",
+                                        err: Box::new(err),
+                                    },
+                                )?))
+                            }
+                            Err(error) => match error.0 {
+                                HandlerErrorInner::Retryable(error) => {
+                                    Ok(RunExitResult::RetryableFailure {
+                                        attempt_duration: start.elapsed(),
+                                        error: CoreError::new(500u16, error.to_string()),
+                                    })
+                                }
+                                HandlerErrorInner::Terminal(error) => {
+                                    Ok(RunExitResult::TerminalFailure(TerminalError(error).into()))
+                                }
+                            },
+                        }
+                    }
+                    .boxed();
+                    guard
+                        .runs
+                        .insert(handle, RegisteredRun::new(future, self.retry_policy));
+                }
+                handle
+            }
+            Err(error) => {
+                guard.fail(error.into());
+                NotificationHandle::from(u32::MAX)
+            }
+        };
+        drop(guard);
+        DurableFutureImpl::new(ctx, handle, Self::boxed_result_fut(inner, handle))
     }
 
     fn boxed_result_fut(

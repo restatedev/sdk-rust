@@ -1,6 +1,14 @@
+use crate::context::DurableFuture;
+use crate::endpoint::ContextInternal;
+use crate::endpoint::context::RunFutureImpl;
+use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::errors::HandlerResult;
+use crate::errors::TerminalError;
 use crate::serde::{Deserialize, Serialize};
+use pin_project_lite::pin_project;
 use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 /// Run closure trait
@@ -37,6 +45,79 @@ pub trait RunFuture<O>: Future<Output = O> {
     ///
     /// This is used mainly for observability.
     fn name(self, name: impl Into<String>) -> Self;
+}
+
+pin_project! {
+    /// Configurable journaled action returned by [`ContextSideEffects::run`](super::ContextSideEffects::run).
+    ///
+    /// Await directly for a sequential action, or call [`Run::start`] to register an owned
+    /// action before awaiting it alongside other operations.
+    pub struct Run<R: RunClosure> {
+        #[pin]
+        inner: InterceptErrorFuture<RunFutureImpl<R, R::Output, R::Fut>>,
+    }
+}
+
+impl<R> Run<R>
+where
+    R: RunClosure + Send,
+    R::Fut: Send,
+{
+    pub(crate) fn new(ctx: ContextInternal, inner: RunFutureImpl<R, R::Output, R::Fut>) -> Self {
+        Self {
+            inner: InterceptErrorFuture::new(ctx, inner),
+        }
+    }
+
+    /// Register this action now, returning a durable future for its result.
+    ///
+    /// Configure the name and retry policy before calling `start`. Register all concurrent
+    /// actions in deterministic order before awaiting any of them, so replay observes the
+    /// same command order even when their closures complete in a different order.
+    ///
+    /// The invocation owns the closure after registration. Dropping the result future
+    /// does not cancel the action; it can continue while another durable operation is
+    /// awaited. Closures are dropped when the invocation finishes, suspends, or fails.
+    /// Captured values and the closure's future must therefore be owned (`'static`).
+    /// Sequential actions that borrow local values can still be awaited directly.
+    pub fn start(
+        self,
+    ) -> impl DurableFuture<Output = Result<R::Output, TerminalError>> + Send + 'static
+    where
+        R: 'static,
+        R::Fut: 'static,
+    {
+        let (ctx, inner) = self.inner.into_parts();
+        inner.start(ctx)
+    }
+}
+
+impl<R> Future for Run<R>
+where
+    R: RunClosure + Send,
+    R::Fut: Send,
+{
+    type Output = Result<R::Output, TerminalError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(cx)
+    }
+}
+
+impl<R> RunFuture<Result<R::Output, TerminalError>> for Run<R>
+where
+    R: RunClosure + Send,
+    R::Fut: Send,
+{
+    fn retry_policy(mut self, policy: RunRetryPolicy) -> Self {
+        self.inner = self.inner.retry_policy(policy);
+        self
+    }
+
+    fn name(mut self, name: impl Into<String>) -> Self {
+        self.inner = self.inner.name(name);
+        self
+    }
 }
 
 /// This struct represents the policy to execute retries for run closures.

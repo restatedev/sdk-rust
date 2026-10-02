@@ -1,6 +1,6 @@
 mod builder;
-mod context;
-mod futures;
+pub(crate) mod context;
+pub(crate) mod futures;
 mod handler_state;
 
 pub use builder::{Builder, HandlerOptions, ServiceOptions};
