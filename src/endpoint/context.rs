@@ -97,7 +97,9 @@ const _: () = is_send_sync::<ContextInternal>();
 
 macro_rules! must_lock {
     ($mutex:expr) => {
-        $mutex.try_lock().expect("You're trying to await two futures at the same time and/or trying to perform some operation on the restate context while awaiting a future. This is not supported!")
+        $mutex
+            .try_lock()
+            .expect("Concurrent access to the Restate context")
     };
 }
 

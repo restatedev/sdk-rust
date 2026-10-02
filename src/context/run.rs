@@ -80,6 +80,9 @@ where
     /// awaited. Closures are dropped when the invocation finishes, suspends, or fails.
     /// Captured values and the closure's future must therefore be owned (`'static`).
     /// Sequential actions that borrow local values can still be awaited directly.
+    ///
+    /// Cancellation fails existing result futures with code 409 and drops their
+    /// pending closures. New context operations can still be used for cleanup.
     pub fn start(
         self,
     ) -> impl DurableFuture<Output = Result<R::Output, TerminalError>> + Send + 'static

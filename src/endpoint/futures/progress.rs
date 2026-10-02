@@ -21,7 +21,7 @@ struct Waiters {
     wakers: HashMap<usize, Waker>,
 }
 
-/// Removes a waiter when its result is consumed or its future is dropped.
+/// Removes a waiter's wakeup subscription when its future is dropped.
 pub(crate) struct ProgressWaiter {
     generation: usize,
     registration: Option<(Arc<ProgressWakers>, usize)>,
