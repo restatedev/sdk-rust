@@ -107,7 +107,7 @@ impl RegisteredRun {
     }
 }
 
-fn flush(inner: &mut ContextInternalInner) -> Result<(), ErrorInner> {
+pub(crate) fn flush(inner: &mut ContextInternalInner) -> Result<(), ErrorInner> {
     let output = inner.vm.take_output();
     if !output.is_empty() && !inner.write.send(output) {
         return Err(ErrorInner::Suspended);

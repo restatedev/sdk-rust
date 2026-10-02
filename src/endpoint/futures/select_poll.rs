@@ -1,6 +1,6 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::ContextInternalInner;
-use crate::endpoint::futures::progress::{ProgressWaiter, poll_progress};
+use crate::endpoint::futures::progress::{ProgressWaiter, flush, poll_progress};
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{
     AwaitResponse, NotificationHandle, TerminalFailure, UnresolvedFuture, VM,
@@ -34,6 +34,20 @@ impl Future for VmSelectAsyncResultPollFuture {
     type Output = Result<Result<usize, TerminalError>, ErrorInner>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        {
+            let mut inner = self
+                .ctx
+                .try_lock()
+                .expect("Concurrent access to the Restate context");
+            if let Some(index) = self
+                .handles
+                .iter()
+                .position(|handle| inner.vm.is_completed(*handle))
+            {
+                flush(&mut inner)?;
+                return Poll::Ready(Ok(Ok(index)));
+            }
+        }
         let unresolved = UnresolvedFuture::FirstCompleted(
             self.handles
                 .iter()
