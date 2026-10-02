@@ -6,7 +6,7 @@ use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::progress::{
-    CancellationLedger, ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
+    ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
 };
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -28,7 +28,6 @@ use std::future::{Future, poll_fn, ready};
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant, SystemTime};
@@ -40,8 +39,10 @@ pub(crate) struct ContextInternalInner {
     pub(super) handler_state: HandlerStateNotifier,
     pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
     pub(super) progress_wakers: Arc<ProgressWakers>,
-    pub(super) cancellation_generation: Arc<AtomicUsize>,
-    pub(super) notifications: CancellationLedger,
+    pub(super) cancellation_generation: usize,
+    /// Notifications keep their registration epoch until consumed, including
+    /// submitted run proposals that the runtime has not acknowledged yet.
+    pub(super) notifications: HashMap<NotificationHandle, usize>,
 
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
     /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
@@ -54,8 +55,6 @@ impl ContextInternalInner {
         read: InputReceiver,
         write: OutputSender,
         handler_state: HandlerStateNotifier,
-        cancellation_generation: Arc<AtomicUsize>,
-        notifications: CancellationLedger,
     ) -> Self {
         Self {
             vm,
@@ -64,10 +63,16 @@ impl ContextInternalInner {
             handler_state,
             runs: HashMap::new(),
             progress_wakers: Arc::default(),
-            cancellation_generation,
-            notifications,
+            cancellation_generation: 0,
+            notifications: HashMap::new(),
             span_replaying_field_state: false,
         }
+    }
+
+    fn register_notification(&mut self, handle: NotificationHandle) -> usize {
+        let generation = self.cancellation_generation;
+        self.notifications.entry(handle).or_insert(generation);
+        generation
     }
 
     pub(super) fn fail(&mut self, e: Error) {
@@ -184,8 +189,6 @@ pub struct ContextInternal {
     svc_name: String,
     handler_name: String,
     inner: Arc<Mutex<ContextInternalInner>>,
-    cancellation_generation: Arc<AtomicUsize>,
-    notifications: CancellationLedger,
 }
 
 impl ContextInternal {
@@ -197,8 +200,6 @@ impl ContextInternal {
         write: OutputSender,
         handler_state: HandlerStateNotifier,
     ) -> Self {
-        let cancellation_generation = Arc::new(AtomicUsize::new(0));
-        let notifications = Arc::new(Mutex::new(HashMap::new()));
         Self {
             svc_name,
             handler_name,
@@ -207,11 +208,7 @@ impl ContextInternal {
                 read,
                 write,
                 handler_state,
-                Arc::clone(&cancellation_generation),
-                Arc::clone(&notifications),
             ))),
-            cancellation_generation,
-            notifications,
         }
     }
 
@@ -305,8 +302,7 @@ impl ContextInternal {
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
@@ -335,8 +331,7 @@ impl ContextInternal {
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -391,7 +386,7 @@ impl ContextInternal {
             VmSelectAsyncResultPollFuture::new(
                 self.inner.clone(),
                 handles,
-                self.cancellation_generation.load(Ordering::Relaxed),
+                must_lock!(self.inner).cancellation_generation,
             )
             .map_err(Error::from),
         ))
@@ -417,8 +412,7 @@ impl ContextInternal {
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(())),
@@ -486,6 +480,10 @@ impl ContextInternal {
             }
         };
         inner_lock.maybe_flip_span_replaying_field();
+        let invocation_id_generation =
+            inner_lock.register_notification(call_handle.invocation_id_notification_handle);
+        let result_generation =
+            inner_lock.register_notification(call_handle.call_notification_handle);
         drop(inner_lock);
 
         // Let's prepare the two futures here
@@ -494,8 +492,7 @@ impl ContextInternal {
             get_async_result(
                 Arc::clone(&self.inner),
                 call_handle.invocation_id_notification_handle,
-                self.cancellation_generation.load(Ordering::Relaxed),
-                Arc::clone(&self.notifications),
+                invocation_id_generation,
             )
             .map(|res| match res {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -511,8 +508,7 @@ impl ContextInternal {
         let result_future = get_async_result(
             Arc::clone(&self.inner),
             call_handle.call_notification_handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            result_generation,
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(
@@ -586,6 +582,8 @@ impl ContextInternal {
             }
         };
         inner_lock.maybe_flip_span_replaying_field();
+        let invocation_id_generation =
+            inner_lock.register_notification(send_handle.invocation_id_notification_handle);
         drop(inner_lock);
 
         let invocation_id_fut = InterceptErrorFuture::new(
@@ -593,8 +591,7 @@ impl ContextInternal {
             get_async_result(
                 Arc::clone(&self.inner),
                 send_handle.invocation_id_notification_handle,
-                self.cancellation_generation.load(Ordering::Relaxed),
-                Arc::clone(&self.notifications),
+                invocation_id_generation,
             )
             .map(|res| match res {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -638,13 +635,11 @@ impl ContextInternal {
                 .sys_attach_invocation(AttachInvocationTarget::InvocationId(invocation_id))
         );
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(T::deserialize(&mut s)
@@ -673,13 +668,11 @@ impl ContextInternal {
             inner_lock.vm.create_signal_handle(name.to_owned())
         );
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => {
@@ -746,13 +739,11 @@ impl ContextInternal {
                 );
             }
         };
-        drop(inner_lock);
 
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(
@@ -808,13 +799,11 @@ impl ContextInternal {
             inner_lock.vm.sys_get_promise(name.to_owned())
         );
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => {
@@ -840,13 +829,11 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_peek_promise(name.to_owned()));
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
         let poll_future = get_async_result(
             Arc::clone(&self.inner),
             handle,
-            self.cancellation_generation.load(Ordering::Relaxed),
-            Arc::clone(&self.notifications),
+            inner_lock.register_notification(handle),
         )
         .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
@@ -1050,10 +1037,11 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
         let inner = inner.expect("Unpolled run has a context");
         let closure = closure.expect("Unpolled run has a closure");
         let mut guard = must_lock!(inner);
-        let generation = guard.cancellation_generation.load(Ordering::Relaxed);
+        let generation = guard.cancellation_generation;
         let RunHandle { handle, replayed } =
             unwrap_or_trap_durable_future!(ctx, guard, guard.vm.sys_run(self.name));
         guard.maybe_flip_span_replaying_field();
+        guard.register_notification(handle);
         if !replayed {
             let future = async move {
                 let start = Instant::now();
@@ -1098,8 +1086,7 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
     where
         Ret: Deserialize,
     {
-        let notifications = Arc::clone(&must_lock!(ctx).notifications);
-        get_async_result(Arc::clone(&ctx), handle, generation, notifications)
+        get_async_result(ctx, handle, generation)
             .map(|res| match res {
                 Ok(Value::Success(mut s)) => {
                     let t =
@@ -1165,17 +1152,13 @@ where
                         .expect("Future should not be polled after returning Poll::Ready");
                     let mut inner_ctx = must_lock!(ctx);
 
-                    let generation = inner_ctx.cancellation_generation.load(Ordering::Relaxed);
+                    let generation = inner_ctx.cancellation_generation;
                     let RunHandle { handle, .. } = inner_ctx
                         .vm
                         .sys_run(this.name.to_owned())
                         .map_err(ErrorInner::from)?;
 
-                    inner_ctx
-                        .notifications
-                        .lock()
-                        .unwrap()
-                        .insert(handle, generation);
+                    inner_ctx.notifications.insert(handle, generation);
 
                     // Flush the registered command before executing the borrowing closure.
                     let b = inner_ctx.vm.take_output();
@@ -1241,7 +1224,7 @@ where
                     let cancelled = {
                         let inner =
                             must_lock!(ctx.as_ref().expect("Running closure has a context"));
-                        inner.cancellation_generation.load(Ordering::Relaxed) != waiter.generation()
+                        inner.cancellation_generation != waiter.generation()
                     };
                     if cancelled {
                         this.state.set(RunState::WaitingResultFut {
@@ -1428,7 +1411,6 @@ fn get_async_result(
     ctx: Arc<Mutex<ContextInternalInner>>,
     handle: NotificationHandle,
     generation: usize,
-    notifications: CancellationLedger,
 ) -> impl Future<Output = Result<Value, Error>> + Send {
-    VmAsyncResultPollFuture::new(ctx, handle, generation, notifications).map_err(Error::from)
+    VmAsyncResultPollFuture::new(ctx, handle, generation).map_err(Error::from)
 }

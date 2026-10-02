@@ -7,13 +7,8 @@ use restate_sdk_shared_core::{
     UnresolvedFuture, VM,
 };
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-
-/// Outstanding notifications retain their registration epoch until consumed,
-/// including run results whose completion proposal has already been submitted.
-pub(crate) type CancellationLedger = Arc<Mutex<HashMap<NotificationHandle, usize>>>;
 
 /// One input stream and all owned run closures share a wakeup source. Input may
 /// satisfy a sibling future, so its consumer must wake every registered waiter.
@@ -116,9 +111,7 @@ pub(crate) fn flush(inner: &mut ContextInternalInner) -> Result<(), ErrorInner> 
 }
 
 pub(crate) fn cancel_runs(inner: &mut ContextInternalInner) {
-    inner
-        .cancellation_generation
-        .fetch_add(1, Ordering::Relaxed);
+    inner.cancellation_generation += 1;
     inner.runs.clear();
 }
 
@@ -152,13 +145,9 @@ pub(crate) fn poll_progress(
 ) -> Poll<Result<AwaitResponse, ErrorInner>> {
     let wakers = {
         let inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
-        let generation = inner.cancellation_generation.load(Ordering::Relaxed);
+        let generation = inner.cancellation_generation;
         if waiter.generation != generation
-            || includes_cancelled_notification(
-                &awaited,
-                &inner.notifications.lock().unwrap(),
-                generation,
-            )
+            || includes_cancelled_notification(&awaited, &inner.notifications, generation)
         {
             return Poll::Ready(Ok(AwaitResponse::CancelSignalReceived));
         }

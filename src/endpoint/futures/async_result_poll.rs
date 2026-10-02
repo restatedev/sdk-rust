@@ -1,8 +1,6 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
-use crate::endpoint::futures::progress::{
-    CancellationLedger, ProgressWaiter, flush, poll_progress,
-};
+use crate::endpoint::futures::progress::{ProgressWaiter, flush, poll_progress};
 use restate_sdk_shared_core::{
     AwaitResponse, NotificationHandle, TerminalFailure, UnresolvedFuture, VM, Value,
 };
@@ -22,13 +20,7 @@ impl VmAsyncResultPollFuture {
         ctx: Arc<Mutex<ContextInternalInner>>,
         handle: NotificationHandle,
         generation: usize,
-        notifications: CancellationLedger,
     ) -> Self {
-        notifications
-            .lock()
-            .unwrap()
-            .entry(handle)
-            .or_insert(generation);
         Self {
             ctx,
             handle,
@@ -52,7 +44,7 @@ fn take_completed_result(
         .vm
         .take_notification(handle)?
         .expect("Completed handle has a notification");
-    inner.notifications.lock().unwrap().remove(&handle);
+    inner.notifications.remove(&handle);
     Ok(Some(notification))
 }
 
