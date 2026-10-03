@@ -399,49 +399,75 @@ impl CancellationWithPendingCall {
 
 #[tokio::test]
 async fn acknowledged_run_survives_cancellation_waiting_for_a_call_invocation_id() {
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Call {
+        #[prost(string, tag = "1")]
+        service_name: String,
+        #[prost(string, tag = "2")]
+        handler_name: String,
+        #[prost(uint32, tag = "10")]
+        invocation_id_notification_idx: u32,
+        #[prost(uint32, tag = "11")]
+        result_completion_id: u32,
+    }
+
     for version in [6, 7] {
-        let endpoint = Endpoint::builder()
-            .bind(CancellationWithPendingCall)
-            .build();
-        let mut invocation = Invocation::new(
-            &endpoint,
-            "CancellationWithPendingCall",
-            version,
-            &[input()],
-            0,
-        );
-        let proposal = invocation.through(PROPOSAL).await;
-        let run = proposal.decode::<Proposal>();
-        assert_eq!(run.completion_id, 3);
-        let mut batch = BytesMut::from(
-            encode(
-                SIGNAL,
-                &Signal {
-                    index: Some(1),
-                    failure: Some(Failure {
-                        code: 409,
-                        message: "cancelled".into(),
-                    }),
-                },
-            )
-            .as_ref(),
-        );
-        let acknowledgment = if proposal.requests_ack {
-            encode(
-                ACK,
-                &Ack {
-                    completion_id: run.completion_id,
-                },
-            )
-        } else {
-            completion(&run)
-        };
-        batch.extend_from_slice(&acknowledgment);
-        invocation.send(batch.freeze());
-        assert_eq!(
-            finish(&mut invocation).await.value.unwrap().content,
-            Bytes::from_static(b"42")
-        );
+        for replay_call in [false, true] {
+            let endpoint = Endpoint::builder()
+                .bind(CancellationWithPendingCall)
+                .build();
+            let mut journal = vec![input()];
+            if replay_call {
+                journal.push(encode(
+                    0x040d,
+                    &Call {
+                        service_name: "Sibling".into(),
+                        handler_name: "run".into(),
+                        invocation_id_notification_idx: 1,
+                        result_completion_id: 2,
+                    },
+                ));
+            }
+            let mut invocation = Invocation::new(
+                &endpoint,
+                "CancellationWithPendingCall",
+                version,
+                &journal,
+                0,
+            );
+            let proposal = invocation.through(PROPOSAL).await;
+            let run = proposal.decode::<Proposal>();
+            assert_eq!(run.completion_id, 3);
+            let mut batch = BytesMut::from(
+                encode(
+                    SIGNAL,
+                    &Signal {
+                        index: Some(1),
+                        failure: Some(Failure {
+                            code: 409,
+                            message: "cancelled".into(),
+                        }),
+                    },
+                )
+                .as_ref(),
+            );
+            let acknowledgment = if proposal.requests_ack {
+                encode(
+                    ACK,
+                    &Ack {
+                        completion_id: run.completion_id,
+                    },
+                )
+            } else {
+                completion(&run)
+            };
+            batch.extend_from_slice(&acknowledgment);
+            invocation.send(batch.freeze());
+            assert_eq!(
+                finish(&mut invocation).await.value.unwrap().content,
+                Bytes::from_static(b"42")
+            );
+        }
     }
 }
 
