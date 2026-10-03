@@ -6,7 +6,7 @@ use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::progress::{
-    Awaited, ProgressGuard, ProgressResult, ProgressWakers, RegisteredRun, poll_progress,
+    ProgressGuard, ProgressResult, ProgressWakers, RegisteredRun, poll_progress,
 };
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -1272,16 +1272,9 @@ where
                     }
                     let mut closure_result = closure_fut.as_mut().poll(cx);
                     if closure_result.is_pending() {
-                        match poll_progress(
-                            guard,
-                            cx,
-                            Awaited::Single(*handle),
-                            |_| -> Result<(), ErrorInner> {
-                                unreachable!(
-                                    "Borrowed run cannot complete before proposing its result"
-                                )
-                            },
-                        ) {
+                        match poll_progress(guard, cx, *handle, |_| -> Result<(), ErrorInner> {
+                            unreachable!("Borrowed run cannot complete before proposing its result")
+                        }) {
                             Poll::Ready(Err(error)) => return Poll::Ready(Err(error.into())),
                             Poll::Ready(Ok(ProgressResult::Cancelled)) => {
                                 this.state.set(RunState::WaitingResultFut {

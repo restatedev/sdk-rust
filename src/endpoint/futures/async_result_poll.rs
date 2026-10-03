@@ -1,6 +1,6 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::{ContextInternalInner, ContextShared};
-use crate::endpoint::futures::progress::{Awaited, ProgressGuard, ProgressResult, poll_progress};
+use crate::endpoint::futures::progress::{ProgressGuard, ProgressResult, poll_progress};
 use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, VM, Value};
 use std::future::Future;
 use std::pin::Pin;
@@ -42,12 +42,9 @@ impl Future for VmAsyncResultPollFuture {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
-        match ready!(poll_progress(
-            &mut this.guard,
-            cx,
-            Awaited::Single(this.handle),
-            |inner| take_completed_result(inner, this.handle),
-        ))? {
+        match ready!(poll_progress(&mut this.guard, cx, this.handle, |inner| {
+            take_completed_result(inner, this.handle)
+        }))? {
             ProgressResult::Completed(notification) => Poll::Ready(Ok(notification)),
             ProgressResult::Cancelled => Poll::Ready(Ok(Value::Failure(TerminalFailure {
                 code: 409,

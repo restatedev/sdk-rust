@@ -1,6 +1,6 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::ContextShared;
-use crate::endpoint::futures::progress::{Awaited, ProgressGuard, ProgressResult, poll_progress};
+use crate::endpoint::futures::progress::{ProgressGuard, ProgressResult, poll_progress};
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, VM};
 use std::future::Future;
@@ -34,7 +34,7 @@ impl Future for VmSelectAsyncResultPollFuture {
         match ready!(poll_progress(
             &mut this.guard,
             cx,
-            Awaited::FirstCompleted(&this.handles),
+            this.handles.as_slice(),
             |inner| {
                 Ok(this
                     .handles

@@ -114,7 +114,6 @@ impl ProgressWaiter {
         }
     }
 
-    #[inline]
     fn register(&mut self, wakers: &ProgressWakers, waker: &Waker) {
         if self
             .registration
@@ -123,10 +122,6 @@ impl ProgressWaiter {
         {
             return;
         }
-        self.register_changed(wakers, waker);
-    }
-
-    fn register_changed(&mut self, wakers: &ProgressWakers, waker: &Waker) {
         let mut waiters = wakers.waiters.lock().unwrap();
         let id = match &self.registration {
             Some((id, _)) => *id,
@@ -284,36 +279,35 @@ fn poll_input(
     Poll::Ready(())
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum Awaited<'a> {
-    Single(NotificationHandle),
-    FirstCompleted(&'a [NotificationHandle]),
+pub(crate) trait Awaited: Copy {
+    fn handles(&self) -> &[NotificationHandle];
+    fn into_unresolved(self) -> UnresolvedFuture;
 }
 
-impl Awaited<'_> {
+impl Awaited for NotificationHandle {
     fn handles(&self) -> &[NotificationHandle] {
-        match self {
-            Self::Single(handle) => std::slice::from_ref(handle),
-            Self::FirstCompleted(handles) => handles,
-        }
+        std::slice::from_ref(self)
     }
 
     fn into_unresolved(self) -> UnresolvedFuture {
-        match self {
-            Self::Single(handle) => UnresolvedFuture::Single(handle),
-            Self::FirstCompleted(handles) => UnresolvedFuture::FirstCompleted(
-                handles
-                    .iter()
-                    .copied()
-                    .map(UnresolvedFuture::Single)
-                    .collect(),
-            ),
-        }
+        UnresolvedFuture::Single(self)
+    }
+}
+
+impl Awaited for &[NotificationHandle] {
+    fn handles(&self) -> &[NotificationHandle] {
+        self
+    }
+
+    fn into_unresolved(self) -> UnresolvedFuture {
+        UnresolvedFuture::FirstCompleted(
+            self.iter().copied().map(UnresolvedFuture::Single).collect(),
+        )
     }
 }
 
 fn includes_cancelled_notification(
-    future: Awaited<'_>,
+    future: impl Awaited,
     notifications: &HashMap<NotificationHandle, usize>,
     generation: usize,
 ) -> bool {
@@ -324,7 +318,7 @@ fn includes_cancelled_notification(
             .any(|handle| notifications.get(handle).copied().unwrap_or(0) != generation)
 }
 
-fn is_completed(future: Awaited<'_>, vm: &impl VM) -> bool {
+fn is_completed(future: impl Awaited, vm: &impl VM) -> bool {
     future
         .handles()
         .iter()
@@ -341,7 +335,7 @@ pub(crate) enum ProgressResult<T> {
 pub(crate) fn poll_progress<T>(
     guard: &mut ProgressGuard,
     cx: &mut Context<'_>,
-    awaited: Awaited<'_>,
+    awaited: impl Awaited,
     completed: impl FnOnce(&mut ContextInternalInner) -> Result<T, ErrorInner>,
 ) -> Poll<Result<ProgressResult<T>, ErrorInner>> {
     let ProgressGuard { ctx, waiter } = guard;
