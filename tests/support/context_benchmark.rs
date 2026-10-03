@@ -160,10 +160,11 @@ pub async fn measure(
 ) {
     let samples = setting("SDK_BENCH_SAMPLES", 10);
     let warmup = setting("SDK_BENCH_WARMUP", 3);
+    let warmup_minimum = Duration::from_millis(setting("SDK_BENCH_WARMUP_MS", 1000) as u64);
     let invocations = setting("SDK_BENCH_OPERATIONS_PER_SAMPLE", 1000)
         .div_ceil(operations)
         .max(1);
-    for batch in 0..warmup + samples {
+    let run_batch = || async {
         let mut elapsed = Duration::ZERO;
         for _ in 0..invocations {
             elapsed += tokio::time::timeout(
@@ -173,14 +174,26 @@ pub async fn measure(
             .await
             .expect("benchmark invocation stalled");
         }
-        if batch >= warmup {
-            println!(
-                "SDK_BENCH workload={label} operations={operations} invocations={invocations} sample={} elapsed_ns={} ns_per_invocation={:.3} ns_per_operation={:.3}",
-                batch - warmup,
-                elapsed.as_nanos(),
-                elapsed.as_nanos() as f64 / invocations as f64,
-                elapsed.as_nanos() as f64 / (invocations * operations) as f64,
-            );
-        }
+        elapsed
+    };
+    let warmup_start = Instant::now();
+    let mut warmed_batches = 0;
+    while warmed_batches < warmup || warmup_start.elapsed() < warmup_minimum {
+        run_batch().await;
+        warmed_batches += 1;
+    }
+    println!(
+        "SDK_BENCH_WARMUP workload={label} operations={operations} batches={warmed_batches} minimum_ms={} elapsed_ns={}",
+        warmup_minimum.as_millis(),
+        warmup_start.elapsed().as_nanos(),
+    );
+    for sample in 0..samples {
+        let elapsed = run_batch().await;
+        println!(
+            "SDK_BENCH workload={label} operations={operations} invocations={invocations} sample={sample} elapsed_ns={} ns_per_invocation={:.3} ns_per_operation={:.3}",
+            elapsed.as_nanos(),
+            elapsed.as_nanos() as f64 / invocations as f64,
+            elapsed.as_nanos() as f64 / (invocations * operations) as f64,
+        );
     }
 }
