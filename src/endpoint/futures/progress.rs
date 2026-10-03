@@ -250,18 +250,20 @@ pub(crate) fn cancel_runs(inner: &mut ContextInternalInner) {
     inner.executing_runs.clear();
 }
 
+#[inline]
 fn poll_input(
     inner: &mut ContextInternalInner,
     cx: &mut Context<'_>,
     shared_cx: &mut Context<'_>,
     wakers: &ProgressWakers,
-) -> Poll<()> {
+) -> Poll<bool> {
+    // Registration requires this VM lock, so the count cannot increase while
+    // input is polled. Concurrent drops can only make this snapshot conservative.
+    let subscriber_count = wakers.subscriber_count.load(Ordering::Acquire);
     // A sole waiter can register its executor waker directly. A new pending
     // sibling registers before polling input and installs the shared waker,
     // so dropping either waiter cannot leave the other without an input wakeup.
-    let input = if inner.runs.is_empty()
-        && inner.executing_runs.is_empty()
-        && wakers.subscriber_count.load(Ordering::Acquire) == 1
+    let input = if inner.runs.is_empty() && inner.executing_runs.is_empty() && subscriber_count == 1
     {
         inner.read.poll_recv(cx)
     } else {
@@ -276,7 +278,7 @@ fn poll_input(
         None => inner.vm.notify_input_closed(),
     }
     inner.progress_version += 1;
-    Poll::Ready(())
+    Poll::Ready(subscriber_count > 1)
 }
 
 pub(crate) trait Awaited: Copy {
@@ -416,8 +418,7 @@ pub(crate) fn poll_progress<T>(
             if !waiting_input {
                 return Poll::Pending;
             }
-            ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers));
-            if wakers.subscriber_count.load(Ordering::Acquire) > 1 {
+            if ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers)) {
                 drop(inner);
                 waiter.wake_siblings(wakers);
                 inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
@@ -476,8 +477,7 @@ pub(crate) fn poll_progress<T>(
                 if !waiting_input {
                     return Poll::Pending;
                 }
-                ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers));
-                if wakers.subscriber_count.load(Ordering::Acquire) > 1 {
+                if ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers)) {
                     drop(inner);
                     waiter.wake_siblings(wakers);
                     inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
