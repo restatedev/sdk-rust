@@ -274,7 +274,9 @@ pub(crate) fn poll_progress<T>(
     // A cached wait drained the notification queue and checked readiness. With
     // no new progress its target stays unready; stale cancellation epochs still
     // check known results before settling cancellation.
-    if (!unchanged_wait || cancelled) && is_completed(awaited, &inner.vm) {
+    if (cancelled || inner.may_have_pending_invocation_ids && !unchanged_wait)
+        && is_completed(awaited, &inner.vm)
+    {
         flush(&mut inner)?;
         return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
     }
@@ -381,7 +383,7 @@ pub(crate) fn poll_progress<T>(
                 // Cancellation can wait for outstanding call invocation IDs.
                 // Resolving those IDs can consume a sibling notification and
                 // make this result ready without settling cancellation yet.
-                if is_completed(awaited, &inner.vm) {
+                if inner.may_have_pending_invocation_ids && is_completed(awaited, &inner.vm) {
                     return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
                 }
                 waiter.waiting_progress = Some((inner.progress_version, waiting_input));

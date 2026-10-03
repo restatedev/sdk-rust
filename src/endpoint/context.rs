@@ -40,6 +40,9 @@ pub(crate) struct ContextInternalInner {
     pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
     pub(super) executing_runs: Vec<(NotificationHandle, RegisteredRun)>,
     pub(super) progress_version: usize,
+    /// Shared-core can delay cancellation while resolving call/send invocation
+    /// IDs. Once one is registered, keep checking for results made ready there.
+    pub(super) may_have_pending_invocation_ids: bool,
     pub(super) progress_wakers: Arc<ProgressWakers>,
     pub(super) cancellation_generation: usize,
     /// Unrecorded handles belong to cancellation generation zero. After the
@@ -67,6 +70,7 @@ impl ContextInternalInner {
             runs: HashMap::new(),
             executing_runs: Vec::new(),
             progress_version: 0,
+            may_have_pending_invocation_ids: false,
             progress_wakers: Arc::default(),
             cancellation_generation: 0,
             notifications: HashMap::new(),
@@ -491,6 +495,7 @@ impl ContextInternal {
         inner_lock.maybe_flip_span_replaying_field();
         let invocation_id_generation =
             inner_lock.register_notification(call_handle.invocation_id_notification_handle);
+        inner_lock.may_have_pending_invocation_ids = true;
         let result_generation =
             inner_lock.register_notification(call_handle.call_notification_handle);
         drop(inner_lock);
@@ -593,6 +598,7 @@ impl ContextInternal {
         inner_lock.maybe_flip_span_replaying_field();
         let invocation_id_generation =
             inner_lock.register_notification(send_handle.invocation_id_notification_handle);
+        inner_lock.may_have_pending_invocation_ids = true;
         drop(inner_lock);
 
         let invocation_id_fut = InterceptErrorFuture::new(
