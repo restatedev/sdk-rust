@@ -16,7 +16,7 @@ use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::task::Poll;
+use std::task::{Poll, Waker};
 use std::time::Duration;
 use tokio::sync::{Notify, mpsc};
 
@@ -374,6 +374,163 @@ struct ParkedOperation {
     timer: bool,
 }
 
+struct CancellationWithPendingCall;
+
+#[service]
+impl CancellationWithPendingCall {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>) -> HandlerResult<u32> {
+        let _call = ctx
+            .request::<_, ()>(RequestTarget::service("Sibling", "run"), ())
+            .call();
+        let run = ctx.run(|| async { Ok(42u32) }).start();
+        // Keep another owned closure executing so protocol V7 also suppresses
+        // Awaiting output while cancellation waits for the call invocation ID.
+        drop(
+            ctx.run(|| async {
+                std::future::pending::<()>().await;
+                Ok(())
+            })
+            .start(),
+        );
+        Ok(run.await?)
+    }
+}
+
+#[tokio::test]
+async fn acknowledged_run_survives_cancellation_waiting_for_a_call_invocation_id() {
+    for version in [6, 7] {
+        let endpoint = Endpoint::builder()
+            .bind(CancellationWithPendingCall)
+            .build();
+        let mut invocation = Invocation::new(
+            &endpoint,
+            "CancellationWithPendingCall",
+            version,
+            &[input()],
+            0,
+        );
+        let proposal = invocation.through(PROPOSAL).await;
+        let run = proposal.decode::<Proposal>();
+        assert_eq!(run.completion_id, 3);
+        let mut batch = BytesMut::from(
+            encode(
+                SIGNAL,
+                &Signal {
+                    index: Some(1),
+                    failure: Some(Failure {
+                        code: 409,
+                        message: "cancelled".into(),
+                    }),
+                },
+            )
+            .as_ref(),
+        );
+        let acknowledgment = if proposal.requests_ack {
+            encode(
+                ACK,
+                &Ack {
+                    completion_id: run.completion_id,
+                },
+            )
+        } else {
+            completion(&run)
+        };
+        batch.extend_from_slice(&acknowledgment);
+        invocation.send(batch.freeze());
+        assert_eq!(
+            finish(&mut invocation).await.value.unwrap().content,
+            Bytes::from_static(b"42")
+        );
+    }
+}
+
+struct ForwardWake {
+    wakes: Arc<AtomicUsize>,
+    waker: Waker,
+}
+
+impl futures::task::ArcWake for ForwardWake {
+    fn wake_by_ref(this: &Arc<Self>) {
+        this.wakes.fetch_add(1, Ordering::SeqCst);
+        this.waker.wake_by_ref();
+    }
+}
+
+struct InputWaiterHandoff {
+    registered: Arc<AtomicUsize>,
+    wakes: Arc<AtomicUsize>,
+}
+
+#[service]
+impl InputWaiterHandoff {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>) -> HandlerResult<()> {
+        let mut first = Box::pin(ctx.sleep(Duration::from_secs(10)));
+        let mut second = Box::pin(ctx.sleep(Duration::from_secs(10)));
+        poll_fn(|cx| {
+            let first_waker = futures::task::waker(Arc::new(ProbeWake));
+            let second_waker = futures::task::waker(Arc::new(ForwardWake {
+                wakes: self.wakes.clone(),
+                waker: cx.waker().clone(),
+            }));
+            assert!(
+                first
+                    .as_mut()
+                    .poll(&mut std::task::Context::from_waker(&first_waker))
+                    .is_pending()
+            );
+            assert!(
+                second
+                    .as_mut()
+                    .poll(&mut std::task::Context::from_waker(&second_waker))
+                    .is_pending()
+            );
+            Poll::Ready(())
+        })
+        .await;
+        drop(first);
+        self.wakes.store(0, Ordering::SeqCst);
+        self.registered.store(1, Ordering::SeqCst);
+        poll_fn(|cx| {
+            if self.wakes.load(Ordering::SeqCst) == 0 {
+                return Poll::Pending;
+            }
+            second.as_mut().poll(cx)
+        })
+        .await?;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_new_sibling_takes_over_input_wakes_when_the_first_waiter_is_dropped() {
+    for version in [6, 7] {
+        let registered = Arc::new(AtomicUsize::new(0));
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let endpoint = Endpoint::builder()
+            .bind(InputWaiterHandoff {
+                registered: registered.clone(),
+                wakes: wakes.clone(),
+            })
+            .build();
+        let mut invocation =
+            Invocation::new(&endpoint, "InputWaiterHandoff", version, &[input()], 0);
+        invocation
+            .drive_until(|| registered.load(Ordering::SeqCst) == 1)
+            .await;
+        invocation.send(encode(
+            0x800c,
+            &SleepCompletion {
+                completion_id: 2,
+                void: Some(Void {}),
+            },
+        ));
+        finish(&mut invocation).await;
+        assert!(wakes.load(Ordering::SeqCst) > 0);
+    }
+}
+
 #[service]
 impl ParkedOperation {
     #[handler]
@@ -535,7 +692,14 @@ impl StartedRuns {
                     Poll::Ready(())
                 })
                 .await;
-                let second_value = second.await?;
+                let second_value = poll_fn(|cx| {
+                    let result = second.as_mut().poll(cx);
+                    if result.is_pending() {
+                        assert!(first.as_mut().poll(cx).is_pending());
+                    }
+                    result
+                })
+                .await?;
                 Ok(Json(vec![first.await?, second_value]))
             }
             Mode::CancelSelectReady => {

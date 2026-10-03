@@ -8,6 +8,7 @@ use restate_sdk_shared_core::{
 };
 use std::collections::HashMap;
 use std::mem;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker, ready};
 
@@ -19,7 +20,10 @@ use std::task::{Context, Poll, Waker, ready};
 /// the input stream. The current waiter keeps driving after consuming input, so
 /// it does not need a second wakeup for that progress.
 #[derive(Default)]
-pub(crate) struct ProgressWakers(Mutex<Waiters>);
+pub(crate) struct ProgressWakers {
+    waiters: Mutex<Waiters>,
+    subscriber_count: AtomicUsize,
+}
 
 #[derive(Default)]
 struct Waiters {
@@ -56,7 +60,7 @@ impl ProgressWaiter {
         {
             return;
         }
-        let mut waiters = wakers.0.lock().unwrap();
+        let mut waiters = wakers.waiters.lock().unwrap();
         let id = match &self.registration {
             Some((_, id, _)) => *id,
             None => {
@@ -64,6 +68,7 @@ impl ProgressWaiter {
                 waiters.next_id = id
                     .checked_add(1)
                     .expect("Too many waiters in one invocation");
+                wakers.subscriber_count.fetch_add(1, Ordering::Release);
                 id
             }
         };
@@ -80,6 +85,9 @@ impl ProgressWaiter {
     }
 
     fn wake_siblings(&self, wakers: &ProgressWakers) {
+        if wakers.subscriber_count.load(Ordering::Acquire) <= 1 {
+            return;
+        }
         wakers.wake_waiters(self.registration.as_ref().map(|(_, id, _)| *id));
     }
 }
@@ -87,20 +95,21 @@ impl ProgressWaiter {
 impl Drop for ProgressWaiter {
     fn drop(&mut self) {
         if let Some((wakers, id, _)) = &self.registration {
-            let mut waiters = wakers.0.lock().unwrap();
+            let mut waiters = wakers.waiters.lock().unwrap();
             if waiters.first.as_ref().is_some_and(|(first, _)| first == id) {
                 let next = waiters.wakers.keys().next().copied();
                 waiters.first = next.map(|next| (next, waiters.wakers.remove(&next).unwrap()));
             } else {
                 waiters.wakers.remove(id);
             }
+            wakers.subscriber_count.fetch_sub(1, Ordering::Release);
         }
     }
 }
 
 impl ProgressWakers {
     fn wake_waiters(&self, except: Option<usize>) {
-        let waiters = self.0.lock().unwrap();
+        let waiters = self.waiters.lock().unwrap();
         if waiters.wakers.is_empty() {
             let waiter = waiters
                 .first
@@ -165,8 +174,24 @@ pub(crate) fn cancel_runs(inner: &mut ContextInternalInner) {
     inner.executing_runs.clear();
 }
 
-fn poll_input(inner: &mut ContextInternalInner, cx: &mut Context<'_>) -> Poll<()> {
-    match ready!(inner.read.poll_recv(cx)) {
+fn poll_input(
+    inner: &mut ContextInternalInner,
+    cx: &mut Context<'_>,
+    shared_cx: &mut Context<'_>,
+    wakers: &ProgressWakers,
+) -> Poll<()> {
+    // A sole waiter can register its executor waker directly. A new pending
+    // sibling registers before polling input and installs the shared waker,
+    // so dropping either waiter cannot leave the other without an input wakeup.
+    let input = if inner.runs.is_empty()
+        && inner.executing_runs.is_empty()
+        && wakers.subscriber_count.load(Ordering::Acquire) == 1
+    {
+        inner.read.poll_recv(cx)
+    } else {
+        inner.read.poll_recv(shared_cx)
+    };
+    match ready!(input) {
         Some(Ok(input)) => inner.vm.notify_input(input),
         Some(Err(error)) => inner.vm.notify_error(
             CoreError::new(500u16, format!("Error when reading the body {error:?}")),
@@ -178,37 +203,51 @@ fn poll_input(inner: &mut ContextInternalInner, cx: &mut Context<'_>) -> Poll<()
     Poll::Ready(())
 }
 
-fn includes_cancelled_notification(
-    future: &UnresolvedFuture,
-    notifications: &HashMap<NotificationHandle, usize>,
-    generation: usize,
-) -> bool {
-    if generation == 0 {
-        return false;
-    }
-    match future {
-        UnresolvedFuture::Single(handle) => {
-            notifications.get(handle).copied().unwrap_or(0) != generation
+#[derive(Clone, Copy)]
+pub(crate) enum Awaited<'a> {
+    Single(NotificationHandle),
+    FirstCompleted(&'a [NotificationHandle]),
+}
+
+impl Awaited<'_> {
+    fn handles(&self) -> &[NotificationHandle] {
+        match self {
+            Self::Single(handle) => std::slice::from_ref(handle),
+            Self::FirstCompleted(handles) => handles,
         }
-        UnresolvedFuture::Unknown(futures)
-        | UnresolvedFuture::FirstCompleted(futures)
-        | UnresolvedFuture::AllCompleted(futures)
-        | UnresolvedFuture::FirstSucceededOrAllFailed(futures)
-        | UnresolvedFuture::AllSucceededOrFirstFailed(futures) => futures
-            .iter()
-            .any(|future| includes_cancelled_notification(future, notifications, generation)),
-        _ => false,
+    }
+
+    fn into_unresolved(self) -> UnresolvedFuture {
+        match self {
+            Self::Single(handle) => UnresolvedFuture::Single(handle),
+            Self::FirstCompleted(handles) => UnresolvedFuture::FirstCompleted(
+                handles
+                    .iter()
+                    .copied()
+                    .map(UnresolvedFuture::Single)
+                    .collect(),
+            ),
+        }
     }
 }
 
-fn is_completed(future: &UnresolvedFuture, vm: &impl VM) -> bool {
-    match future {
-        UnresolvedFuture::Single(handle) => vm.is_completed(*handle),
-        UnresolvedFuture::FirstCompleted(futures) => {
-            futures.iter().any(|future| is_completed(future, vm))
-        }
-        _ => false,
-    }
+fn includes_cancelled_notification(
+    future: Awaited<'_>,
+    notifications: &HashMap<NotificationHandle, usize>,
+    generation: usize,
+) -> bool {
+    generation != 0
+        && future
+            .handles()
+            .iter()
+            .any(|handle| notifications.get(handle).copied().unwrap_or(0) != generation)
+}
+
+fn is_completed(future: Awaited<'_>, vm: &impl VM) -> bool {
+    future
+        .handles()
+        .iter()
+        .any(|handle| vm.is_completed(*handle))
 }
 
 pub(crate) enum ProgressResult<T> {
@@ -222,23 +261,33 @@ pub(crate) fn poll_progress<T>(
     ctx: &Arc<Mutex<ContextInternalInner>>,
     cx: &mut Context<'_>,
     waiter: &mut ProgressWaiter,
-    awaited: UnresolvedFuture,
+    awaited: Awaited<'_>,
     completed: impl FnOnce(&mut ContextInternalInner) -> Result<T, ErrorInner>,
 ) -> Poll<Result<ProgressResult<T>, ErrorInner>> {
     let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
-    if is_completed(&awaited, &inner.vm) {
+    let generation = inner.cancellation_generation;
+    let cancelled = waiter.generation != generation
+        || includes_cancelled_notification(awaited, &inner.notifications, generation);
+    let unchanged_wait = waiter
+        .waiting_progress
+        .is_some_and(|(version, _)| version == inner.progress_version);
+    // A cached wait drained the notification queue and checked readiness. With
+    // no new progress its target stays unready; stale cancellation epochs still
+    // check known results before settling cancellation.
+    if (!unchanged_wait || cancelled) && is_completed(awaited, &inner.vm) {
         flush(&mut inner)?;
         return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
     }
-    let generation = inner.cancellation_generation;
-    if waiter.generation != generation
-        || includes_cancelled_notification(&awaited, &inner.notifications, generation)
-    {
+    if cancelled {
         return Poll::Ready(Ok(ProgressResult::Cancelled));
     }
-    let wakers = Arc::clone(&inner.progress_wakers);
-    waiter.register(&wakers, cx.waker());
-    let waker = waker_ref(&wakers);
+    waiter.register(&inner.progress_wakers, cx.waker());
+    let wakers = &waiter
+        .registration
+        .as_ref()
+        .expect("Registered waiter has a wakeup source")
+        .0;
+    let waker = waker_ref(wakers);
     let mut shared_cx = Context::from_waker(&waker);
 
     loop {
@@ -260,7 +309,7 @@ pub(crate) fn poll_progress<T>(
                         inner.maybe_flip_span_replaying_field();
                         flush(&mut inner)?;
                         drop(inner);
-                        waiter.wake_siblings(&wakers);
+                        waiter.wake_siblings(wakers);
                     }
                     Poll::Pending => index += 1,
                 }
@@ -285,16 +334,16 @@ pub(crate) fn poll_progress<T>(
             if !waiting_input {
                 return Poll::Pending;
             }
-            ready!(poll_input(&mut inner, &mut shared_cx));
+            ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers));
             drop(inner);
-            waiter.wake_siblings(&wakers);
+            waiter.wake_siblings(wakers);
             inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
         }
         let unresolved = if inner.runs.is_empty() && inner.executing_runs.is_empty() {
-            awaited.clone()
+            awaited.into_unresolved()
         } else {
             let mut futures = Vec::with_capacity(1 + inner.runs.len() + inner.executing_runs.len());
-            futures.push(awaited.clone());
+            futures.push(awaited.into_unresolved());
             futures.extend(inner.runs.keys().copied().map(UnresolvedFuture::Single));
             futures.extend(
                 inner
@@ -316,7 +365,7 @@ pub(crate) fn poll_progress<T>(
             AwaitResponse::CancelSignalReceived => {
                 cancel_runs(&mut inner);
                 drop(inner);
-                waiter.wake_siblings(&wakers);
+                waiter.wake_siblings(wakers);
                 return Poll::Ready(Ok(ProgressResult::Cancelled));
             }
             AwaitResponse::ExecuteRun(handle) => {
@@ -329,13 +378,19 @@ pub(crate) fn poll_progress<T>(
             }
             AwaitResponse::WaitingExternalProgress { waiting_input, .. } => {
                 flush(&mut inner)?;
+                // Cancellation can wait for outstanding call invocation IDs.
+                // Resolving those IDs can consume a sibling notification and
+                // make this result ready without settling cancellation yet.
+                if is_completed(awaited, &inner.vm) {
+                    return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
+                }
                 waiter.waiting_progress = Some((inner.progress_version, waiting_input));
                 if !waiting_input {
                     return Poll::Pending;
                 }
-                ready!(poll_input(&mut inner, &mut shared_cx));
+                ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers));
                 drop(inner);
-                waiter.wake_siblings(&wakers);
+                waiter.wake_siblings(wakers);
                 inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
             }
         }

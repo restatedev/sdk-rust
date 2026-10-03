@@ -6,7 +6,7 @@ use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::progress::{
-    ProgressResult, ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
+    Awaited, ProgressResult, ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
 };
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -1252,7 +1252,7 @@ where
                             ctx_ref,
                             cx,
                             waiter,
-                            UnresolvedFuture::Single(*handle),
+                            Awaited::Single(*handle),
                             |_| -> Result<(), ErrorInner> {
                                 unreachable!(
                                     "Borrowed run cannot complete before proposing its result"

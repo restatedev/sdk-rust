@@ -1,7 +1,7 @@
 use crate::endpoint::ErrorInner;
 use crate::endpoint::context::ContextInternalInner;
-use crate::endpoint::futures::progress::{ProgressResult, ProgressWaiter, poll_progress};
-use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, UnresolvedFuture, VM, Value};
+use crate::endpoint::futures::progress::{Awaited, ProgressResult, ProgressWaiter, poll_progress};
+use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, VM, Value};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -50,7 +50,7 @@ impl Future for VmAsyncResultPollFuture {
             &this.ctx,
             cx,
             &mut this.waiter,
-            UnresolvedFuture::Single(this.handle),
+            Awaited::Single(this.handle),
             |inner| take_completed_result(inner, this.handle),
         ))? {
             ProgressResult::Completed(notification) => Poll::Ready(Ok(notification)),
