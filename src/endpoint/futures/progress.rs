@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker, ready};
+use std::task::{Context, Poll, RawWakerVTable, Waker, ready};
 
 /// One input stream and all owned run closures share a wakeup source. Input may
 /// satisfy a sibling future, including when only completion proposals remain.
@@ -43,8 +43,26 @@ impl Waiters {
 /// Removes a waiter's wakeup subscription when its future is dropped.
 pub(crate) struct ProgressWaiter {
     generation: usize,
-    registration: Option<(Arc<ProgressWakers>, usize, Waker)>,
+    registration: Option<(Arc<ProgressWakers>, usize, WakerIdentity)>,
     waiting_progress: Option<(usize, bool)>,
+}
+
+struct WakerIdentity {
+    data: usize,
+    vtable: &'static RawWakerVTable,
+}
+
+impl WakerIdentity {
+    fn new(waker: &Waker) -> Self {
+        Self {
+            data: waker.data().addr(),
+            vtable: waker.vtable(),
+        }
+    }
+
+    fn will_wake(&self, waker: &Waker) -> bool {
+        self.data == waker.data().addr() && std::ptr::eq(self.vtable, waker.vtable())
+    }
 }
 
 impl ProgressWaiter {
@@ -79,13 +97,18 @@ impl ProgressWaiter {
                 id
             }
         };
+        // Sample the owned clone: a custom waker's clone may use a different
+        // allocation. The registry retains that allocation for the subscription,
+        // so the cached identity matches std::Waker::will_wake without a clone.
+        let registered_waker = waker.clone();
+        let identity = WakerIdentity::new(&registered_waker);
         match &mut waiters.first {
             Some((first_id, registered)) if *first_id == id => {
-                *registered = waker.clone();
+                *registered = registered_waker;
             }
-            None => waiters.first = Some((id, waker.clone())),
+            None => waiters.first = Some((id, registered_waker)),
             Some(_) => {
-                waiters.wakers.insert(id, waker.clone());
+                waiters.wakers.insert(id, registered_waker);
             }
         }
         if self.registration.is_none() {
@@ -93,7 +116,7 @@ impl ProgressWaiter {
                 .subscriber_count
                 .store(waiters.len(), Ordering::Release);
         }
-        self.registration = Some((Arc::clone(wakers), id, waker.clone()));
+        self.registration = Some((Arc::clone(wakers), id, identity));
     }
 
     fn wake_siblings(&self, wakers: &ProgressWakers) {
