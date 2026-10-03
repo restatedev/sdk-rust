@@ -39,6 +39,8 @@ pub(crate) struct ContextInternalInner {
     pub(super) handler_state: HandlerStateNotifier,
     pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
     pub(super) executing_runs: Vec<(NotificationHandle, RegisteredRun)>,
+    /// Invalidates parked waits after input, run proposals, or context commands,
+    /// including synchronous commands that only append output.
     pub(super) progress_version: usize,
     /// Shared-core can delay cancellation while resolving call/send invocation
     /// IDs. Once one is registered, keep checking for results made ready there.
@@ -96,6 +98,7 @@ impl ContextInternalInner {
                 .with_stacktrace(Cow::<str>::Owned(format!("{:#}", e.0))),
             None,
         );
+        self.progress_version += 1;
         self.handler_state.mark_error(e);
     }
 
@@ -287,6 +290,7 @@ impl ContextInternal {
                     PayloadOptions::default(),
                 );
                 let _ = inner_lock.vm.sys_end();
+                inner_lock.progress_version += 1;
                 // This causes the trap, plus logs the error
                 inner_lock.handler_state.mark_error(error_inner.into());
                 drop(inner_lock);
@@ -367,6 +371,7 @@ impl ContextInternal {
                 let _ = inner_lock
                     .vm
                     .sys_state_set(key.to_owned(), b, PayloadOptions::default());
+                inner_lock.progress_version += 1;
                 inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
@@ -378,12 +383,14 @@ impl ContextInternal {
     pub fn clear(&self, key: &str) {
         let mut inner_lock = must_lock!(self.inner);
         let _ = inner_lock.vm.sys_state_clear(key.to_string());
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn clear_all(&self) {
         let mut inner_lock = must_lock!(self.inner);
         let _ = inner_lock.vm.sys_state_clear_all();
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
@@ -633,6 +640,7 @@ impl ContextInternal {
         let _ = inner_lock
             .vm
             .sys_cancel_invocation(invocation_id.to_owned());
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
@@ -716,6 +724,7 @@ impl ContextInternal {
                     name.to_owned(),
                     NonEmptyValue::Success(b),
                 );
+                inner_lock.progress_version += 1;
             }
             Err(e) => {
                 inner_lock.fail(Error::serialization("resolve_signal", e));
@@ -725,11 +734,13 @@ impl ContextInternal {
 
     /// Reject a named signal on a target invocation.
     pub fn reject_signal(&self, invocation_id: &str, name: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner).vm.sys_complete_signal(
+        let mut inner = must_lock!(self.inner);
+        let _ = inner.vm.sys_complete_signal(
             invocation_id.to_owned(),
             name.to_owned(),
             NonEmptyValue::Failure(failure.into()),
         );
+        inner.progress_version += 1;
     }
 
     pub fn awakeable<T: Deserialize>(
@@ -788,6 +799,7 @@ impl ContextInternal {
                     NonEmptyValue::Success(b),
                     PayloadOptions::default(),
                 );
+                inner_lock.progress_version += 1;
             }
             Err(e) => {
                 inner_lock.fail(Error::serialization("resolve_awakeable", e));
@@ -796,11 +808,13 @@ impl ContextInternal {
     }
 
     pub fn reject_awakeable(&self, id: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner).vm.sys_complete_awakeable(
+        let mut inner = must_lock!(self.inner);
+        let _ = inner.vm.sys_complete_awakeable(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
             PayloadOptions::default(),
         );
+        inner.progress_version += 1;
     }
 
     pub fn promise<T: Deserialize>(
@@ -878,6 +892,7 @@ impl ContextInternal {
                     NonEmptyValue::Success(b),
                     PayloadOptions::default(),
                 );
+                inner_lock.progress_version += 1;
             }
             Err(e) => {
                 inner_lock.fail(
@@ -892,11 +907,13 @@ impl ContextInternal {
     }
 
     pub fn reject_promise(&self, id: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner).vm.sys_complete_promise(
+        let mut inner = must_lock!(self.inner);
+        let _ = inner.vm.sys_complete_promise(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
             PayloadOptions::default(),
         );
+        inner.progress_version += 1;
     }
 
     pub fn run<'a, Run, Fut, Out>(&'a self, run_closure: Run) -> crate::context::Run<Run>
@@ -939,6 +956,7 @@ impl ContextInternal {
         let _ = inner_lock
             .vm
             .sys_write_output(res_to_write, PayloadOptions::default());
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
@@ -947,6 +965,7 @@ impl ContextInternal {
         inner.runs.clear();
         inner.executing_runs.clear();
         let _ = inner.vm.sys_end();
+        inner.progress_version += 1;
     }
 
     pub(crate) fn consume_to_end(&self) {

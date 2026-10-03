@@ -374,12 +374,28 @@ struct ParkedOperation {
     timer: bool,
 }
 
-struct CommandBetweenWaiterPolls;
+#[derive(Clone, Copy)]
+enum BufferedCommand {
+    Set,
+    Clear,
+    ClearAll,
+    Cancel,
+    ResolveSignal,
+    RejectSignal,
+    ResolveAwakeable,
+    RejectAwakeable,
+    ResolvePromise,
+    RejectPromise,
+}
 
-#[service]
+struct CommandBetweenWaiterPolls {
+    command: BufferedCommand,
+}
+
+#[workflow]
 impl CommandBetweenWaiterPolls {
     #[handler]
-    async fn run(&self, ctx: Context<'_>) -> HandlerResult<()> {
+    async fn run(&self, ctx: WorkflowContext<'_>) -> HandlerResult<()> {
         let (id, result) = ctx.awakeable::<()>();
         drop(result);
         let mut timer = Box::pin(ctx.sleep(Duration::from_secs(10)));
@@ -388,7 +404,28 @@ impl CommandBetweenWaiterPolls {
             Poll::Ready(())
         })
         .await;
-        ctx.resolve_awakeable(&id, ());
+        match self.command {
+            BufferedCommand::Set => ctx.set("key", String::from("value")),
+            BufferedCommand::Clear => ctx.clear("key"),
+            BufferedCommand::ClearAll => ctx.clear_all(),
+            BufferedCommand::Cancel => ctx.invocation_handle("sibling".into()).cancel(),
+            BufferedCommand::ResolveSignal => ctx
+                .invocation_handle("sibling".into())
+                .signal("signal")
+                .resolve(()),
+            BufferedCommand::RejectSignal => ctx
+                .invocation_handle("sibling".into())
+                .signal("signal")
+                .reject(TerminalError::new("failed")),
+            BufferedCommand::ResolveAwakeable => ctx.resolve_awakeable(&id, ()),
+            BufferedCommand::RejectAwakeable => {
+                ctx.reject_awakeable(&id, TerminalError::new("failed"))
+            }
+            BufferedCommand::ResolvePromise => ctx.resolve_promise("promise", ()),
+            BufferedCommand::RejectPromise => {
+                ctx.reject_promise("promise", TerminalError::new("failed"))
+            }
+        }
         timer.await?;
         Ok(())
     }
@@ -397,25 +434,40 @@ impl CommandBetweenWaiterPolls {
 #[tokio::test]
 async fn a_parked_waiter_flushes_synchronous_context_commands() {
     for version in [6, 7] {
-        let endpoint = Endpoint::builder().bind(CommandBetweenWaiterPolls).build();
-        let mut invocation = Invocation::new(
-            &endpoint,
-            "CommandBetweenWaiterPolls",
-            version,
-            &[input()],
-            0,
-        );
-        // The awakeable completion must reach the runtime while the timer is
-        // still pending, even though it does not invalidate the cached wait.
-        invocation.through(0x0414).await;
-        invocation.send(encode(
-            0x800c,
-            &SleepCompletion {
-                completion_id: 1,
-                void: Some(Void {}),
-            },
-        ));
-        finish(&mut invocation).await;
+        for (command, kind) in [
+            (BufferedCommand::Set, 0x0403),
+            (BufferedCommand::Clear, 0x0404),
+            (BufferedCommand::ClearAll, 0x0405),
+            (BufferedCommand::Cancel, 0x0410),
+            (BufferedCommand::ResolveSignal, 0x0410),
+            (BufferedCommand::RejectSignal, 0x0410),
+            (BufferedCommand::ResolveAwakeable, 0x0414),
+            (BufferedCommand::RejectAwakeable, 0x0414),
+            (BufferedCommand::ResolvePromise, 0x040b),
+            (BufferedCommand::RejectPromise, 0x040b),
+        ] {
+            let endpoint = Endpoint::builder()
+                .bind(CommandBetweenWaiterPolls { command })
+                .build();
+            let mut invocation = Invocation::new(
+                &endpoint,
+                "CommandBetweenWaiterPolls",
+                version,
+                &[input()],
+                0,
+            );
+            // Each synchronous command must invalidate the cached wait and reach
+            // the runtime before the timer receives its completion.
+            invocation.through(kind).await;
+            invocation.send(encode(
+                0x800c,
+                &SleepCompletion {
+                    completion_id: 1,
+                    void: Some(Void {}),
+                },
+            ));
+            finish(&mut invocation).await;
+        }
     }
 }
 

@@ -182,6 +182,7 @@ pub(crate) fn flush(inner: &mut ContextInternalInner) -> Result<(), ErrorInner> 
 
 pub(crate) fn cancel_runs(inner: &mut ContextInternalInner) {
     inner.cancellation_generation += 1;
+    inner.progress_version += 1;
     inner.runs.clear();
     inner.executing_runs.clear();
 }
@@ -304,10 +305,12 @@ pub(crate) fn poll_progress<T>(
     let waker = waker_ref(wakers);
     let mut shared_cx = Context::from_waker(&waker);
 
-    // Synchronous context operations can buffer commands while this waiter is
-    // parked, so drain them once on entry. Reading input only queues VM
-    // notifications; the resulting output is drained after do_await below.
-    flush(&mut inner)?;
+    // The last WaitingExternalProgress drained output before caching this
+    // version. Every input, proposal, and context command changes the version,
+    // so an unchanged parked waiter has no new output to drain on entry.
+    if !unchanged_wait {
+        flush(&mut inner)?;
+    }
     loop {
         if !inner.executing_runs.is_empty() {
             // Keep the vector's allocation between polls. Run closures may call
