@@ -1,10 +1,8 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
-use crate::endpoint::futures::progress::{ProgressWaiter, flush, poll_progress};
+use crate::endpoint::context::ContextInternalInner;
+use crate::endpoint::futures::progress::{ProgressResult, ProgressWaiter, poll_progress};
 use crate::errors::TerminalError;
-use restate_sdk_shared_core::{
-    AwaitResponse, NotificationHandle, TerminalFailure, UnresolvedFuture, VM,
-};
+use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, UnresolvedFuture, VM};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -34,17 +32,6 @@ impl Future for VmSelectAsyncResultPollFuture {
     type Output = Result<Result<usize, TerminalError>, ErrorInner>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        {
-            let mut inner = self.ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
-            if let Some(index) = self
-                .handles
-                .iter()
-                .position(|handle| inner.vm.is_completed(*handle))
-            {
-                flush(&mut inner)?;
-                return Poll::Ready(Ok(Ok(index)));
-            }
-        }
         let unresolved = UnresolvedFuture::FirstCompleted(
             self.handles
                 .iter()
@@ -53,24 +40,26 @@ impl Future for VmSelectAsyncResultPollFuture {
                 .collect(),
         );
         let this = self.as_mut().get_mut();
-        match ready!(poll_progress(&this.ctx, cx, &mut this.waiter, unresolved))? {
-            AwaitResponse::AnyCompleted => {
-                let inner = self.ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
-                Poll::Ready(Ok(Ok(self
+        match ready!(poll_progress(
+            &this.ctx,
+            cx,
+            &mut this.waiter,
+            unresolved,
+            |inner| {
+                Ok(this
                     .handles
                     .iter()
                     .position(|handle| inner.vm.is_completed(*handle))
-                    .expect("Completed selection has a ready handle"))))
-            }
-            AwaitResponse::CancelSignalReceived => Poll::Ready(Ok(Err(TerminalFailure {
+                    .expect("Completed selection has a ready handle"))
+            },
+        ))? {
+            ProgressResult::Completed(index) => Poll::Ready(Ok(Ok(index))),
+            ProgressResult::Cancelled => Poll::Ready(Ok(Err(TerminalFailure {
                 code: 409,
                 message: "cancelled".to_string(),
                 metadata: vec![],
             }
             .into()))),
-            AwaitResponse::ExecuteRun(_) | AwaitResponse::WaitingExternalProgress { .. } => {
-                unreachable!("Progress driver resolves execution and waiting internally")
-            }
         }
     }
 }

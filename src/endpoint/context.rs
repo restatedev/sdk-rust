@@ -6,7 +6,7 @@ use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::progress::{
-    ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
+    ProgressResult, ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
 };
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -42,8 +42,9 @@ pub(crate) struct ContextInternalInner {
     pub(super) progress_version: usize,
     pub(super) progress_wakers: Arc<ProgressWakers>,
     pub(super) cancellation_generation: usize,
-    /// Notifications keep their registration epoch until consumed, including
-    /// submitted run proposals that the runtime has not acknowledged yet.
+    /// Unrecorded handles belong to cancellation generation zero. After the
+    /// first cancellation, notifications keep their nonzero registration epoch
+    /// until consumed, including run proposals not acknowledged by the runtime.
     pub(super) notifications: HashMap<NotificationHandle, usize>,
 
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
@@ -75,7 +76,9 @@ impl ContextInternalInner {
 
     fn register_notification(&mut self, handle: NotificationHandle) -> usize {
         let generation = self.cancellation_generation;
-        self.notifications.entry(handle).or_insert(generation);
+        if generation != 0 {
+            self.notifications.entry(handle).or_insert(generation);
+        }
         self.progress_version += 1;
         generation
     }
@@ -1245,10 +1248,19 @@ where
                     let mut closure_result = closure_fut.as_mut().poll(cx);
                     if closure_result.is_pending() {
                         let ctx_ref = ctx.as_ref().expect("Running closure has a context");
-                        match poll_progress(ctx_ref, cx, waiter, UnresolvedFuture::Single(*handle))
-                        {
+                        match poll_progress(
+                            ctx_ref,
+                            cx,
+                            waiter,
+                            UnresolvedFuture::Single(*handle),
+                            |_| -> Result<(), ErrorInner> {
+                                unreachable!(
+                                    "Borrowed run cannot complete before proposing its result"
+                                )
+                            },
+                        ) {
                             Poll::Ready(Err(error)) => return Poll::Ready(Err(error.into())),
-                            Poll::Ready(Ok(AwaitResponse::CancelSignalReceived)) => {
+                            Poll::Ready(Ok(ProgressResult::Cancelled)) => {
                                 this.state.set(RunState::WaitingResultFut {
                                     result_fut: async {
                                         Ok(Err(TerminalError::new_with_code(409, "cancelled")))
@@ -1257,11 +1269,8 @@ where
                                 });
                                 continue;
                             }
-                            Poll::Ready(Ok(AwaitResponse::AnyCompleted)) => unreachable!(
+                            Poll::Ready(Ok(ProgressResult::Completed(_))) => unreachable!(
                                 "Borrowed run cannot complete before proposing its result"
-                            ),
-                            Poll::Ready(Ok(_)) => unreachable!(
-                                "Progress driver resolves execution and waiting internally"
                             ),
                             Poll::Pending => {}
                         }

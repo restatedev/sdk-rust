@@ -1,9 +1,7 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
-use crate::endpoint::futures::progress::{ProgressWaiter, flush, poll_progress};
-use restate_sdk_shared_core::{
-    AwaitResponse, NotificationHandle, TerminalFailure, UnresolvedFuture, VM, Value,
-};
+use crate::endpoint::context::ContextInternalInner;
+use crate::endpoint::futures::progress::{ProgressResult, ProgressWaiter, poll_progress};
+use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, UnresolvedFuture, VM, Value};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -32,50 +30,35 @@ impl VmAsyncResultPollFuture {
 /// Known completions win over invocation cancellation, including results that
 /// were acknowledged before another waiter consumed the cancellation signal.
 fn take_completed_result(
-    ctx: &Arc<Mutex<ContextInternalInner>>,
+    inner: &mut ContextInternalInner,
     handle: NotificationHandle,
-) -> Result<Option<Value>, ErrorInner> {
-    let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
-    if !inner.vm.is_completed(handle) {
-        return Ok(None);
-    }
-    flush(&mut inner)?;
+) -> Result<Value, ErrorInner> {
     let notification = inner
         .vm
         .take_notification(handle)?
         .expect("Completed handle has a notification");
     inner.notifications.remove(&handle);
-    Ok(Some(notification))
+    Ok(notification)
 }
 
 impl Future for VmAsyncResultPollFuture {
     type Output = Result<Value, ErrorInner>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        if let Some(notification) = take_completed_result(&self.ctx, self.handle)? {
-            return Poll::Ready(Ok(notification));
-        }
         let this = self.as_mut().get_mut();
         match ready!(poll_progress(
             &this.ctx,
             cx,
             &mut this.waiter,
-            UnresolvedFuture::Single(this.handle)
+            UnresolvedFuture::Single(this.handle),
+            |inner| take_completed_result(inner, this.handle),
         ))? {
-            AwaitResponse::AnyCompleted => {
-                Poll::Ready(Ok(take_completed_result(&self.ctx, self.handle)?
-                    .expect("Completed handle has a notification")))
-            }
-            AwaitResponse::CancelSignalReceived => {
-                Poll::Ready(Ok(Value::Failure(TerminalFailure {
-                    code: 409,
-                    message: "cancelled".to_string(),
-                    metadata: vec![],
-                })))
-            }
-            AwaitResponse::ExecuteRun(_) | AwaitResponse::WaitingExternalProgress { .. } => {
-                unreachable!("Progress driver resolves execution and waiting internally")
-            }
+            ProgressResult::Completed(notification) => Poll::Ready(Ok(notification)),
+            ProgressResult::Cancelled => Poll::Ready(Ok(Value::Failure(TerminalFailure {
+                code: 409,
+                message: "cancelled".to_string(),
+                metadata: vec![],
+            }))),
         }
     }
 }

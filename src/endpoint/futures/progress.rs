@@ -24,6 +24,7 @@ pub(crate) struct ProgressWakers(Mutex<Waiters>);
 #[derive(Default)]
 struct Waiters {
     next_id: usize,
+    first: Option<(usize, Waker)>,
     wakers: HashMap<usize, Waker>,
 }
 
@@ -66,9 +67,14 @@ impl ProgressWaiter {
                 id
             }
         };
-        let entry = waiters.wakers.entry(id).or_insert_with(|| waker.clone());
-        if !entry.will_wake(waker) {
-            *entry = waker.clone();
+        match &mut waiters.first {
+            Some((first_id, registered)) if *first_id == id => {
+                *registered = waker.clone();
+            }
+            None => waiters.first = Some((id, waker.clone())),
+            Some(_) => {
+                waiters.wakers.insert(id, waker.clone());
+            }
         }
         self.registration = Some((Arc::clone(wakers), id, waker.clone()));
     }
@@ -81,7 +87,13 @@ impl ProgressWaiter {
 impl Drop for ProgressWaiter {
     fn drop(&mut self) {
         if let Some((wakers, id, _)) = &self.registration {
-            wakers.0.lock().unwrap().wakers.remove(id);
+            let mut waiters = wakers.0.lock().unwrap();
+            if waiters.first.as_ref().is_some_and(|(first, _)| first == id) {
+                let next = waiters.wakers.keys().next().copied();
+                waiters.first = next.map(|next| (next, waiters.wakers.remove(&next).unwrap()));
+            } else {
+                waiters.wakers.remove(id);
+            }
         }
     }
 }
@@ -89,11 +101,11 @@ impl Drop for ProgressWaiter {
 impl ProgressWakers {
     fn wake_waiters(&self, except: Option<usize>) {
         let waiters = self.0.lock().unwrap();
-        if waiters.wakers.len() <= 1 {
+        if waiters.wakers.is_empty() {
             let waiter = waiters
-                .wakers
-                .iter()
-                .find(|(id, _)| Some(**id) != except)
+                .first
+                .as_ref()
+                .filter(|(id, _)| Some(*id) != except)
                 .map(|(_, waker)| waker.clone());
             drop(waiters);
             if let Some(waiter) = waiter {
@@ -102,8 +114,10 @@ impl ProgressWakers {
             return;
         }
         let wakers: Vec<_> = waiters
-            .wakers
+            .first
             .iter()
+            .map(|(id, waker)| (id, waker))
+            .chain(waiters.wakers.iter())
             .filter(|(id, _)| Some(**id) != except)
             .map(|(_, waker)| waker.clone())
             .collect();
@@ -169,10 +183,13 @@ fn includes_cancelled_notification(
     notifications: &HashMap<NotificationHandle, usize>,
     generation: usize,
 ) -> bool {
+    if generation == 0 {
+        return false;
+    }
     match future {
-        UnresolvedFuture::Single(handle) => notifications
-            .get(handle)
-            .is_some_and(|registered| *registered != generation),
+        UnresolvedFuture::Single(handle) => {
+            notifications.get(handle).copied().unwrap_or(0) != generation
+        }
         UnresolvedFuture::Unknown(futures)
         | UnresolvedFuture::FirstCompleted(futures)
         | UnresolvedFuture::AllCompleted(futures)
@@ -184,20 +201,40 @@ fn includes_cancelled_notification(
     }
 }
 
+fn is_completed(future: &UnresolvedFuture, vm: &impl VM) -> bool {
+    match future {
+        UnresolvedFuture::Single(handle) => vm.is_completed(*handle),
+        UnresolvedFuture::FirstCompleted(futures) => {
+            futures.iter().any(|future| is_completed(future, vm))
+        }
+        _ => false,
+    }
+}
+
+pub(crate) enum ProgressResult<T> {
+    Completed(T),
+    Cancelled,
+}
+
 /// Drive the VM, owned closures, and input together. User futures are never
 /// polled with the VM mutex held.
-pub(crate) fn poll_progress(
+pub(crate) fn poll_progress<T>(
     ctx: &Arc<Mutex<ContextInternalInner>>,
     cx: &mut Context<'_>,
     waiter: &mut ProgressWaiter,
     awaited: UnresolvedFuture,
-) -> Poll<Result<AwaitResponse, ErrorInner>> {
+    completed: impl FnOnce(&mut ContextInternalInner) -> Result<T, ErrorInner>,
+) -> Poll<Result<ProgressResult<T>, ErrorInner>> {
     let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+    if is_completed(&awaited, &inner.vm) {
+        flush(&mut inner)?;
+        return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
+    }
     let generation = inner.cancellation_generation;
     if waiter.generation != generation
         || includes_cancelled_notification(&awaited, &inner.notifications, generation)
     {
-        return Poll::Ready(Ok(AwaitResponse::CancelSignalReceived));
+        return Poll::Ready(Ok(ProgressResult::Cancelled));
     }
     let wakers = Arc::clone(&inner.progress_wakers);
     waiter.register(&wakers, cx.waker());
@@ -273,13 +310,14 @@ pub(crate) fn poll_progress(
             AwaitResponse::AnyCompleted => {
                 // Only the awaited handles remain eligible for completion after
                 // a run has submitted its proposal and left the execution set.
-                return Poll::Ready(Ok(progress));
+                flush(&mut inner)?;
+                return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
             }
             AwaitResponse::CancelSignalReceived => {
                 cancel_runs(&mut inner);
                 drop(inner);
                 waiter.wake_siblings(&wakers);
-                return Poll::Ready(Ok(progress));
+                return Poll::Ready(Ok(ProgressResult::Cancelled));
             }
             AwaitResponse::ExecuteRun(handle) => {
                 waiter.waiting_progress = None;

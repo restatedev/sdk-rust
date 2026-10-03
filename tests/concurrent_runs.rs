@@ -445,6 +445,7 @@ enum Mode {
     Terminal,
     BoundedRetry,
     BatchedSibling,
+    CancelTwice,
 }
 struct StartedRuns {
     stats: Arc<RunStats>,
@@ -508,6 +509,22 @@ impl StartedRuns {
                 let second = make(1).start();
                 let second_error = second.await.unwrap_err().code();
                 Ok(Json(vec![second_error as u32, first.await?]))
+            }
+            Mode::CancelTwice => {
+                let first_error = make(0).start().await.unwrap_err().code();
+                let second = make(1).start();
+                let third = make(2).start();
+                let second_error = second.await.unwrap_err().code();
+                let mut old_results = DurableFuturesUnordered::new();
+                old_results.push(third);
+                let third_error = old_results.next().await.unwrap_err().code();
+                let cleanup = ctx.run(|| async { Ok(42u32) }).start().await?;
+                Ok(Json(vec![
+                    first_error as u32,
+                    second_error as u32,
+                    third_error as u32,
+                    cleanup,
+                ]))
             }
             Mode::BatchedSibling => {
                 let mut first = Box::pin(make(0).start());
@@ -1012,6 +1029,36 @@ async fn cancellation_allows_new_cleanup_operation_after_pending_results_settle(
         assert_eq!(proposal.decode::<Proposal>().completion_id, 4);
         invocation.acknowledge(&proposal);
         assert_eq!(values(finish(&mut invocation).await), vec![42]);
+    }
+}
+
+#[tokio::test]
+async fn repeated_cancellation_rejects_old_results_and_allows_new_cleanup() {
+    for version in [6, 7] {
+        let (endpoint, stats) = started(Mode::CancelTwice);
+        let mut invocation = Invocation::new(&endpoint, "StartedRuns", version, &[input()], 0);
+        let cancellation = encode(
+            SIGNAL,
+            &Signal {
+                index: Some(1),
+                failure: Some(Failure {
+                    code: 409,
+                    message: "cancelled".into(),
+                }),
+            },
+        );
+        invocation.drive_until(|| stats.counts() == [1, 0, 0]).await;
+        invocation.send(cancellation.clone());
+        invocation.drive_until(|| stats.counts() == [1, 1, 1]).await;
+        invocation.send(cancellation);
+        let proposal = invocation.through(PROPOSAL).await;
+        assert_eq!(proposal.decode::<Proposal>().completion_id, 4);
+        invocation.acknowledge(&proposal);
+        assert_eq!(
+            values(finish(&mut invocation).await),
+            vec![409, 409, 409, 42]
+        );
+        assert_eq!(stats.drops(), [1, 1, 1]);
     }
 }
 
