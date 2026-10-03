@@ -32,6 +32,12 @@ struct Waiters {
     wakers: HashMap<usize, Waker>,
 }
 
+impl Waiters {
+    fn len(&self) -> usize {
+        usize::from(self.first.is_some()) + self.wakers.len()
+    }
+}
+
 /// Removes a waiter's wakeup subscription when its future is dropped.
 pub(crate) struct ProgressWaiter {
     generation: usize,
@@ -68,7 +74,6 @@ impl ProgressWaiter {
                 waiters.next_id = id
                     .checked_add(1)
                     .expect("Too many waiters in one invocation");
-                wakers.subscriber_count.fetch_add(1, Ordering::Release);
                 id
             }
         };
@@ -80,6 +85,11 @@ impl ProgressWaiter {
             Some(_) => {
                 waiters.wakers.insert(id, waker.clone());
             }
+        }
+        if self.registration.is_none() {
+            wakers
+                .subscriber_count
+                .store(waiters.len(), Ordering::Release);
         }
         self.registration = Some((Arc::clone(wakers), id, waker.clone()));
     }
@@ -102,7 +112,9 @@ impl Drop for ProgressWaiter {
             } else {
                 waiters.wakers.remove(id);
             }
-            wakers.subscriber_count.fetch_sub(1, Ordering::Release);
+            wakers
+                .subscriber_count
+                .store(waiters.len(), Ordering::Release);
         }
     }
 }
@@ -292,6 +304,10 @@ pub(crate) fn poll_progress<T>(
     let waker = waker_ref(wakers);
     let mut shared_cx = Context::from_waker(&waker);
 
+    // Synchronous context operations can buffer commands while this waiter is
+    // parked, so drain them once on entry. Reading input only queues VM
+    // notifications; the resulting output is drained after do_await below.
+    flush(&mut inner)?;
     loop {
         if !inner.executing_runs.is_empty() {
             // Keep the vector's allocation between polls. Run closures may call
@@ -322,9 +338,11 @@ pub(crate) fn poll_progress<T>(
             } else {
                 inner.executing_runs.extend(executing);
             }
+            // Pending user futures can also buffer synchronous commands while
+            // the context is unlocked, even without submitting a proposal.
+            flush(&mut inner)?;
         }
 
-        flush(&mut inner)?;
         if let Some((version, waiting_input)) = waiter.waiting_progress
             && version == inner.progress_version
             && inner.runs.is_empty()
@@ -337,9 +355,11 @@ pub(crate) fn poll_progress<T>(
                 return Poll::Pending;
             }
             ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers));
-            drop(inner);
-            waiter.wake_siblings(wakers);
-            inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+            if wakers.subscriber_count.load(Ordering::Acquire) > 1 {
+                drop(inner);
+                waiter.wake_siblings(wakers);
+                inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+            }
         }
         let unresolved = if inner.runs.is_empty() && inner.executing_runs.is_empty() {
             awaited.into_unresolved()
@@ -391,9 +411,11 @@ pub(crate) fn poll_progress<T>(
                     return Poll::Pending;
                 }
                 ready!(poll_input(&mut inner, cx, &mut shared_cx, wakers));
-                drop(inner);
-                waiter.wake_siblings(wakers);
-                inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                if wakers.subscriber_count.load(Ordering::Acquire) > 1 {
+                    drop(inner);
+                    waiter.wake_siblings(wakers);
+                    inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                }
             }
         }
     }

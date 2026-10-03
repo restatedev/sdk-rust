@@ -374,6 +374,51 @@ struct ParkedOperation {
     timer: bool,
 }
 
+struct CommandBetweenWaiterPolls;
+
+#[service]
+impl CommandBetweenWaiterPolls {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>) -> HandlerResult<()> {
+        let (id, result) = ctx.awakeable::<()>();
+        drop(result);
+        let mut timer = Box::pin(ctx.sleep(Duration::from_secs(10)));
+        poll_fn(|cx| {
+            assert!(timer.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        ctx.resolve_awakeable(&id, ());
+        timer.await?;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_parked_waiter_flushes_synchronous_context_commands() {
+    for version in [6, 7] {
+        let endpoint = Endpoint::builder().bind(CommandBetweenWaiterPolls).build();
+        let mut invocation = Invocation::new(
+            &endpoint,
+            "CommandBetweenWaiterPolls",
+            version,
+            &[input()],
+            0,
+        );
+        // The awakeable completion must reach the runtime while the timer is
+        // still pending, even though it does not invalidate the cached wait.
+        invocation.through(0x0414).await;
+        invocation.send(encode(
+            0x800c,
+            &SleepCompletion {
+                completion_id: 1,
+                void: Some(Void {}),
+            },
+        ));
+        finish(&mut invocation).await;
+    }
+}
+
 struct CancellationWithPendingCall;
 
 #[service]
