@@ -712,6 +712,7 @@ enum Mode {
     Unordered,
     DropFirst,
     Borrowed,
+    BorrowedPending,
     Mixed,
     CancelSettled,
     CancelCleanup,
@@ -736,9 +737,19 @@ impl StartedRuns {
     #[handler]
     async fn run(&self, ctx: Context<'_>) -> HandlerResult<Json<Vec<u32>>> {
         let mode = self.mode;
-        if matches!(mode, Mode::Borrowed) {
+        if matches!(mode, Mode::Borrowed | Mode::BorrowedPending) {
             let value = 42;
-            return Ok(Json(vec![ctx.run(|| async { Ok(value) }).await?]));
+            let stats = &self.stats;
+            return Ok(Json(vec![
+                ctx.run(|| async {
+                    if matches!(mode, Mode::BorrowedPending) {
+                        stats.starts[0].fetch_add(1, Ordering::SeqCst);
+                        stats.gates[0].notified().await;
+                    }
+                    Ok(value)
+                })
+                .await?,
+            ]));
         }
         let make = |i: usize| {
             let stats = self.stats.clone();
@@ -917,7 +928,7 @@ impl StartedRuns {
                 let (index, value) = runs.next().await?.unwrap();
                 Ok(Json(vec![index as u32, value?]))
             }
-            Mode::Borrowed => unreachable!(),
+            Mode::Borrowed | Mode::BorrowedPending => unreachable!(),
         }
     }
 }
@@ -1365,6 +1376,38 @@ async fn sequential_borrowing_run_drives_earlier_started_run() {
 struct ProbeWake;
 impl futures::task::ArcWake for ProbeWake {
     fn wake_by_ref(_: &Arc<Self>) {}
+}
+
+#[tokio::test]
+async fn borrowed_run_releases_closure_waker_when_transferring_to_result() {
+    for version in [6, 7] {
+        let (endpoint, stats) = started(Mode::BorrowedPending);
+        let mut invocation = Invocation::new(&endpoint, "StartedRuns", version, &[input()], 0);
+        let probe = Arc::new(ProbeWake);
+        let weak = Arc::downgrade(&probe);
+        {
+            let waker = futures::task::waker(probe);
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                match Pin::new(&mut invocation.body).poll_frame(&mut cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(Some(Ok(_))) => {}
+                    other => {
+                        panic!("unexpected response while borrowed closure is pending: {other:?}")
+                    }
+                }
+            }
+        }
+        assert_eq!(stats.counts(), [1, 0, 0]);
+        stats.gates[0].notify_one();
+        let proposal = invocation.through(PROPOSAL).await;
+        assert!(
+            weak.upgrade().is_none(),
+            "borrowed closure subscription retained its executor after result handoff"
+        );
+        invocation.acknowledge(&proposal);
+        assert_eq!(values(finish(&mut invocation).await), vec![42]);
+    }
 }
 
 #[tokio::test]

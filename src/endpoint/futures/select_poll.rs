@@ -1,29 +1,27 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::ContextInternalInner;
-use crate::endpoint::futures::progress::{Awaited, ProgressResult, ProgressWaiter, poll_progress};
+use crate::endpoint::context::ContextShared;
+use crate::endpoint::futures::progress::{Awaited, ProgressGuard, ProgressResult, poll_progress};
 use crate::errors::TerminalError;
 use restate_sdk_shared_core::{NotificationHandle, TerminalFailure, VM};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Poll, ready};
 
 pub(crate) struct VmSelectAsyncResultPollFuture {
-    ctx: Arc<Mutex<ContextInternalInner>>,
+    guard: ProgressGuard,
     handles: Vec<NotificationHandle>,
-    waiter: ProgressWaiter,
 }
 
 impl VmSelectAsyncResultPollFuture {
     pub fn new(
-        ctx: Arc<Mutex<ContextInternalInner>>,
+        ctx: Arc<ContextShared>,
         handles: Vec<NotificationHandle>,
         generation: usize,
     ) -> Self {
         Self {
-            ctx,
+            guard: ProgressGuard::new(ctx, generation),
             handles,
-            waiter: ProgressWaiter::new(generation),
         }
     }
 }
@@ -34,9 +32,8 @@ impl Future for VmSelectAsyncResultPollFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
         match ready!(poll_progress(
-            &this.ctx,
+            &mut this.guard,
             cx,
-            &mut this.waiter,
             Awaited::FirstCompleted(&this.handles),
             |inner| {
                 Ok(this

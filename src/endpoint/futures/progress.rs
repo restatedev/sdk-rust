@@ -1,5 +1,5 @@
 use crate::endpoint::ErrorInner;
-use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner};
+use crate::endpoint::context::{CONTEXT_LOCK_ERROR, ContextInternalInner, ContextShared};
 use futures::future::BoxFuture;
 use futures::task::{ArcWake, waker_ref};
 use restate_sdk_shared_core::{
@@ -40,10 +40,50 @@ impl Waiters {
     }
 }
 
-/// Removes a waiter's wakeup subscription when its future is dropped.
-pub(crate) struct ProgressWaiter {
+/// Keeps the context alive until its wakeup subscription has been removed.
+pub(crate) struct ProgressGuard {
+    ctx: Option<Arc<ContextShared>>,
+    waiter: ProgressWaiter,
+}
+
+impl ProgressGuard {
+    pub(crate) fn new(ctx: Arc<ContextShared>, generation: usize) -> Self {
+        Self {
+            ctx: Some(ctx),
+            waiter: ProgressWaiter::new(generation),
+        }
+    }
+
+    pub(crate) fn context(&self) -> &Arc<ContextShared> {
+        self.ctx.as_ref().expect("Progress guard has a context")
+    }
+
+    pub(crate) fn generation(&self) -> usize {
+        self.waiter.generation
+    }
+
+    pub(crate) fn take_context(&mut self) -> Arc<ContextShared> {
+        // A borrowed closure hands its owner to the result future only after
+        // leaving the wake registry.
+        let ctx = self.ctx.as_ref().expect("Progress guard has a context");
+        self.waiter.unregister(&ctx.progress_wakers);
+        self.ctx.take().expect("Progress guard has a context")
+    }
+}
+
+impl Drop for ProgressGuard {
+    fn drop(&mut self) {
+        if let Some(ctx) = &self.ctx {
+            // Release the registry lock before dropping the context owner:
+            // context teardown can itself drop other progress guards.
+            self.waiter.unregister(&ctx.progress_wakers);
+        }
+    }
+}
+
+struct ProgressWaiter {
     generation: usize,
-    registration: Option<(Arc<ProgressWakers>, usize, WakerIdentity)>,
+    registration: Option<(usize, WakerIdentity)>,
     waiting_progress: Option<(usize, bool)>,
 }
 
@@ -66,7 +106,7 @@ impl WakerIdentity {
 }
 
 impl ProgressWaiter {
-    pub(crate) fn new(generation: usize) -> Self {
+    fn new(generation: usize) -> Self {
         Self {
             generation,
             registration: None,
@@ -74,21 +114,17 @@ impl ProgressWaiter {
         }
     }
 
-    pub(crate) fn generation(&self) -> usize {
-        self.generation
-    }
-
-    fn register(&mut self, wakers: &Arc<ProgressWakers>, waker: &Waker) {
+    fn register(&mut self, wakers: &ProgressWakers, waker: &Waker) {
         if self
             .registration
             .as_ref()
-            .is_some_and(|(_, _, registered)| registered.will_wake(waker))
+            .is_some_and(|(_, registered)| registered.will_wake(waker))
         {
             return;
         }
         let mut waiters = wakers.waiters.lock().unwrap();
         let id = match &self.registration {
-            Some((_, id, _)) => *id,
+            Some((id, _)) => *id,
             None => {
                 let id = waiters.next_id;
                 waiters.next_id = id
@@ -116,26 +152,28 @@ impl ProgressWaiter {
                 .subscriber_count
                 .store(waiters.len(), Ordering::Release);
         }
-        self.registration = Some((Arc::clone(wakers), id, identity));
+        self.registration = Some((id, identity));
     }
 
     fn wake_siblings(&self, wakers: &ProgressWakers) {
         if wakers.subscriber_count.load(Ordering::Acquire) <= 1 {
             return;
         }
-        wakers.wake_waiters(self.registration.as_ref().map(|(_, id, _)| *id));
+        wakers.wake_waiters(self.registration.as_ref().map(|(id, _)| *id));
     }
-}
 
-impl Drop for ProgressWaiter {
-    fn drop(&mut self) {
-        if let Some((wakers, id, _)) = &self.registration {
+    fn unregister(&mut self, wakers: &ProgressWakers) {
+        if let Some((id, _)) = self.registration.take() {
             let mut waiters = wakers.waiters.lock().unwrap();
-            if waiters.first.as_ref().is_some_and(|(first, _)| first == id) {
+            if waiters
+                .first
+                .as_ref()
+                .is_some_and(|(first, _)| *first == id)
+            {
                 let next = waiters.wakers.keys().next().copied();
                 waiters.first = next.map(|next| (next, waiters.wakers.remove(&next).unwrap()));
             } else {
-                waiters.wakers.remove(id);
+                waiters.wakers.remove(&id);
             }
             wakers
                 .subscriber_count
@@ -296,13 +334,14 @@ pub(crate) enum ProgressResult<T> {
 /// Drive the VM, owned closures, and input together. User futures are never
 /// polled with the VM mutex held.
 pub(crate) fn poll_progress<T>(
-    ctx: &Arc<Mutex<ContextInternalInner>>,
+    guard: &mut ProgressGuard,
     cx: &mut Context<'_>,
-    waiter: &mut ProgressWaiter,
     awaited: Awaited<'_>,
     completed: impl FnOnce(&mut ContextInternalInner) -> Result<T, ErrorInner>,
 ) -> Poll<Result<ProgressResult<T>, ErrorInner>> {
-    let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+    let ProgressGuard { ctx, waiter } = guard;
+    let ctx = ctx.as_ref().expect("Progress guard has a context");
+    let mut inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
     let generation = inner.cancellation_generation;
     let cancelled = waiter.generation != generation
         || includes_cancelled_notification(awaited, &inner.notifications, generation);
@@ -321,12 +360,8 @@ pub(crate) fn poll_progress<T>(
     if cancelled {
         return Poll::Ready(Ok(ProgressResult::Cancelled));
     }
-    waiter.register(&inner.progress_wakers, cx.waker());
-    let wakers = &waiter
-        .registration
-        .as_ref()
-        .expect("Registered waiter has a wakeup source")
-        .0;
+    let wakers = &ctx.progress_wakers;
+    waiter.register(wakers, cx.waker());
     let waker = waker_ref(wakers);
     let mut shared_cx = Context::from_waker(&waker);
 
@@ -347,7 +382,7 @@ pub(crate) fn poll_progress<T>(
                 match executing[index].1.future.as_mut().poll(&mut shared_cx) {
                     Poll::Ready(result) => {
                         let (handle, run) = executing.swap_remove(index);
-                        let mut inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                        let mut inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
                         inner
                             .vm
                             .propose_run_completion(handle, result?, run.retry_policy)?;
@@ -360,7 +395,7 @@ pub(crate) fn poll_progress<T>(
                     Poll::Pending => index += 1,
                 }
             }
-            inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+            inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
             if inner.executing_runs.is_empty() {
                 inner.executing_runs = executing;
             } else {
@@ -386,7 +421,7 @@ pub(crate) fn poll_progress<T>(
             if wakers.subscriber_count.load(Ordering::Acquire) > 1 {
                 drop(inner);
                 waiter.wake_siblings(wakers);
-                inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
                 // A sibling's wake callback can buffer synchronous commands
                 // while the context is unlocked; drain them on reacquisition.
                 flush(&mut inner)?;
@@ -446,7 +481,7 @@ pub(crate) fn poll_progress<T>(
                 if wakers.subscriber_count.load(Ordering::Acquire) > 1 {
                     drop(inner);
                     waiter.wake_siblings(wakers);
-                    inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                    inner = ctx.inner.try_lock().expect(CONTEXT_LOCK_ERROR);
                     flush(&mut inner)?;
                 }
             }

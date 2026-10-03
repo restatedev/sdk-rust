@@ -6,7 +6,7 @@ use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
 use crate::endpoint::futures::progress::{
-    Awaited, ProgressResult, ProgressWaiter, ProgressWakers, RegisteredRun, poll_progress,
+    Awaited, ProgressGuard, ProgressResult, ProgressWakers, RegisteredRun, poll_progress,
 };
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
@@ -32,6 +32,14 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant, SystemTime};
 
+/// Guards can remove wake subscriptions without locking the VM. The shared
+/// input waker targets ProgressWakers, keeping it independent of this context
+/// and the input receiver stored here.
+pub(crate) struct ContextShared {
+    pub(super) inner: Mutex<ContextInternalInner>,
+    pub(super) progress_wakers: Arc<ProgressWakers>,
+}
+
 pub(crate) struct ContextInternalInner {
     pub(super) vm: CoreVM,
     pub(super) read: InputReceiver,
@@ -45,7 +53,6 @@ pub(crate) struct ContextInternalInner {
     /// Shared-core can delay cancellation while resolving call/send invocation
     /// IDs. Once one is registered, keep checking for results made ready there.
     pub(super) may_have_pending_invocation_ids: bool,
-    pub(super) progress_wakers: Arc<ProgressWakers>,
     pub(super) cancellation_generation: usize,
     /// Unrecorded handles belong to cancellation generation zero. After the
     /// first cancellation, notifications keep their nonzero registration epoch
@@ -73,7 +80,6 @@ impl ContextInternalInner {
             executing_runs: Vec::new(),
             progress_version: 0,
             may_have_pending_invocation_ids: false,
-            progress_wakers: Arc::default(),
             cancellation_generation: 0,
             notifications: HashMap::new(),
             span_replaying_field_state: false,
@@ -120,8 +126,8 @@ const _: () = is_send_sync::<ContextInternal>();
 pub(crate) const CONTEXT_LOCK_ERROR: &str = "Concurrent access to the Restate context. Do not call context operations from inside a run closure or poll the context from two tasks at once.";
 
 macro_rules! must_lock {
-    ($mutex:expr) => {
-        $mutex.try_lock().expect(CONTEXT_LOCK_ERROR)
+    ($ctx:expr) => {
+        ($ctx).inner.try_lock().expect(CONTEXT_LOCK_ERROR)
     };
 }
 
@@ -204,7 +210,7 @@ impl From<RequestTarget> for Target {
 pub struct ContextInternal {
     svc_name: String,
     handler_name: String,
-    inner: Arc<Mutex<ContextInternalInner>>,
+    inner: Arc<ContextShared>,
 }
 
 impl ContextInternal {
@@ -219,12 +225,10 @@ impl ContextInternal {
         Self {
             svc_name,
             handler_name,
-            inner: Arc::new(Mutex::new(ContextInternalInner::new(
-                vm,
-                read,
-                write,
-                handler_state,
-            ))),
+            inner: Arc::new(ContextShared {
+                inner: Mutex::new(ContextInternalInner::new(vm, read, write, handler_state)),
+                progress_wakers: Arc::default(),
+            }),
         }
     }
 
@@ -1023,14 +1027,13 @@ pin_project! {
     #[project = RunStateProj]
     enum RunState<Run, RunFnFut, Ret> {
         New {
-            ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+            ctx: Option<Arc<ContextShared>>,
             closure: Option<Run>,
         },
         ClosureRunning {
-            ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+            guard: ProgressGuard,
             handle: NotificationHandle,
             start_time: Instant,
-            waiter: ProgressWaiter,
             #[pin]
             closure_fut: RunFnFut,
         },
@@ -1041,7 +1044,7 @@ pin_project! {
 }
 
 impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
-    fn new(ctx: Arc<Mutex<ContextInternalInner>>, closure: Run) -> Self {
+    fn new(ctx: Arc<ContextShared>, closure: Run) -> Self {
         Self {
             name: "".to_string(),
             retry_policy: RetryPolicy::Infinite,
@@ -1114,7 +1117,7 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
     }
 
     fn boxed_result_fut(
-        ctx: Arc<Mutex<ContextInternalInner>>,
+        ctx: Arc<ContextShared>,
         handle: NotificationHandle,
         generation: usize,
     ) -> BoxFuture<'static, Result<Result<Ret, TerminalError>, Error>>
@@ -1210,16 +1213,15 @@ where
 
                             drop(inner_ctx);
                             this.state.set(RunState::ClosureRunning {
-                                ctx: Some(ctx),
+                                guard: ProgressGuard::new(ctx, generation),
                                 handle,
                                 start_time: Instant::now(),
-                                waiter: ProgressWaiter::new(generation),
                                 closure_fut: closure.run(),
                             });
                         }
                         Ok(AwaitResponse::CancelSignalReceived) => {
                             crate::endpoint::futures::progress::cancel_runs(&mut inner_ctx);
-                            let wakers = Arc::clone(&inner_ctx.progress_wakers);
+                            let wakers = Arc::clone(&ctx.progress_wakers);
                             drop(inner_ctx);
                             futures::task::ArcWake::wake_by_ref(&wakers);
                             // Got cancellation!
@@ -1250,16 +1252,14 @@ where
                     }
                 }
                 RunStateProj::ClosureRunning {
-                    ctx,
+                    guard,
                     handle,
                     start_time,
-                    waiter,
                     mut closure_fut,
                 } => {
                     let cancelled = {
-                        let inner =
-                            must_lock!(ctx.as_ref().expect("Running closure has a context"));
-                        inner.cancellation_generation != waiter.generation()
+                        let inner = must_lock!(guard.context());
+                        inner.cancellation_generation != guard.generation()
                     };
                     if cancelled {
                         this.state.set(RunState::WaitingResultFut {
@@ -1272,11 +1272,9 @@ where
                     }
                     let mut closure_result = closure_fut.as_mut().poll(cx);
                     if closure_result.is_pending() {
-                        let ctx_ref = ctx.as_ref().expect("Running closure has a context");
                         match poll_progress(
-                            ctx_ref,
+                            guard,
                             cx,
-                            waiter,
                             Awaited::Single(*handle),
                             |_| -> Result<(), ErrorInner> {
                                 unreachable!(
@@ -1302,7 +1300,7 @@ where
                         // A sibling closure may have made this borrowed closure ready.
                         closure_result = closure_fut.poll(cx);
                     }
-                    let generation = waiter.generation();
+                    let generation = guard.generation();
                     let res = match ready!(closure_result) {
                         Ok(t) => RunExitResult::Success(Ret::serialize(&t).map_err(|e| {
                             ErrorInner::Serialization {
@@ -1321,9 +1319,7 @@ where
                         },
                     };
 
-                    let ctx = ctx
-                        .take()
-                        .expect("Future should not be polled after returning Poll::Ready");
+                    let ctx = guard.take_context();
                     let handle = *handle;
 
                     let _ = {
@@ -1335,7 +1331,7 @@ where
                     };
 
                     this.state.set(RunState::WaitingResultFut {
-                        result_fut: Self::boxed_result_fut(Arc::clone(&ctx), handle, generation),
+                        result_fut: Self::boxed_result_fut(ctx, handle, generation),
                     });
                 }
                 RunStateProj::WaitingResultFut { result_fut } => return result_fut.poll_unpin(cx),
@@ -1449,7 +1445,7 @@ impl Error {
 }
 
 fn get_async_result(
-    ctx: Arc<Mutex<ContextInternalInner>>,
+    ctx: Arc<ContextShared>,
     handle: NotificationHandle,
     generation: usize,
 ) -> impl Future<Output = Result<Value, Error>> + Send {
