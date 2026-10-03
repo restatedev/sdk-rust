@@ -23,6 +23,7 @@ impl VmAsyncResultPollFuture {
 
 /// Known completions win over invocation cancellation, including results that
 /// were acknowledged before another waiter consumed the cancellation signal.
+#[inline]
 fn take_completed_result(
     inner: &mut ContextInternalInner,
     handle: NotificationHandle,
