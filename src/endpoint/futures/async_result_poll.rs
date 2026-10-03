@@ -31,7 +31,9 @@ fn take_completed_result(
         .vm
         .take_notification(handle)?
         .expect("Completed handle has a notification");
-    inner.notifications.remove(&handle);
+    if !inner.notifications.is_empty() {
+        inner.notifications.remove(&handle);
+    }
     Ok(notification)
 }
 
