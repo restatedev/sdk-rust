@@ -43,10 +43,14 @@ impl Future for VmAsyncResultPollFuture {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
+        let mut notification = None;
         match ready!(poll_progress(&mut this.guard, cx, this.handle, |inner| {
-            take_completed_result(inner, this.handle)
+            notification = Some(take_completed_result(inner, this.handle)?);
+            Ok(())
         }))? {
-            ProgressResult::Completed(notification) => Poll::Ready(Ok(notification)),
+            ProgressResult::Completed(()) => Poll::Ready(Ok(notification
+                .take()
+                .expect("Completed progress extracted a notification"))),
             ProgressResult::Cancelled => Poll::Ready(Ok(Value::Failure(TerminalFailure {
                 code: 409,
                 message: "cancelled".to_string(),
