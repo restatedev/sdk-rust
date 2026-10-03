@@ -19,6 +19,8 @@ use std::task::{Context, Poll, Waker, ready};
 /// completion/drop handoff to keep a finished or abandoned waiter from stranding
 /// the input stream. The current waiter keeps driving after consuming input, so
 /// it does not need a second wakeup for that progress.
+/// `tests/started_run_benchmark.rs` measures this strategy for N = 1, 10, 100,
+/// and 1000; `tests/sequential_context_benchmark.rs` checks ordinary awaits.
 #[derive(Default)]
 pub(crate) struct ProgressWakers {
     waiters: Mutex<Waiters>,
@@ -362,6 +364,9 @@ pub(crate) fn poll_progress<T>(
                 drop(inner);
                 waiter.wake_siblings(wakers);
                 inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                // A sibling's wake callback can buffer synchronous commands
+                // while the context is unlocked; drain them on reacquisition.
+                flush(&mut inner)?;
             }
         }
         let unresolved = if inner.runs.is_empty() && inner.executing_runs.is_empty() {
@@ -384,7 +389,8 @@ pub(crate) fn poll_progress<T>(
             AwaitResponse::AnyCompleted => {
                 // Only the awaited handles remain eligible for completion after
                 // a run has submitted its proposal and left the execution set.
-                flush(&mut inner)?;
+                // Shared-core's ready transition emits no output. Commands are
+                // drained on entry and after every unlocked user-code/wake gap.
                 return Poll::Ready(completed(&mut inner).map(ProgressResult::Completed));
             }
             AwaitResponse::CancelSignalReceived => {
@@ -418,6 +424,7 @@ pub(crate) fn poll_progress<T>(
                     drop(inner);
                     waiter.wake_siblings(wakers);
                     inner = ctx.try_lock().expect(CONTEXT_LOCK_ERROR);
+                    flush(&mut inner)?;
                 }
             }
         }
