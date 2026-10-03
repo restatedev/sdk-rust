@@ -114,6 +114,7 @@ impl ProgressWaiter {
         }
     }
 
+    #[inline]
     fn register(&mut self, wakers: &ProgressWakers, waker: &Waker) {
         if self
             .registration
@@ -122,6 +123,10 @@ impl ProgressWaiter {
         {
             return;
         }
+        self.register_changed(wakers, waker);
+    }
+
+    fn register_changed(&mut self, wakers: &ProgressWakers, waker: &Waker) {
         let mut waiters = wakers.waiters.lock().unwrap();
         let id = match &self.registration {
             Some((id, _)) => *id,
