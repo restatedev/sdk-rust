@@ -11,6 +11,10 @@ impl HandlerStateNotifier {
         (Self { tx: Some(tx) }, rx)
     }
 
+    pub(super) fn is_failed_or_suspended(&self) -> bool {
+        self.tx.is_none()
+    }
+
     pub(super) fn mark_error(&mut self, err: Error) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(err);

@@ -1,6 +1,6 @@
 mod builder;
-mod context;
-mod futures;
+pub(crate) mod context;
+pub(crate) mod futures;
 mod handler_state;
 
 pub use builder::{Builder, HandlerOptions, ServiceOptions};
@@ -566,7 +566,7 @@ struct InputReceiver(Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +
 
 impl InputReceiver {
     fn from_stream<S: Stream<Item = Result<Bytes, BoxError>> + Send + 'static>(s: S) -> Self {
-        Self(Box::pin(s))
+        Self(Box::pin(s.fuse()))
     }
 
     async fn recv(&mut self) -> Option<Result<Bytes, BoxError>> {
