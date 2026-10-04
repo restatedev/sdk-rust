@@ -232,6 +232,18 @@ impl ContextInternal {
         }
     }
 
+    /// Whether this handler attempt has recorded a failure or suspension.
+    ///
+    /// Durable futures return `Pending` after recording these terminal states.
+    /// Polling adapters can use this observation to stop polling them without
+    /// mistaking an ordinary progress wake for termination. This query does not
+    /// consume the handler's error or change its journal.
+    pub fn is_failed_or_suspended(&self) -> bool {
+        must_lock!(self.inner)
+            .handler_state
+            .is_failed_or_suspended()
+    }
+
     pub fn service_name(&self) -> &str {
         &self.svc_name
     }
@@ -1443,4 +1455,80 @@ fn get_async_result(
     generation: usize,
 ) -> impl Future<Output = Result<Value, Error>> + Send {
     VmAsyncResultPollFuture::new(ctx, handle, generation).map_err(Error::from)
+}
+
+#[cfg(test)]
+mod terminal_state_tests {
+    use super::*;
+    use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
+    use crate::endpoint::handler_state::HandlerStateNotifier;
+    use std::task::{Wake, Waker};
+
+    /// A Pending result's sibling wake is progress; the SDK's hidden terminal
+    /// error is observable without consuming the outer handler's notification.
+    #[test]
+    fn a_pending_result_exposes_terminal_state_without_confusing_sibling_wakes() {
+        for error in [
+            ErrorInner::Suspended.into(),
+            Error::unknown_handler("probe", "run"),
+        ] {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                http::header::CONTENT_TYPE,
+                http::HeaderValue::from_static("application/vnd.restate.invocation.v7"),
+            );
+            let vm = CoreVM::new(headers, Default::default()).unwrap();
+            let (state, mut notification) = HandlerStateNotifier::new();
+            let (output, _receiver) = tokio::sync::mpsc::unbounded_channel();
+            let context = ContextInternal::new(
+                vm,
+                "probe".to_owned(),
+                "run".to_owned(),
+                InputReceiver::from_stream(futures::stream::pending()),
+                OutputSender::from_channel(output),
+                state,
+            );
+            let peer = context.clone();
+            let mut error = Some(error);
+            let mut polls = 0;
+            let mut sibling = None;
+            let result = std::future::poll_fn(move |cx| {
+                polls += 1;
+                match polls {
+                    1 => {
+                        sibling = Some(cx.waker().clone());
+                        Poll::Pending
+                    }
+                    2 => {
+                        sibling.take().unwrap().wake();
+                        Poll::Pending
+                    }
+                    3 => Poll::Ready(Err::<(), _>(error.take().unwrap())),
+                    _ => panic!("terminal SDK result was polled again"),
+                }
+            });
+            let mut result = Box::pin(DurableFutureImpl::trapping(context.clone(), result));
+            struct Parent;
+            impl Wake for Parent {
+                fn wake(self: Arc<Self>) {}
+            }
+            let waker = Waker::from(Arc::new(Parent));
+            let mut cx = Context::from_waker(&waker);
+            for _ in 0..2 {
+                assert!(result.as_mut().poll(&mut cx).is_pending());
+                assert!(!context.is_failed_or_suspended());
+            }
+            assert!(result.as_mut().poll(&mut cx).is_pending());
+            assert!(context.is_failed_or_suspended());
+            assert!(peer.is_failed_or_suspended());
+            assert!(
+                notification.try_recv().is_ok(),
+                "query must not consume the handler error"
+            );
+            assert!(
+                context.is_failed_or_suspended(),
+                "terminal state remains observable"
+            );
+        }
+    }
 }
