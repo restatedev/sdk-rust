@@ -23,17 +23,17 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.4.0
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.17.0
         with:
           components: clippy
           rustflags: ""
           cache: false
 
       - name: Setup Rust Caching
-        uses: WarpBuilds/rust-cache@v2
+        uses: WarpBuilds/rust-cache@v2.9.1
         with:
           cache-on-failure: "true"
 
@@ -41,7 +41,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Setup just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v2.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
