@@ -274,7 +274,7 @@ impl ContextInternal {
             inner_lock,
             inner_lock
                 .vm
-                .sys_state_get(key.to_owned(), PayloadOptions::default())
+                .sys_state_get(key.to_owned(), None, PayloadOptions::default())
         );
         inner_lock.maybe_flip_span_replaying_field();
 
@@ -299,7 +299,7 @@ impl ContextInternal {
 
     pub fn get_keys(&self) -> impl Future<Output = Result<Vec<String>, TerminalError>> + Send {
         let mut inner_lock = must_lock!(self.inner);
-        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get_keys());
+        let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get_keys(None,));
         inner_lock.maybe_flip_span_replaying_field();
 
         let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
@@ -320,9 +320,10 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         match t.serialize() {
             Ok(b) => {
-                let _ = inner_lock
-                    .vm
-                    .sys_state_set(key.to_owned(), b, PayloadOptions::default());
+                let _ =
+                    inner_lock
+                        .vm
+                        .sys_state_set(key.to_owned(), b, None, PayloadOptions::default());
                 inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
@@ -333,13 +334,13 @@ impl ContextInternal {
 
     pub fn clear(&self, key: &str) {
         let mut inner_lock = must_lock!(self.inner);
-        let _ = inner_lock.vm.sys_state_clear(key.to_string());
+        let _ = inner_lock.vm.sys_state_clear(key.to_string(), None);
         inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn clear_all(&self) {
         let mut inner_lock = must_lock!(self.inner);
-        let _ = inner_lock.vm.sys_state_clear_all();
+        let _ = inner_lock.vm.sys_state_clear_all(None);
         inner_lock.maybe_flip_span_replaying_field();
     }
 

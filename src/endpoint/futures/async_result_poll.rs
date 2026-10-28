@@ -119,7 +119,8 @@ impl Future for VmAsyncResultPollFuture {
                             continue;
                         }
                         Ok(AwaitResponse::WaitingExternalProgress { .. })
-                        | Ok(AwaitResponse::ExecuteRun(_)) => {
+                        | Ok(AwaitResponse::ExecuteRun(_))
+                        | Ok(AwaitResponse::EphemeralNotificationReady(_)) => {
                             // Waiting only on a run proposal is not expected on this await path.
                             // These two are used by the shared-core to implement async run, which is not supported by the rust sdk currently.
                             unimplemented!()
