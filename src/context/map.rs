@@ -49,7 +49,7 @@ impl<F: SealedDurableFuture, M> SealedDurableFuture for MapDurableFuture<F, M> {
         self.fut.inner_context()
     }
 
-    fn handle(&self) -> NotificationHandle {
+    fn handle(&self) -> Option<NotificationHandle> {
         self.fut.handle()
     }
 }
@@ -102,7 +102,7 @@ impl<F: SealedDurableFuture, M> SealedDurableFuture for MapOkDurableFuture<F, M>
         self.fut.inner_context()
     }
 
-    fn handle(&self) -> NotificationHandle {
+    fn handle(&self) -> Option<NotificationHandle> {
         self.fut.handle()
     }
 }
@@ -155,7 +155,7 @@ impl<F: SealedDurableFuture, M> SealedDurableFuture for MapErrDurableFuture<F, M
         self.fut.inner_context()
     }
 
-    fn handle(&self) -> NotificationHandle {
+    fn handle(&self) -> Option<NotificationHandle> {
         self.fut.handle()
     }
 }

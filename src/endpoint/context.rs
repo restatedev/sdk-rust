@@ -5,6 +5,9 @@ use crate::context::{
 use crate::endpoint::futures::async_result_poll::VmAsyncResultPollFuture;
 use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
 use crate::endpoint::futures::intercept_error::InterceptErrorFuture;
+use crate::endpoint::futures::progress::{
+    ProgressGuard, ProgressResult, ProgressWakers, RegisteredRun, poll_progress,
+};
 use crate::endpoint::futures::select_poll::VmSelectAsyncResultPollFuture;
 use crate::endpoint::futures::trap::TrapFuture;
 use crate::endpoint::handler_state::HandlerStateNotifier;
@@ -29,11 +32,32 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant, SystemTime};
 
-pub struct ContextInternalInner {
-    pub(crate) vm: CoreVM,
-    pub(crate) read: InputReceiver,
-    pub(crate) write: OutputSender,
+/// Guards can remove wake subscriptions without locking the VM. The shared
+/// input waker targets ProgressWakers, keeping it independent of this context
+/// and the input receiver stored here.
+pub(crate) struct ContextShared {
+    pub(super) inner: Mutex<ContextInternalInner>,
+    pub(super) progress_wakers: Arc<ProgressWakers>,
+}
+
+pub(crate) struct ContextInternalInner {
+    pub(super) vm: CoreVM,
+    pub(super) read: InputReceiver,
+    pub(super) write: OutputSender,
     pub(super) handler_state: HandlerStateNotifier,
+    pub(super) runs: HashMap<NotificationHandle, RegisteredRun>,
+    pub(super) executing_runs: Vec<(NotificationHandle, RegisteredRun)>,
+    /// Invalidates parked waits after input, run proposals, or context commands,
+    /// including synchronous commands that only append output.
+    pub(super) progress_version: usize,
+    /// Shared-core can delay cancellation while resolving call/send invocation
+    /// IDs. Once one is registered, keep checking for results made ready there.
+    pub(super) may_have_pending_invocation_ids: bool,
+    pub(super) cancellation_generation: usize,
+    /// Unrecorded handles belong to cancellation generation zero. After the
+    /// first cancellation, notifications keep their nonzero registration epoch
+    /// until consumed, including run proposals not acknowledged by the runtime.
+    pub(super) notifications: HashMap<NotificationHandle, usize>,
 
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
     /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
@@ -52,17 +76,35 @@ impl ContextInternalInner {
             read,
             write,
             handler_state,
+            runs: HashMap::new(),
+            executing_runs: Vec::new(),
+            progress_version: 0,
+            may_have_pending_invocation_ids: false,
+            cancellation_generation: 0,
+            notifications: HashMap::new(),
             span_replaying_field_state: false,
         }
     }
 
+    fn register_notification(&mut self, handle: NotificationHandle) -> usize {
+        let generation = self.cancellation_generation;
+        if generation != 0 {
+            self.notifications.entry(handle).or_insert(generation);
+        }
+        self.progress_version += 1;
+        generation
+    }
+
     pub(super) fn fail(&mut self, e: Error) {
+        self.runs.clear();
+        self.executing_runs.clear();
         self.maybe_flip_span_replaying_field();
         self.vm.notify_error(
             CoreError::new(500u16, e.0.to_string())
                 .with_stacktrace(Cow::<str>::Owned(format!("{:#}", e.0))),
             None,
         );
+        self.progress_version += 1;
         self.handler_state.mark_error(e);
     }
 
@@ -81,9 +123,11 @@ impl ContextInternalInner {
 const fn is_send_sync<T: Send + Sync>() {}
 const _: () = is_send_sync::<ContextInternal>();
 
+pub(crate) const CONTEXT_LOCK_ERROR: &str = "Concurrent access to the Restate context. Do not call context operations from inside a run closure or poll the context from two tasks at once.";
+
 macro_rules! must_lock {
-    ($mutex:expr) => {
-        $mutex.try_lock().expect("You're trying to await two futures at the same time and/or trying to perform some operation on the restate context while awaiting a future. This is not supported!")
+    ($ctx:expr) => {
+        ($ctx).inner.try_lock().expect(CONTEXT_LOCK_ERROR)
     };
 }
 
@@ -105,9 +149,8 @@ macro_rules! unwrap_or_trap_durable_future {
             Ok(t) => t,
             Err(e) => {
                 $inner_lock.fail(e.into());
-                return DurableFutureImpl::new(
+                return DurableFutureImpl::trapping(
                     $ctx.clone(),
-                    NotificationHandle::from(u32::MAX),
                     Either::Right(TrapFuture::default()),
                 );
             }
@@ -167,7 +210,7 @@ impl From<RequestTarget> for Target {
 pub struct ContextInternal {
     svc_name: String,
     handler_name: String,
-    inner: Arc<Mutex<ContextInternalInner>>,
+    inner: Arc<ContextShared>,
 }
 
 impl ContextInternal {
@@ -182,13 +225,23 @@ impl ContextInternal {
         Self {
             svc_name,
             handler_name,
-            inner: Arc::new(Mutex::new(ContextInternalInner::new(
-                vm,
-                read,
-                write,
-                handler_state,
-            ))),
+            inner: Arc::new(ContextShared {
+                inner: Mutex::new(ContextInternalInner::new(vm, read, write, handler_state)),
+                progress_wakers: Arc::default(),
+            }),
         }
+    }
+
+    /// Whether this handler attempt has recorded a failure or suspension.
+    ///
+    /// Durable futures return `Pending` after recording these terminal states.
+    /// Polling adapters can use this observation to stop polling them without
+    /// mistaking an ordinary progress wake for termination. This query does not
+    /// consume the handler's error or change its journal.
+    pub fn is_failed_or_suspended(&self) -> bool {
+        must_lock!(self.inner)
+            .handler_state
+            .is_failed_or_suspended()
     }
 
     pub fn service_name(&self) -> &str {
@@ -253,6 +306,7 @@ impl ContextInternal {
                     PayloadOptions::default(),
                 );
                 let _ = inner_lock.vm.sys_end();
+                inner_lock.progress_version += 1;
                 // This causes the trap, plus logs the error
                 inner_lock.handler_state.mark_error(error_inner.into());
                 drop(inner_lock);
@@ -278,7 +332,12 @@ impl ContextInternal {
         );
         inner_lock.maybe_flip_span_replaying_field();
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
             Ok(Value::Success(mut s)) => {
                 let t =
@@ -302,7 +361,12 @@ impl ContextInternal {
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_state_get_keys());
         inner_lock.maybe_flip_span_replaying_field();
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
             Ok(Value::StateKeys(s)) => Ok(Ok(s)),
             Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
@@ -323,6 +387,7 @@ impl ContextInternal {
                 let _ = inner_lock
                     .vm
                     .sys_state_set(key.to_owned(), b, PayloadOptions::default());
+                inner_lock.progress_version += 1;
                 inner_lock.maybe_flip_span_replaying_field();
             }
             Err(e) => {
@@ -334,23 +399,33 @@ impl ContextInternal {
     pub fn clear(&self, key: &str) {
         let mut inner_lock = must_lock!(self.inner);
         let _ = inner_lock.vm.sys_state_clear(key.to_string());
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn clear_all(&self) {
         let mut inner_lock = must_lock!(self.inner);
         let _ = inner_lock.vm.sys_state_clear_all();
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn select(
         &self,
-        handles: Vec<NotificationHandle>,
+        handles: Vec<Option<NotificationHandle>>,
     ) -> impl Future<Output = Result<usize, TerminalError>> + Send {
-        InterceptErrorFuture::new(
+        let Some(handles) = handles.into_iter().collect::<Option<Vec<_>>>() else {
+            return Either::Right(TrapFuture::default());
+        };
+        Either::Left(InterceptErrorFuture::new(
             self.clone(),
-            VmSelectAsyncResultPollFuture::new(self.inner.clone(), handles).map_err(Error::from),
-        )
+            VmSelectAsyncResultPollFuture::new(
+                self.inner.clone(),
+                handles,
+                must_lock!(self.inner).cancellation_generation,
+            )
+            .map_err(Error::from),
+        ))
     }
 
     pub fn sleep(
@@ -370,7 +445,12 @@ impl ContextInternal {
         );
         inner_lock.maybe_flip_span_replaying_field();
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(())),
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
             Ok(v) => Err(ErrorInner::UnexpectedValueVariantForSyscall {
@@ -430,12 +510,17 @@ impl ContextInternal {
                 return CallFutureImpl {
                     invocation_id_future: Either::Right(TrapFuture::default()).shared(),
                     result_future: Either::Right(TrapFuture::default()),
-                    call_notification_handle: NotificationHandle::from(u32::MAX),
+                    call_notification_handle: None,
                     ctx: self.clone(),
                 };
             }
         };
         inner_lock.maybe_flip_span_replaying_field();
+        let invocation_id_generation =
+            inner_lock.register_notification(call_handle.invocation_id_notification_handle);
+        inner_lock.may_have_pending_invocation_ids = true;
+        let result_generation =
+            inner_lock.register_notification(call_handle.call_notification_handle);
         drop(inner_lock);
 
         // Let's prepare the two futures here
@@ -444,6 +529,7 @@ impl ContextInternal {
             get_async_result(
                 Arc::clone(&self.inner),
                 call_handle.invocation_id_notification_handle,
+                invocation_id_generation,
             )
             .map(|res| match res {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -459,6 +545,7 @@ impl ContextInternal {
         let result_future = get_async_result(
             Arc::clone(&self.inner),
             call_handle.call_notification_handle,
+            result_generation,
         )
         .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(
@@ -476,7 +563,7 @@ impl ContextInternal {
         CallFutureImpl {
             invocation_id_future: Either::Left(invocation_id_fut).shared(),
             result_future: Either::Left(result_future),
-            call_notification_handle: call_handle.call_notification_handle,
+            call_notification_handle: Some(call_handle.call_notification_handle),
             ctx: self.clone(),
         }
     }
@@ -532,6 +619,9 @@ impl ContextInternal {
             }
         };
         inner_lock.maybe_flip_span_replaying_field();
+        let invocation_id_generation =
+            inner_lock.register_notification(send_handle.invocation_id_notification_handle);
+        inner_lock.may_have_pending_invocation_ids = true;
         drop(inner_lock);
 
         let invocation_id_fut = InterceptErrorFuture::new(
@@ -539,6 +629,7 @@ impl ContextInternal {
             get_async_result(
                 Arc::clone(&self.inner),
                 send_handle.invocation_id_notification_handle,
+                invocation_id_generation,
             )
             .map(|res| match res {
                 Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -565,6 +656,7 @@ impl ContextInternal {
         let _ = inner_lock
             .vm
             .sys_cancel_invocation(invocation_id.to_owned());
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
@@ -582,9 +674,13 @@ impl ContextInternal {
                 .sys_attach_invocation(AttachInvocationTarget::InvocationId(invocation_id))
         );
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(T::deserialize(&mut s)
                 .map_err(|e| Error::deserialization("attach_invocation", e))?)),
             Ok(Value::Failure(f)) => Ok(Err(f.into())),
@@ -611,9 +707,13 @@ impl ContextInternal {
             inner_lock.vm.create_signal_handle(name.to_owned())
         );
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Success(mut s)) => {
                 let t = T::deserialize(&mut s).map_err(|e| Error::deserialization("signal", e))?;
                 Ok(Ok(t))
@@ -640,6 +740,7 @@ impl ContextInternal {
                     name.to_owned(),
                     NonEmptyValue::Success(b),
                 );
+                inner_lock.progress_version += 1;
             }
             Err(e) => {
                 inner_lock.fail(Error::serialization("resolve_signal", e));
@@ -649,11 +750,13 @@ impl ContextInternal {
 
     /// Reject a named signal on a target invocation.
     pub fn reject_signal(&self, invocation_id: &str, name: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner).vm.sys_complete_signal(
+        let mut inner = must_lock!(self.inner);
+        let _ = inner.vm.sys_complete_signal(
             invocation_id.to_owned(),
             name.to_owned(),
             NonEmptyValue::Failure(failure.into()),
         );
+        inner.progress_version += 1;
     }
 
     pub fn awakeable<T: Deserialize>(
@@ -674,17 +777,17 @@ impl ContextInternal {
                     // TODO NOW this is REALLY BAD. The reason for this is that we would need to return a future of a future instead, which is not nice.
                     //  we assume for the time being this works because no user should use the awakeable without doing any other syscall first, which will prevent this invalid awakeable id to work in the first place.
                     "invalid".to_owned(),
-                    DurableFutureImpl::new(
-                        self.clone(),
-                        NotificationHandle::from(u32::MAX),
-                        Either::Right(TrapFuture::default()),
-                    ),
+                    DurableFutureImpl::trapping(self.clone(), Either::Right(TrapFuture::default())),
                 );
             }
         };
-        drop(inner_lock);
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Success(mut s)) => Ok(Ok(
                 T::deserialize(&mut s).map_err(|e| Error::deserialization("awakeable", e))?
             )),
@@ -712,6 +815,7 @@ impl ContextInternal {
                     NonEmptyValue::Success(b),
                     PayloadOptions::default(),
                 );
+                inner_lock.progress_version += 1;
             }
             Err(e) => {
                 inner_lock.fail(Error::serialization("resolve_awakeable", e));
@@ -720,11 +824,13 @@ impl ContextInternal {
     }
 
     pub fn reject_awakeable(&self, id: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner).vm.sys_complete_awakeable(
+        let mut inner = must_lock!(self.inner);
+        let _ = inner.vm.sys_complete_awakeable(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
             PayloadOptions::default(),
         );
+        inner.progress_version += 1;
     }
 
     pub fn promise<T: Deserialize>(
@@ -738,9 +844,13 @@ impl ContextInternal {
             inner_lock.vm.sys_get_promise(name.to_owned())
         );
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Success(mut s)) => {
                 let t = T::deserialize(&mut s).map_err(|e| Error::deserialization("promise", e))?;
                 Ok(Ok(t))
@@ -764,9 +874,13 @@ impl ContextInternal {
         let mut inner_lock = must_lock!(self.inner);
         let handle = unwrap_or_trap!(inner_lock, inner_lock.vm.sys_peek_promise(name.to_owned()));
         inner_lock.maybe_flip_span_replaying_field();
-        drop(inner_lock);
 
-        let poll_future = get_async_result(Arc::clone(&self.inner), handle).map(|res| match res {
+        let poll_future = get_async_result(
+            Arc::clone(&self.inner),
+            handle,
+            inner_lock.register_notification(handle),
+        )
+        .map(|res| match res {
             Ok(Value::Void) => Ok(Ok(None)),
             Ok(Value::Success(mut s)) => {
                 let t = T::deserialize(&mut s)
@@ -794,6 +908,7 @@ impl ContextInternal {
                     NonEmptyValue::Success(b),
                     PayloadOptions::default(),
                 );
+                inner_lock.progress_version += 1;
             }
             Err(e) => {
                 inner_lock.fail(
@@ -808,24 +923,23 @@ impl ContextInternal {
     }
 
     pub fn reject_promise(&self, id: &str, failure: TerminalError) {
-        let _ = must_lock!(self.inner).vm.sys_complete_promise(
+        let mut inner = must_lock!(self.inner);
+        let _ = inner.vm.sys_complete_promise(
             id.to_owned(),
             NonEmptyValue::Failure(failure.into()),
             PayloadOptions::default(),
         );
+        inner.progress_version += 1;
     }
 
-    pub fn run<'a, Run, Fut, Out>(
-        &'a self,
-        run_closure: Run,
-    ) -> impl RunFuture<Result<Out, TerminalError>> + Send + 'a
+    pub fn run<'a, Run, Fut, Out>(&'a self, run_closure: Run) -> crate::context::Run<Run>
     where
         Run: RunClosure<Fut = Fut, Output = Out> + Send + 'a,
         Fut: Future<Output = HandlerResult<Out>> + Send + 'a,
         Out: Serialize + Deserialize + 'static,
     {
         let this = Arc::clone(&self.inner);
-        InterceptErrorFuture::new(self.clone(), RunFutureImpl::new(this, run_closure))
+        crate::context::Run::new(self.clone(), RunFutureImpl::new(this, run_closure))
     }
 
     // Used by codegen
@@ -858,11 +972,16 @@ impl ContextInternal {
         let _ = inner_lock
             .vm
             .sys_write_output(res_to_write, PayloadOptions::default());
+        inner_lock.progress_version += 1;
         inner_lock.maybe_flip_span_replaying_field();
     }
 
     pub fn end(&self) {
-        let _ = must_lock!(self.inner).vm.sys_end();
+        let mut inner = must_lock!(self.inner);
+        inner.runs.clear();
+        inner.executing_runs.clear();
+        let _ = inner.vm.sys_end();
+        inner.progress_version += 1;
     }
 
     pub(crate) fn consume_to_end(&self) {
@@ -907,7 +1026,7 @@ impl ContextInternal {
 }
 
 pin_project! {
-    struct RunFutureImpl<Run, Ret, RunFnFut> {
+    pub(crate) struct RunFutureImpl<Run, Ret, RunFnFut> {
         name: String,
         retry_policy: RetryPolicy,
         phantom_data: PhantomData<fn() -> Ret>,
@@ -920,11 +1039,11 @@ pin_project! {
     #[project = RunStateProj]
     enum RunState<Run, RunFnFut, Ret> {
         New {
-            ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+            ctx: Option<Arc<ContextShared>>,
             closure: Option<Run>,
         },
         ClosureRunning {
-            ctx: Option<Arc<Mutex<ContextInternalInner>>>,
+            guard: ProgressGuard,
             handle: NotificationHandle,
             start_time: Instant,
             #[pin]
@@ -937,7 +1056,7 @@ pin_project! {
 }
 
 impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
-    fn new(ctx: Arc<Mutex<ContextInternalInner>>, closure: Run) -> Self {
+    fn new(ctx: Arc<ContextShared>, closure: Run) -> Self {
         Self {
             name: "".to_string(),
             retry_policy: RetryPolicy::Infinite,
@@ -949,14 +1068,75 @@ impl<Run, Ret, RunFnFut> RunFutureImpl<Run, Ret, RunFnFut> {
         }
     }
 
+    pub(crate) fn start(
+        self,
+        ctx: ContextInternal,
+    ) -> impl DurableFuture<Output = Result<Ret, TerminalError>> + Send + 'static
+    where
+        Run: RunClosure<Fut = RunFnFut, Output = Ret> + Send + 'static,
+        RunFnFut: Future<Output = HandlerResult<Ret>> + Send + 'static,
+        Ret: Serialize + Deserialize + 'static,
+    {
+        let RunState::New {
+            ctx: inner,
+            closure,
+        } = self.state
+        else {
+            panic!("An action cannot be started after it has been polled");
+        };
+        let inner = inner.expect("Unpolled run has a context");
+        let closure = closure.expect("Unpolled run has a closure");
+        let mut guard = must_lock!(inner);
+        let generation = guard.cancellation_generation;
+        let RunHandle { handle, replayed } =
+            unwrap_or_trap_durable_future!(ctx, guard, guard.vm.sys_run(self.name));
+        guard.maybe_flip_span_replaying_field();
+        guard.register_notification(handle);
+        if !replayed {
+            let future = async move {
+                let start = Instant::now();
+                match closure.run().await {
+                    Ok(value) => Ok(RunExitResult::Success(Ret::serialize(&value).map_err(
+                        |err| ErrorInner::Serialization {
+                            syscall: "run",
+                            err: Box::new(err),
+                        },
+                    )?)),
+                    Err(error) => match error.0 {
+                        HandlerErrorInner::Retryable(error) => {
+                            Ok(RunExitResult::RetryableFailure {
+                                attempt_duration: start.elapsed(),
+                                error: CoreError::new(500u16, error.to_string()),
+                            })
+                        }
+                        HandlerErrorInner::Terminal(error) => {
+                            Ok(RunExitResult::TerminalFailure(TerminalError(error).into()))
+                        }
+                    },
+                }
+            }
+            .boxed();
+            guard
+                .runs
+                .insert(handle, RegisteredRun::new(future, self.retry_policy));
+        }
+        drop(guard);
+        DurableFutureImpl::new(
+            ctx,
+            handle,
+            Either::Left(Self::boxed_result_fut(inner, handle, generation)),
+        )
+    }
+
     fn boxed_result_fut(
-        ctx: Arc<Mutex<ContextInternalInner>>,
+        ctx: Arc<ContextShared>,
         handle: NotificationHandle,
+        generation: usize,
     ) -> BoxFuture<'static, Result<Result<Ret, TerminalError>, Error>>
     where
         Ret: Deserialize,
     {
-        get_async_result(Arc::clone(&ctx), handle)
+        get_async_result(ctx, handle, generation)
             .map(|res| match res {
                 Ok(Value::Success(mut s)) => {
                     let t =
@@ -1022,13 +1202,15 @@ where
                         .expect("Future should not be polled after returning Poll::Ready");
                     let mut inner_ctx = must_lock!(ctx);
 
+                    let generation = inner_ctx.cancellation_generation;
                     let RunHandle { handle, .. } = inner_ctx
                         .vm
                         .sys_run(this.name.to_owned())
                         .map_err(ErrorInner::from)?;
 
-                    // TODO this is a mitigation for https://github.com/restatedev/sdk-rust/issues/72
-                    // Should be removed once we correctly support run async
+                    inner_ctx.register_notification(handle);
+
+                    // Flush the registered command before executing the borrowing closure.
                     let b = inner_ctx.vm.take_output();
                     if !b.is_empty() && !inner_ctx.write.send(b) {
                         return Poll::Ready(Err(ErrorInner::Suspended.into()));
@@ -1043,14 +1225,17 @@ where
 
                             drop(inner_ctx);
                             this.state.set(RunState::ClosureRunning {
-                                ctx: Some(ctx),
+                                guard: ProgressGuard::new(ctx, generation),
                                 handle,
                                 start_time: Instant::now(),
                                 closure_fut: closure.run(),
                             });
                         }
                         Ok(AwaitResponse::CancelSignalReceived) => {
+                            crate::endpoint::futures::progress::cancel_runs(&mut inner_ctx);
+                            let wakers = Arc::clone(&ctx.progress_wakers);
                             drop(inner_ctx);
+                            futures::task::ArcWake::wake_by_ref(&wakers);
                             // Got cancellation!
                             this.state.set(RunState::WaitingResultFut {
                                 result_fut: async {
@@ -1069,18 +1254,59 @@ where
                             // the poll future state will take care of doing whatever needs to be done here,
                             // that is propagating state machine error, or result, or whatever
                             this.state.set(RunState::WaitingResultFut {
-                                result_fut: Self::boxed_result_fut(Arc::clone(&ctx), handle),
+                                result_fut: Self::boxed_result_fut(
+                                    Arc::clone(&ctx),
+                                    handle,
+                                    generation,
+                                ),
                             })
                         }
                     }
                 }
                 RunStateProj::ClosureRunning {
-                    ctx,
+                    guard,
                     handle,
                     start_time,
-                    closure_fut,
+                    mut closure_fut,
                 } => {
-                    let res = match ready!(closure_fut.poll(cx)) {
+                    let cancelled = {
+                        let inner = must_lock!(guard.context());
+                        inner.cancellation_generation != guard.generation()
+                    };
+                    if cancelled {
+                        this.state.set(RunState::WaitingResultFut {
+                            result_fut: async {
+                                Ok(Err(TerminalError::new_with_code(409, "cancelled")))
+                            }
+                            .boxed(),
+                        });
+                        continue;
+                    }
+                    let mut closure_result = closure_fut.as_mut().poll(cx);
+                    if closure_result.is_pending() {
+                        match poll_progress(guard, cx, *handle, |_| -> Result<(), ErrorInner> {
+                            unreachable!("Borrowed run cannot complete before proposing its result")
+                        }) {
+                            Poll::Ready(Err(error)) => return Poll::Ready(Err(error.into())),
+                            Poll::Ready(Ok(ProgressResult::Cancelled)) => {
+                                this.state.set(RunState::WaitingResultFut {
+                                    result_fut: async {
+                                        Ok(Err(TerminalError::new_with_code(409, "cancelled")))
+                                    }
+                                    .boxed(),
+                                });
+                                continue;
+                            }
+                            Poll::Ready(Ok(ProgressResult::Completed(_))) => unreachable!(
+                                "Borrowed run cannot complete before proposing its result"
+                            ),
+                            Poll::Pending => {}
+                        }
+                        // A sibling closure may have made this borrowed closure ready.
+                        closure_result = closure_fut.poll(cx);
+                    }
+                    let generation = guard.generation();
+                    let res = match ready!(closure_result) {
                         Ok(t) => RunExitResult::Success(Ret::serialize(&t).map_err(|e| {
                             ErrorInner::Serialization {
                                 syscall: "run",
@@ -1098,21 +1324,19 @@ where
                         },
                     };
 
-                    let ctx = ctx
-                        .take()
-                        .expect("Future should not be polled after returning Poll::Ready");
+                    let ctx = guard.take_context();
                     let handle = *handle;
 
                     let _ = {
-                        must_lock!(ctx).vm.propose_run_completion(
-                            handle,
-                            res,
-                            mem::take(this.retry_policy),
-                        )
+                        let mut inner = must_lock!(ctx);
+                        inner.progress_version += 1;
+                        inner
+                            .vm
+                            .propose_run_completion(handle, res, mem::take(this.retry_policy))
                     };
 
                     this.state.set(RunState::WaitingResultFut {
-                        result_fut: Self::boxed_result_fut(Arc::clone(&ctx), handle),
+                        result_fut: Self::boxed_result_fut(ctx, handle, generation),
                     });
                 }
                 RunStateProj::WaitingResultFut { result_fut } => return result_fut.poll_unpin(cx),
@@ -1127,7 +1351,7 @@ pin_project! {
         invocation_id_future: Shared<InvIdFut>,
         #[pin]
         result_future: ResultFut,
-        call_notification_handle: NotificationHandle,
+        call_notification_handle: Option<NotificationHandle>,
         ctx: ContextInternal,
     }
 }
@@ -1189,7 +1413,7 @@ where
         self.ctx.clone()
     }
 
-    fn handle(&self) -> NotificationHandle {
+    fn handle(&self) -> Option<NotificationHandle> {
         self.call_notification_handle
     }
 }
@@ -1226,8 +1450,85 @@ impl Error {
 }
 
 fn get_async_result(
-    ctx: Arc<Mutex<ContextInternalInner>>,
+    ctx: Arc<ContextShared>,
     handle: NotificationHandle,
+    generation: usize,
 ) -> impl Future<Output = Result<Value, Error>> + Send {
-    VmAsyncResultPollFuture::new(ctx, handle).map_err(Error::from)
+    VmAsyncResultPollFuture::new(ctx, handle, generation).map_err(Error::from)
+}
+
+#[cfg(test)]
+mod terminal_state_tests {
+    use super::*;
+    use crate::endpoint::futures::durable_future_impl::DurableFutureImpl;
+    use crate::endpoint::handler_state::HandlerStateNotifier;
+    use std::task::{Wake, Waker};
+
+    /// A Pending result's sibling wake is progress; the SDK's hidden terminal
+    /// error is observable without consuming the outer handler's notification.
+    #[test]
+    fn a_pending_result_exposes_terminal_state_without_confusing_sibling_wakes() {
+        for error in [
+            ErrorInner::Suspended.into(),
+            Error::unknown_handler("probe", "run"),
+        ] {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                http::header::CONTENT_TYPE,
+                http::HeaderValue::from_static("application/vnd.restate.invocation.v7"),
+            );
+            let vm = CoreVM::new(headers, Default::default()).unwrap();
+            let (state, mut notification) = HandlerStateNotifier::new();
+            let (output, _receiver) = tokio::sync::mpsc::unbounded_channel();
+            let context = ContextInternal::new(
+                vm,
+                "probe".to_owned(),
+                "run".to_owned(),
+                InputReceiver::from_stream(futures::stream::pending()),
+                OutputSender::from_channel(output),
+                state,
+            );
+            let peer = context.clone();
+            let mut error = Some(error);
+            let mut polls = 0;
+            let mut sibling = None;
+            let result = std::future::poll_fn(move |cx| {
+                polls += 1;
+                match polls {
+                    1 => {
+                        sibling = Some(cx.waker().clone());
+                        Poll::Pending
+                    }
+                    2 => {
+                        sibling.take().unwrap().wake();
+                        Poll::Pending
+                    }
+                    3 => Poll::Ready(Err::<(), _>(error.take().unwrap())),
+                    _ => panic!("terminal SDK result was polled again"),
+                }
+            });
+            let mut result = Box::pin(DurableFutureImpl::trapping(context.clone(), result));
+            struct Parent;
+            impl Wake for Parent {
+                fn wake(self: Arc<Self>) {}
+            }
+            let waker = Waker::from(Arc::new(Parent));
+            let mut cx = Context::from_waker(&waker);
+            for _ in 0..2 {
+                assert!(result.as_mut().poll(&mut cx).is_pending());
+                assert!(!context.is_failed_or_suspended());
+            }
+            assert!(result.as_mut().poll(&mut cx).is_pending());
+            assert!(context.is_failed_or_suspended());
+            assert!(peer.is_failed_or_suspended());
+            assert!(
+                notification.try_recv().is_ok(),
+                "query must not consume the handler error"
+            );
+            assert!(
+                context.is_failed_or_suspended(),
+                "terminal state remains observable"
+            );
+        }
+    }
 }
