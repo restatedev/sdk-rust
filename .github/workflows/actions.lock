@@ -25,7 +25,7 @@ workflows:
         - 'docker/setup-buildx-action@v3.12.0'
         - 'docker/setup-docker-action@v4.7.0'
         - 'docker/setup-qemu-action@v3.7.0'
-        - 'restatedev/e2e@v2.2'
+        - 'restatedev/e2e@v2.3'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
 dependencies:
@@ -106,9 +106,9 @@ dependencies:
         commit: 'sha1-dd310ad5a97d8e7b41793f8ef055398d51ad4de6'
         owner_id: 64203070
         repo_id: 258510356
-    'restatedev/e2e@v2.2':
-        ref: 'v2.2'
-        commit: 'sha1-edd926b59e51af418b95c143220c0a2a62b7fd7b'
+    'restatedev/e2e@v2.3':
+        ref: 'v2.3'
+        commit: 'sha1-167318ba8820f18ee74c9358d2d3f0640dbb5149'
         owner_id: 97341811
         repo_id: 489007488
         uses:

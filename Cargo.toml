@@ -129,7 +129,7 @@ rand = { version = "0.10", optional = true }
 regress = "0.10"
 reqwest = { version = "0.13", optional = true }
 restate-sdk-macros = { version = "0.12", path = "macros" }
-restate-sdk-shared-core = { version = "=7.0.3", features = ["request_identity", "sha2_random_seed", "http"] }
+restate-sdk-shared-core = { version = "=8.2.0", features = ["request_identity", "sha2_random_seed", "http"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 schemars = { version = "1.2", optional = true }
