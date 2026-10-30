@@ -1,0 +1,15 @@
+[package]
+name = "restate-sdk-wasm-check"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "CI-only: wasm32-unknown-unknown no-std-clock binary check for restate-sdk. See src/lib.rs."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+restate-sdk = { path = "..", default-features = false, features = ["rand", "uuid", "rust_crypto"] }
+bytes = "1"
+http = "1"
+http-body-util = "0.1"
