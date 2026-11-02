@@ -7,7 +7,7 @@ workflows:
         - 'actions-rust-lang/setup-rust-toolchain@v1.17.0'
         - 'actions/checkout@v4.4.0'
         - 'extractions/setup-just@v2.0.0'
-        - 'taiki-e/install-action@nextest'
+        - 'taiki-e/install-action@v2.87.32'
         - 'warpbuilds/rust-cache@v2.9.1'
     '.github/workflows/cla.yml': []
     '.github/workflows/docker.yaml':
@@ -26,6 +26,13 @@ workflows:
         - 'docker/setup-docker-action@v4.7.0'
         - 'docker/setup-qemu-action@v3.7.0'
         - 'restatedev/e2e@v2.3'
+    '.github/workflows/pullfrog.yml':
+        - 'actions-rust-lang/setup-rust-toolchain@v1.17.0'
+        - 'actions/checkout@v6.1.0'
+        - 'extractions/setup-just@v2.0.0'
+        - 'pullfrog/pullfrog@v0.1.110'
+        - 'taiki-e/install-action@v2.87.32'
+        - 'warpbuilds/rust-cache@v2.9.1'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
 dependencies:
@@ -39,6 +46,11 @@ dependencies:
     'actions/checkout@v4.4.0':
         ref: 'v4.4.0'
         commit: 'sha1-11d5960a326750d5838078e36cf38b85af677262'
+        owner_id: 44036562
+        repo_id: 197814629
+    'actions/checkout@v6.1.0':
+        ref: 'v6.1.0'
+        commit: 'sha1-d23441a48e516b6c34aea4fa41551a30e30af803'
         owner_id: 44036562
         repo_id: 197814629
     'actions/checkout@v7.0.1':
@@ -106,6 +118,11 @@ dependencies:
         commit: 'sha1-dd310ad5a97d8e7b41793f8ef055398d51ad4de6'
         owner_id: 64203070
         repo_id: 258510356
+    'pullfrog/pullfrog@v0.1.110':
+        ref: 'v0.1.110'
+        commit: 'sha1-895164fc90f5c493e72693c919c6cf269af158eb'
+        owner_id: 223181266
+        repo_id: 1032749534
     'restatedev/e2e@v2.3':
         ref: 'v2.3'
         commit: 'sha1-167318ba8820f18ee74c9358d2d3f0640dbb5149'
@@ -120,9 +137,9 @@ dependencies:
         commit: 'sha1-c19371144df3bb44fab255c43d04cbc2ab54d1c4'
         owner_id: 580492
         repo_id: 298565987
-    'taiki-e/install-action@nextest':
-        ref: 'nextest'
-        commit: 'sha1-d042af60014eb018fcd01f57f4f62118b69e3ea6'
+    'taiki-e/install-action@v2.87.32':
+        ref: 'v2.87.32'
+        commit: 'sha1-5488ac5a951645ce95062214902ac4b6bc1a1037'
         owner_id: 43724913
         repo_id: 442947557
     'warpbuilds/rust-cache@v2.9.1':
