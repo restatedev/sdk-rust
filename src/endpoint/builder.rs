@@ -33,6 +33,14 @@ impl ServiceOptions {
         Self::default()
     }
 
+    /// Override the service name, which otherwise comes from the type name or the `name`
+    /// attribute. This lets one service definition be bound under different names, for example
+    /// one per deployment, in the same Restate cluster.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
     /// This timer guards against stalled invocations. Once it expires, Restate triggers a graceful
     /// termination by asking the invocation to suspend (which preserves intermediate progress).
     ///

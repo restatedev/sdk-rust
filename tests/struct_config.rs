@@ -142,3 +142,54 @@ fn bare_bool_flags_mean_true() {
     assert_eq!(disc.enable_lazy_state, Some(true));
     assert_eq!(handler(&disc, "touch").ingress_private, Some(true));
 }
+
+/// `ServiceOptions::name` binds a service under another name: discovery reports the new name,
+/// and invocations are routed by it.
+#[tokio::test]
+async fn service_options_name_renames_the_bound_service() {
+    use http_body_util::BodyExt;
+    use restate_sdk::endpoint::{Endpoint, ServiceOptions};
+    use restate_sdk::service::IntoServiceDefinition;
+
+    let endpoint = Endpoint::builder()
+        .bind(
+            ConfiguredService
+                .into_service_definition()
+                .options(ServiceOptions::new().name("Renamed")),
+        )
+        .build();
+    let request = http::Request::builder()
+        .uri("/discover")
+        .header(
+            http::header::ACCEPT,
+            "application/vnd.restate.endpointmanifest.v4+json",
+        )
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let response = endpoint.handle(request);
+    assert_eq!(response.status(), 200);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let manifest: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let names: Vec<&str> = manifest["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|service| service["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Renamed"]);
+
+    let unknown = http::Request::builder()
+        .method("POST")
+        .uri("/invoke/Configured/plain")
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/vnd.restate.invocation.v5",
+        )
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    assert_eq!(
+        endpoint.handle(unknown).status(),
+        404,
+        "the old name is gone"
+    );
+}
