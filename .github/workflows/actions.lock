@@ -26,6 +26,7 @@ workflows:
         - 'docker/setup-docker-action@v4.7.0'
         - 'docker/setup-qemu-action@v3.7.0'
         - 'restatedev/e2e@v2.3'
+        - 'warpbuilds/cache@v1.4.13'
     '.github/workflows/pullfrog.yml':
         - 'actions-rust-lang/setup-rust-toolchain@v1.17.0'
         - 'actions/checkout@v6.1.0'
@@ -136,6 +137,11 @@ dependencies:
         commit: 'sha1-5488ac5a951645ce95062214902ac4b6bc1a1037'
         owner_id: 43724913
         repo_id: 442947557
+    'warpbuilds/cache@v1.4.13':
+        ref: 'v1.4.13'
+        commit: 'sha1-40f3443ae7b70e568d6e2070ea897f3df94d7553'
+        owner_id: 142974432
+        repo_id: 721583430
     'warpbuilds/rust-cache@v2.9.1':
         ref: 'v2.9.1'
         commit: 'sha1-9d0cc3090d9c87de74ea67617b246e978735b1a1'
