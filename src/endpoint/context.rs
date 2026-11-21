@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, ready};
+use std::task::{Context, Poll, Waker, ready};
 use std::time::Duration;
 // wasm32-unknown-unknown has no std clock: `std::time::{Instant, SystemTime}::now()`
 // abort with "time not implemented on this platform". `web_time` exposes the same API
@@ -41,10 +41,49 @@ pub struct ContextInternalInner {
     pub(crate) read: InputReceiver,
     pub(crate) write: OutputSender,
     pub(super) handler_state: HandlerStateNotifier,
+    pub(crate) run_proposal_waiters: RunProposalWaiters,
 
     /// We remember here the state of the span replaying field state, because setting it might be expensive (it's guarded behind locks and other stuff).
     /// For details, see [ContextInternalInner::maybe_flip_span_replaying_field]
     pub(super) span_replaying_field_state: bool,
+}
+
+/// Wakers of the futures awaiting a notification, for which the VM is waiting for a run completion
+/// to be proposed (`AwaitResponse::WaitingExternalProgress { waiting_run_proposal: true, .. }`).
+///
+/// The run closure is executed by its own `ctx.run()` future, which isn't necessarily polled
+/// together with the awaiting future (e.g. with `FuturesUnordered`): the awaiting future registers
+/// here, and gets woken up when any run completion is proposed.
+#[derive(Default)]
+pub(crate) struct RunProposalWaiters {
+    /// Number of run completions proposed so far, to tell whether one happened since registering.
+    proposals: u64,
+    wakers: Vec<Waker>,
+}
+
+impl RunProposalWaiters {
+    /// Number of run completions proposed so far.
+    pub(crate) fn proposals(&self) -> u64 {
+        self.proposals
+    }
+
+    /// Ready if a run completion was proposed since `proposals` (a previous [Self::proposals]),
+    /// otherwise registers the waker to be woken up by the next proposal.
+    pub(crate) fn poll_proposed_since(&mut self, proposals: u64, cx: &Context<'_>) -> Poll<()> {
+        if self.proposals != proposals {
+            return Poll::Ready(());
+        }
+        if !self.wakers.iter().any(|w| w.will_wake(cx.waker())) {
+            self.wakers.push(cx.waker().clone());
+        }
+        Poll::Pending
+    }
+
+    /// Records a run completion proposal, returning the wakers to wake up.
+    fn proposed(&mut self) -> Vec<Waker> {
+        self.proposals += 1;
+        mem::take(&mut self.wakers)
+    }
 }
 
 impl ContextInternalInner {
@@ -59,6 +98,7 @@ impl ContextInternalInner {
             read,
             write,
             handler_state,
+            run_proposal_waiters: Default::default(),
             span_replaying_field_state: false,
         }
     }
@@ -1120,13 +1160,16 @@ where
                         .expect("Future should not be polled after returning Poll::Ready");
                     let handle = *handle;
 
-                    let _ = {
-                        must_lock!(ctx).vm.propose_run_completion(
+                    let waiters = {
+                        let mut inner_ctx = must_lock!(ctx);
+                        let _ = inner_ctx.vm.propose_run_completion(
                             handle,
                             res,
                             mem::take(this.retry_policy),
-                        )
+                        );
+                        inner_ctx.run_proposal_waiters.proposed()
                     };
+                    waiters.into_iter().for_each(Waker::wake);
 
                     this.state.set(RunState::WaitingResultFut {
                         result_fut: Self::boxed_result_fut(Arc::clone(&ctx), handle),

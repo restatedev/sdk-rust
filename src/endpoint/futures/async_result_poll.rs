@@ -33,6 +33,17 @@ enum AsyncResultPollState {
     WaitingInput {
         ctx: Arc<Mutex<ContextInternalInner>>,
         handle: NotificationHandle,
+        /// Set if the VM waits for a run completion proposal as well, see [WaitingRunProposal].
+        ///
+        /// [WaitingRunProposal]: AsyncResultPollState::WaitingRunProposal
+        run_proposals: Option<u64>,
+    },
+    /// Waiting for a run completion to be proposed after the given number of proposals,
+    /// see [crate::endpoint::context::RunProposalWaiters].
+    WaitingRunProposal {
+        ctx: Arc<Mutex<ContextInternalInner>>,
+        handle: NotificationHandle,
+        run_proposals: u64,
     },
 }
 
@@ -69,15 +80,35 @@ impl Future for VmAsyncResultPollFuture {
                     drop(inner_lock);
                     self.state = Some(AsyncResultPollState::PollProgress { ctx, handle });
                 }
-                AsyncResultPollState::WaitingInput { ctx, handle } => {
+                AsyncResultPollState::WaitingInput {
+                    ctx,
+                    handle,
+                    run_proposals,
+                } => {
                     let mut inner_lock = must_lock!(ctx);
+
+                    // A run completion proposal unblocks the VM as well
+                    if run_proposals.is_some_and(|run_proposals| {
+                        inner_lock
+                            .run_proposal_waiters
+                            .poll_proposed_since(run_proposals, cx)
+                            .is_ready()
+                    }) {
+                        drop(inner_lock);
+                        self.state = Some(AsyncResultPollState::PollProgress { ctx, handle });
+                        continue;
+                    }
 
                     let read_result = match inner_lock.read.poll_recv(cx) {
                         Poll::Ready(t) => t,
                         Poll::Pending => {
                             // Still need to wait for input
                             drop(inner_lock);
-                            self.state = Some(AsyncResultPollState::WaitingInput { ctx, handle });
+                            self.state = Some(AsyncResultPollState::WaitingInput {
+                                ctx,
+                                handle,
+                                run_proposals,
+                            });
                             return Poll::Pending;
                         }
                     };
@@ -96,6 +127,31 @@ impl Future for VmAsyncResultPollFuture {
                     drop(inner_lock);
                     self.state = Some(AsyncResultPollState::PollProgress { ctx, handle });
                 }
+                AsyncResultPollState::WaitingRunProposal {
+                    ctx,
+                    handle,
+                    run_proposals,
+                } => {
+                    let mut inner_lock = must_lock!(ctx);
+
+                    if inner_lock
+                        .run_proposal_waiters
+                        .poll_proposed_since(run_proposals, cx)
+                        .is_pending()
+                    {
+                        drop(inner_lock);
+                        self.state = Some(AsyncResultPollState::WaitingRunProposal {
+                            ctx,
+                            handle,
+                            run_proposals,
+                        });
+                        return Poll::Pending;
+                    }
+
+                    // It's time to poll progress again
+                    drop(inner_lock);
+                    self.state = Some(AsyncResultPollState::PollProgress { ctx, handle });
+                }
                 AsyncResultPollState::PollProgress { ctx, handle } => {
                     let mut inner_lock = must_lock!(ctx);
 
@@ -104,24 +160,47 @@ impl Future for VmAsyncResultPollFuture {
                             // We're good, we got the response
                         }
                         Ok(AwaitResponse::WaitingExternalProgress {
-                            waiting_input: true,
-                            ..
+                            waiting_input,
+                            waiting_run_proposal,
                         }) => {
-                            // do_await buffered an AwaitingOnMessage describing what we're
-                            // suspending on; flush it to the runtime before we block on input,
+                            // do_await might have buffered an AwaitingOnMessage describing what
+                            // we're suspending on; flush it to the runtime before we block,
                             // otherwise the runtime never learns what we're waiting for.
                             let b = inner_lock.vm.take_output();
                             if !b.is_empty() && !inner_lock.write.send(b) {
                                 return Poll::Ready(Err(ErrorInner::Suspended));
                             }
+                            let run_proposals = waiting_run_proposal
+                                .then(|| inner_lock.run_proposal_waiters.proposals());
                             drop(inner_lock);
-                            self.state = Some(AsyncResultPollState::WaitingInput { ctx, handle });
+
+                            self.state = Some(match (waiting_input, run_proposals) {
+                                (true, run_proposals) => AsyncResultPollState::WaitingInput {
+                                    ctx,
+                                    handle,
+                                    run_proposals,
+                                },
+                                // The input is closed, but some run is still executing:
+                                // the VM won't suspend before its completion is proposed.
+                                (false, Some(run_proposals)) => {
+                                    AsyncResultPollState::WaitingRunProposal {
+                                        ctx,
+                                        handle,
+                                        run_proposals,
+                                    }
+                                }
+                                (false, None) => {
+                                    return Poll::Ready(Err(CoreError::new(
+                                        500u16,
+                                        "Unexpected await response: waiting on nothing",
+                                    )
+                                    .into()));
+                                }
+                            });
                             continue;
                         }
-                        Ok(AwaitResponse::WaitingExternalProgress { .. })
-                        | Ok(AwaitResponse::ExecuteRun(_))
+                        Ok(AwaitResponse::ExecuteRun(_))
                         | Ok(AwaitResponse::EphemeralNotificationReady(_)) => {
-                            // Waiting only on a run proposal is not expected on this await path.
                             // These two are used by the shared-core to implement async run, which is not supported by the rust sdk currently.
                             unimplemented!()
                         }
