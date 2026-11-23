@@ -38,6 +38,7 @@ const X_RESTATE_SERVER_VALUE: HeaderValue =
 const DISCOVERY_CONTENT_TYPE_V2: &str = "application/vnd.restate.endpointmanifest.v2+json";
 const DISCOVERY_CONTENT_TYPE_V3: &str = "application/vnd.restate.endpointmanifest.v3+json";
 const DISCOVERY_CONTENT_TYPE_V4: &str = "application/vnd.restate.endpointmanifest.v4+json";
+const DISCOVERY_CONTENT_TYPE_V6: &str = "application/vnd.restate.endpointmanifest.v6+json";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -88,7 +89,7 @@ pub(crate) enum ErrorInner {
     #[error("Cannot convert header '{0}', reason: {1}")]
     Header(String, #[source] BoxError),
     #[error(
-        "Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2, v3 and v4"
+        "Cannot reply to discovery, got accept header '{0}' but currently supported discovery versions are v2, v3, v4 and v6"
     )]
     BadDiscoveryVersion(String),
     #[error(
@@ -334,7 +335,10 @@ impl Endpoint {
         let mut version = 2;
         let mut content_type = DISCOVERY_CONTENT_TYPE_V2;
         if let Some(accept) = accept_header {
-            if accept.contains(DISCOVERY_CONTENT_TYPE_V4) {
+            if accept.contains(DISCOVERY_CONTENT_TYPE_V6) {
+                version = 6;
+                content_type = DISCOVERY_CONTENT_TYPE_V6;
+            } else if accept.contains(DISCOVERY_CONTENT_TYPE_V4) {
                 version = 4;
                 content_type = DISCOVERY_CONTENT_TYPE_V4;
             } else if accept.contains(DISCOVERY_CONTENT_TYPE_V3) {
@@ -350,6 +354,18 @@ impl Endpoint {
 
         if let Err(e) = self.validate_discovery_request(version) {
             return error_response(e);
+        }
+
+        let mut services = self.0.discovery_services.clone();
+        if version < 6 {
+            // Servers that negotiate a discovery version older than V6 never preempt
+            // invocations, so `preemptable` is dropped instead of failing discovery.
+            for service in &mut services {
+                service.preemptable = None;
+                for handler in &mut service.handlers {
+                    handler.preemptable = None;
+                }
+            }
         }
 
         simple_response(
@@ -369,7 +385,7 @@ impl Endpoint {
                         }
                         ProtocolMode::BidiStream => crate::discovery::ProtocolMode::BidiStream,
                     }),
-                    services: self.0.discovery_services.clone(),
+                    services,
                 })
                 .expect("Discovery should be serializable"),
             ),

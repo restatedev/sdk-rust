@@ -34,6 +34,7 @@ pub(crate) struct CommonOptions {
     pub(crate) workflow_completion_retention: Option<u64>,
     pub(crate) enable_lazy_state: Option<bool>,
     pub(crate) ingress_private: Option<bool>,
+    pub(crate) preemptable: Option<bool>,
     pub(crate) retry_policy: RetryPolicyArgs,
 }
 
@@ -101,7 +102,7 @@ pub(crate) fn parse_service_args(
                     "unsupported attribute argument `{ident}`; supported arguments are: \
                      name, client_visibility, inactivity_timeout, abort_timeout, \
                      journal_retention, idempotency_retention, lazy_state, ingress_private, \
-                     invocation_retry_policy(..){}",
+                     preemptable, invocation_retry_policy(..){}",
                     if service_ty == ServiceType::Workflow {
                         ", workflow_completion_retention"
                     } else {
@@ -148,6 +149,7 @@ fn apply_common_meta(opts: &mut CommonOptions, meta: &Meta, level: ConfigLevel) 
         },
         "lazy_state" => opts.enable_lazy_state = Some(parse_flag_or_bool(meta)?),
         "ingress_private" => opts.ingress_private = Some(parse_flag_or_bool(meta)?),
+        "preemptable" => opts.preemptable = Some(parse_flag_or_bool(meta)?),
         "invocation_retry_policy" => parse_retry_policy(&mut opts.retry_policy, meta)?,
         _ => return Ok(false),
     }
@@ -475,7 +477,7 @@ fn read_handler_attr(attr: &Attribute) -> Result<(Option<String>, CommonOptions)
                         format!(
                             "unsupported `#[handler]` argument `{ident}`; supported arguments are: \
                              name, inactivity_timeout, abort_timeout, journal_retention, \
-                             idempotency_retention, lazy_state, ingress_private, \
+                             idempotency_retention, lazy_state, ingress_private, preemptable, \
                              invocation_retry_policy(..)"
                         ),
                     ));

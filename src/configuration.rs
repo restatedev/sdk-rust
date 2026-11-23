@@ -57,6 +57,7 @@
 //! | `idempotency_retention` | duration | How long the result of an idempotent invocation is retained for deduplication. |
 //! | `lazy_state` | bool | Load virtual-object K/V state lazily. Bare `lazy_state` is shorthand for `lazy_state = true`. |
 //! | `ingress_private` | bool | Make the service / handler private, i.e. only callable from other handlers, not directly from ingress. |
+//! | `preemptable` | bool | When `false`, Restate never preempts invocations to the service / handler, i.e. it doesn't eagerly suspend them while they wait on an await point to free up concurrency capacity. They still suspend when the inactivity timeout expires. Defaults to `true`. Requires a Restate server supporting discovery protocol V6. |
 //! | [`invocation_retry_policy(..)`](#invocation-retry-policy) | group | The invocation retry policy — see below. |
 //!
 //! Two options are attribute-specific:

@@ -74,6 +74,9 @@ impl Service {
         if let Some(v) = options.ingress_private {
             self.ingress_private = Some(v);
         }
+        if let Some(v) = options.preemptable {
+            self.preemptable = Some(v);
+        }
         if let Some(d) = options.retry_policy_initial_interval {
             self.retry_policy_initial_interval = Some(d.as_millis() as u64);
         }
@@ -125,6 +128,9 @@ impl Handler {
         }
         if let Some(v) = options.ingress_private {
             self.ingress_private = Some(v);
+        }
+        if let Some(v) = options.preemptable {
+            self.preemptable = Some(v);
         }
         if let Some(d) = options.retry_policy_initial_interval {
             self.retry_policy_initial_interval = Some(d.as_millis() as u64);

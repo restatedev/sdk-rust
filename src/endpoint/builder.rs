@@ -17,6 +17,7 @@ pub struct ServiceOptions {
     pub(crate) journal_retention: Option<Duration>,
     pub(crate) enable_lazy_state: Option<bool>,
     pub(crate) ingress_private: Option<bool>,
+    pub(crate) preemptable: Option<bool>,
     // Retry policy options
     pub(crate) retry_policy_initial_interval: Option<Duration>,
     pub(crate) retry_policy_exponentiation_factor: Option<f64>,
@@ -98,6 +99,17 @@ impl ServiceOptions {
         self
     }
 
+    /// When set to `false`, the restate-server never preempts invocations to this service: it doesn't
+    /// eagerly suspend them while they wait on an await point to free up concurrency capacity for
+    /// other invocations. They still suspend when the inactivity timeout expires.
+    ///
+    /// Defaults to `true`. Requires a restate-server supporting discovery protocol V6. Older servers
+    /// never preempt invocations, so the setting is not sent to them.
+    pub fn preemptable(mut self, preemptable: bool) -> Self {
+        self.preemptable = Some(preemptable);
+        self
+    }
+
     /// Custom metadata of this service definition. This metadata is shown on the Admin API when querying the service definition.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
@@ -170,6 +182,7 @@ pub struct HandlerOptions {
     pub(crate) workflow_retention: Option<Duration>,
     pub(crate) journal_retention: Option<Duration>,
     pub(crate) ingress_private: Option<bool>,
+    pub(crate) preemptable: Option<bool>,
     pub(crate) enable_lazy_state: Option<bool>,
     // Retry policy options
     pub(crate) retry_policy_initial_interval: Option<Duration>,
@@ -242,6 +255,18 @@ impl HandlerOptions {
     /// but only from other services.
     pub fn ingress_private(mut self, private: bool) -> Self {
         self.ingress_private = Some(private);
+        self
+    }
+
+    /// When set to `false`, the restate-server never preempts invocations to this handler: it doesn't
+    /// eagerly suspend them while they wait on an await point to free up concurrency capacity for
+    /// other invocations. They still suspend when the inactivity timeout expires.
+    ///
+    /// This overrides the setting of the service. Defaults to `true`. Requires a restate-server
+    /// supporting discovery protocol V6. Older servers never preempt invocations, so the setting is
+    /// not sent to them.
+    pub fn preemptable(mut self, preemptable: bool) -> Self {
+        self.preemptable = Some(preemptable);
         self
     }
 
