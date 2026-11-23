@@ -215,6 +215,7 @@ fn discovery(svc: &StructService) -> TokenStream2 {
             };
         let enable_lazy_state = opt_lit(opts.enable_lazy_state);
         let ingress_private = opt_lit(opts.ingress_private);
+        let preemptable = opt_lit(opts.preemptable);
         let retry = retry_policy_tokens(opts);
         let RetryPolicyTokens {
             initial_interval,
@@ -239,6 +240,7 @@ fn discovery(svc: &StructService) -> TokenStream2 {
                 workflow_completion_retention: #workflow_completion_retention,
                 enable_lazy_state: #enable_lazy_state,
                 ingress_private: #ingress_private,
+                preemptable: #preemptable,
                 retry_policy_initial_interval: #initial_interval,
                 retry_policy_max_interval: #max_interval,
                 retry_policy_max_attempts: #max_attempts,
@@ -256,6 +258,7 @@ fn discovery(svc: &StructService) -> TokenStream2 {
     let idempotency_retention = opt_lit(opts.idempotency_retention);
     let enable_lazy_state = opt_lit(opts.enable_lazy_state);
     let ingress_private = opt_lit(opts.ingress_private);
+    let preemptable = opt_lit(opts.preemptable);
     let RetryPolicyTokens {
         initial_interval,
         max_interval,
@@ -280,6 +283,7 @@ fn discovery(svc: &StructService) -> TokenStream2 {
                     idempotency_retention: #idempotency_retention,
                     enable_lazy_state: #enable_lazy_state,
                     ingress_private: #ingress_private,
+                    preemptable: #preemptable,
                     retry_policy_initial_interval: #initial_interval,
                     retry_policy_max_interval: #max_interval,
                     retry_policy_max_attempts: #max_attempts,

@@ -24,6 +24,7 @@ struct ConfiguredService;
     idempotency_retention = "2 days",
     lazy_state = true,
     ingress_private = false,
+    preemptable = false,
     invocation_retry_policy(
         initial_interval = "100ms",
         max_interval = "10s",
@@ -36,6 +37,7 @@ impl ConfiguredService {
     /// Documented, overriding handler.
     #[handler(
         inactivity_timeout = "5s",
+        preemptable = true,
         invocation_retry_policy(max_attempts = 3, on_max_attempts = "kill")
     )]
     async fn configured(&self, _ctx: Context<'_>) -> HandlerResult<()> {
@@ -60,6 +62,7 @@ fn service_level_options_are_applied() {
     assert_eq!(disc.idempotency_retention, Some(172_800_000));
     assert_eq!(disc.enable_lazy_state, Some(true));
     assert_eq!(disc.ingress_private, Some(false));
+    assert_eq!(disc.preemptable, Some(false));
 
     assert_eq!(disc.retry_policy_initial_interval, Some(100));
     assert_eq!(disc.retry_policy_max_interval, Some(10_000));
@@ -77,6 +80,7 @@ fn handler_level_options_override_and_capture_docs() {
 
     let configured = handler(&disc, "configured");
     assert_eq!(configured.inactivity_timeout, Some(5_000));
+    assert_eq!(configured.preemptable, Some(true));
     assert_eq!(configured.retry_policy_max_attempts, Some(3));
     assert!(matches!(
         configured.retry_policy_on_max_attempts,
@@ -89,6 +93,7 @@ fn handler_level_options_override_and_capture_docs() {
 
     let plain = handler(&disc, "plain");
     assert_eq!(plain.inactivity_timeout, None);
+    assert_eq!(plain.preemptable, None);
     assert_eq!(plain.retry_policy_max_attempts, None);
     assert_eq!(
         plain.documentation.as_deref(),
@@ -192,4 +197,84 @@ async fn service_options_name_renames_the_bound_service() {
         404,
         "the old name is gone"
     );
+}
+
+async fn discover(endpoint: &Endpoint, accept: &str) -> (String, serde_json::Value) {
+    use http_body_util::BodyExt;
+
+    let request = http::Request::builder()
+        .uri("/discover")
+        .header(http::header::ACCEPT, accept)
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let response = endpoint.handle(request);
+    assert_eq!(response.status(), 200);
+    let content_type = response.headers()[http::header::CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    (content_type, serde_json::from_slice(&body).unwrap())
+}
+
+/// `preemptable` is published only when explicitly set, and only from discovery protocol V6 on:
+/// older versions silently drop it, since servers that old never preempt invocations.
+#[tokio::test]
+async fn preemptable_is_published_only_when_set_and_from_discovery_v6() {
+    const V4: &str = "application/vnd.restate.endpointmanifest.v4+json";
+    const V6: &str = "application/vnd.restate.endpointmanifest.v6+json";
+
+    // `Configured` sets it through the macro attributes, `FlagObject` through the options builder.
+    let endpoint = Endpoint::builder()
+        .bind(ConfiguredService)
+        .bind(FlagObject.into_service_definition().options(
+            ServiceOptions::new().handler("touch", HandlerOptions::new().preemptable(false)),
+        ))
+        .build();
+    let preemptable = |manifest: &serde_json::Value, service: &str, handler: Option<&str>| {
+        let service = manifest["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == service)
+            .unwrap();
+        let target = match handler {
+            None => service,
+            Some(handler) => service["handlers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|h| h["name"] == handler)
+                .unwrap(),
+        };
+        target.get("preemptable").cloned()
+    };
+
+    // V6 is negotiated when offered alongside older versions.
+    let (content_type, manifest) = discover(&endpoint, &format!("{V4}, {V6}")).await;
+    assert_eq!(content_type, V6);
+    assert_eq!(
+        preemptable(&manifest, "Configured", None),
+        Some(false.into())
+    );
+    assert_eq!(
+        preemptable(&manifest, "Configured", Some("configured")),
+        Some(true.into())
+    );
+    assert_eq!(preemptable(&manifest, "Configured", Some("plain")), None);
+    assert_eq!(preemptable(&manifest, "FlagObject", None), None);
+    assert_eq!(
+        preemptable(&manifest, "FlagObject", Some("touch")),
+        Some(false.into())
+    );
+
+    // Below V6 the field is dropped everywhere, without failing discovery.
+    let (content_type, manifest) = discover(&endpoint, V4).await;
+    assert_eq!(content_type, V4);
+    assert_eq!(preemptable(&manifest, "Configured", None), None);
+    assert_eq!(
+        preemptable(&manifest, "Configured", Some("configured")),
+        None
+    );
+    assert_eq!(preemptable(&manifest, "FlagObject", Some("touch")), None);
 }
